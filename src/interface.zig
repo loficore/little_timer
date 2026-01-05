@@ -53,7 +53,9 @@ pub const ClockInterfaceT = opaque {
 /// 时钟事件 - 从 windows 发送给 app/clock
 pub const ClockEvent = union(enum) {
     tick: i64, // 毫秒增量
-    user_press_pause: void, // 用户按了暂停
+    user_start_timer: void, // 用户开始计时
+    user_pause_timer: void, // 用户暂停计时
+    user_reset_timer: void, // 用户重置计时
     user_set_duration: u64, // 用户修改了总时长
     system_low_battery: void, // 系统电量低
 };

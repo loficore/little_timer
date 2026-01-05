@@ -41,10 +41,6 @@ const CountdownState = struct {
             self.is_finished = true;
         }
     }
-
-    pub fn pasue(self: *CountdownState) void {
-        self.is_paused = true;
-    }
 };
 
 const StopwatchState = struct {
@@ -74,6 +70,7 @@ pub const ClockManager = struct {
     state: ClockState,
     last_tick_time: i64 = 0,
     display_data: ClockInterfaceData = undefined, // 复用的显示数据
+    initial_config: ClockTaskConfigT, // 保存初始配置用于重置
 
     pub fn init(clock_config: ClockTaskConfigT) ClockManager {
         const state = switch (clock_config) {
@@ -95,6 +92,7 @@ pub const ClockManager = struct {
         };
         return .{
             .state = state,
+            .initial_config = clock_config,
         };
     }
 
@@ -103,23 +101,88 @@ pub const ClockManager = struct {
             .tick => {
                 self.OnTick(event);
             },
-            .user_press_pause => {
-                // 切换暂停状态
+            .user_start_timer => {
+                // 开始计时
                 switch (self.state) {
                     .COUNTDOWN_MODE => {
-                        self.state.COUNTDOWN_MODE.is_paused = !self.state.COUNTDOWN_MODE.is_paused;
+                        self.state.COUNTDOWN_MODE.is_paused = false;
                     },
                     .STOPWATCH_MODE => {
-                        // TODO: 实现正计时暂停逻辑
-                        self.state.STOPWATCH_MODE.is_paused = !self.state.STOPWATCH_MODE.is_paused;
+                        self.state.STOPWATCH_MODE.is_paused = false;
+                    },
+                    .WORLD_CLOCK_MODE => {
+                        // 世界时钟不支持开始/暂停
+                    },
+                }
+            },
+            .user_pause_timer => {
+                // 暂停计时
+                switch (self.state) {
+                    .COUNTDOWN_MODE => {
+                        self.state.COUNTDOWN_MODE.is_paused = true;
+                    },
+                    .STOPWATCH_MODE => {
+                        self.state.STOPWATCH_MODE.is_paused = true;
                     },
                     .WORLD_CLOCK_MODE => {
                         // 世界时钟不支持暂停
                     },
                 }
             },
-            .user_set_duration => {
-                // TODO: 实现设置时长逻辑
+            .user_reset_timer => {
+                // 重置计时器
+                switch (self.state) {
+                    .COUNTDOWN_MODE => {
+                        self.state.COUNTDOWN_MODE.remaining_ms = @as(i64, @intCast(self.initial_config.countdown.duration_seconds * 1000));
+                        self.state.COUNTDOWN_MODE.is_paused = true;
+                        self.state.COUNTDOWN_MODE.is_finished = false;
+                    },
+                    .STOPWATCH_MODE => {
+                        self.state.STOPWATCH_MODE.esplased_ms = 0;
+                        self.state.STOPWATCH_MODE.is_paused = true;
+                        self.state.STOPWATCH_MODE.is_finished = false;
+                    },
+                    .WORLD_CLOCK_MODE => {
+                        // 世界时钟不支持重置
+                    },
+                }
+            },
+            .user_set_duration => |duration| {
+                // 处理设置时长事件
+                // 如果duration为0，则重置到初始配置
+                switch (self.state) {
+                    .COUNTDOWN_MODE => {
+                        if (duration == 0) {
+                            // 重置到初始配置 - 暂停状态，完整时长
+                            self.state.COUNTDOWN_MODE.remaining_ms = @as(i64, @intCast(self.initial_config.countdown.duration_seconds * 1000));
+                            self.state.COUNTDOWN_MODE.is_paused = true;
+                            self.state.COUNTDOWN_MODE.is_finished = false;
+                        } else {
+                            // 设置新的倒计时时间
+                            self.state.COUNTDOWN_MODE.remaining_ms = @as(i64, @intCast(duration * 1000));
+                            self.state.COUNTDOWN_MODE.is_paused = true; // 设置新时间后暂停
+                            self.state.COUNTDOWN_MODE.is_finished = false;
+                        }
+                    },
+                    .STOPWATCH_MODE => {
+                        // 对于秒表，设置最大时间
+                        if (duration == 0) {
+                            // 重置秒表
+                            self.state.STOPWATCH_MODE.esplased_ms = 0;
+                            self.state.STOPWATCH_MODE.max_ms = @as(i64, @intCast(self.initial_config.stopwatch.max_seconds * 1000));
+                            self.state.STOPWATCH_MODE.is_paused = true;
+                            self.state.STOPWATCH_MODE.is_finished = false;
+                        } else {
+                            // 设置新的最大时间
+                            self.state.STOPWATCH_MODE.max_ms = @as(i64, @intCast(duration * 1000));
+                            self.state.STOPWATCH_MODE.is_paused = true; // 设置新时间后暂停
+                            self.state.STOPWATCH_MODE.is_finished = false;
+                        }
+                    },
+                    .WORLD_CLOCK_MODE => {
+                        // 世界时钟不支持设置时长
+                    },
+                }
             },
             .system_low_battery => {
                 // TODO: 处理电量低事件

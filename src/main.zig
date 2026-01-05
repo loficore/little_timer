@@ -14,17 +14,19 @@ pub fn main() !void {
 
     const clock_config = clock.ClockTaskConfigT{
         .countdown = .{
-            .duration_seconds = 25 * 60,
+            .duration_seconds = 25 * 60, // 25分钟倒计时
             .loop = false,
         },
     };
+
     // 3. 初始化应用程序（在指针上原地初始化）
     try main_app.init(allocator, clock_config);
 
     // 4. 设置全局指针（这样回调函数才能访问 app 实例）
     main_app.setGlobalApp();
 
-    // 5. 运行应用程序（启动 GTK 主循环）
+    // 5. 运行应用程序
+    // 根据编译选项，这将启动GTK或WebUI主循环
     try main_app.run();
 }
 

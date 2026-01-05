@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Little Timer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            text-align: center;
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            width: 400px;
+        }
+        h1 {
+            color: #333;
+            margin: 0 0 20px 0;
+        }
+        .time {
+            font-size: 48px;
+            font-weight: bold;
+            color: #667eea;
+            font-family: 'Courier New', monospace;
+            margin: 20px 0;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #e9ecef;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            margin: 10px 5px;
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+            transition: background 0.3s, transform 0.1s;
+        }
+        button:hover {
+            background: #764ba2;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        .mode-indicator {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Little Timer</h1>
+        <div class="time" id="time">25:00:00</div>
+        <div class="controls">
+            <button onclick="webui.call('start')">开始</button>
+            <button onclick="webui.call('pause')">暂停</button>
+            <button onclick="webui.call('reset')">重置</button>
+        </div>
+        <div class="mode-indicator" id="mode">倒计时模式</div>
+    </div>
+
+    <script>
+        // WebUI JavaScript API回调处理
+        function webuiEvent(event) {
+            // 处理来自Zig后端的事件
+            if(event.function === 'update_time') {
+                document.getElementById('time').textContent = event.data;
+            }
+            else if(event.function === 'update_mode') {
+                document.getElementById('mode').textContent = event.data;
+            }
+        }
+    </script>
+</body>
+</html>

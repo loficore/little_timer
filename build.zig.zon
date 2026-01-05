@@ -33,7 +33,7 @@
     // internet connectivity.
     .dependencies = .{
         .webui = .{
-            .url = "https://github.com/webui-dev/zig-webui/archive/refs/heads/main.tar.gz",
+            .url = "https://github.com/webui-dev/zig-webui/archive/main.tar.gz",
             .hash = "zig_webui-2.5.0-beta.4-M4z7zexlAQD-drd9H1BqG1goIZQ-S623XbqUWSYDs5wd",
         },
     },

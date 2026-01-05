@@ -120,9 +120,17 @@ pub const WindowsManager = struct {
             return;
         }
         switch (event) {
-            .user_press_pause => {
+            .user_start_timer => {
+                // 处理用户按下开始按钮的事件
+                global_on_user_event.?(.user_start_timer);
+            },
+            .user_pause_timer => {
                 // 处理用户按下暂停按钮的事件
-                global_on_user_event.?(.user_press_pause);
+                global_on_user_event.?(.user_pause_timer);
+            },
+            .user_reset_timer => {
+                // 处理用户按下重置按钮的事件
+                global_on_user_event.?(.user_reset_timer);
             },
             .user_set_duration => {
                 // 处理用户设置持续时间的事件
@@ -179,7 +187,8 @@ fn onPauseButtonClicked(button: ?*gtk.GtkButton, user_data: ?*anyopaque) callcon
     const event_handler = global_on_user_event;
 
     if (event_handler != null) {
-        event_handler.?(.user_press_pause);
+        // 暂停按钮现在发送暂停事件
+        event_handler.?(.user_pause_timer);
     }
 }
 

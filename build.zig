@@ -118,6 +118,12 @@ pub fn build(b: *std.Build) void {
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
 
+    // 导入 webui 依赖
+    const webui_dep = b.dependency("webui", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe = b.addExecutable(.{
         .name = "little_timer",
         .root_module = b.createModule(.{
@@ -144,68 +150,72 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    // ========== GTK4 依赖配置 ==========
     // 1. 链接 libc (必要，因为使用了 C 库)
     exe.linkLibC();
 
-    if (target.result.os.tag == .windows) {
-        const mingw_lib = "C:\\msys64\\mingw64\\lib";
-
-        // 2. 使用 pkg-config 获取 GTK4 的编译标志（包含头文件路径等）
-        const gtk_cflags = pkgConfigQuery(b, &.{ "pkg-config", "--dont-define-prefix", "--cflags", "--libs", "gtk4" });
-        var gtk_cflags_split = std.mem.tokenizeAny(u8, gtk_cflags, " ");
-
-        while (gtk_cflags_split.next()) |raw_flag| {
-            const flag = std.mem.trim(u8, raw_flag, " \n\r");
-            if (flag.len < 2) continue; //忽略无效标志
-
-            if (std.mem.startsWith(u8, flag, "-I")) {
-                const include_path_raw = flag[2..];
-                const include_path = normalizeMsysPathForWindows(b, include_path_raw);
-                // 使用绝对路径，避免生成 "\\mingw64\\..." 这样的无效根路径
-                exe.addIncludePath(.{ .cwd_relative = include_path });
-            } else if (std.mem.startsWith(u8, flag, "-l")) {
-                const lib_name = b.fmt("lib{s}.dll.a", .{flag[2..]});
-                const lib_full_path = std.fs.path.join(b.allocator, &.{ mingw_lib, lib_name }) catch {
-                    std.debug.panic("无法构建库文件路径。\n", .{});
-                };
-                // 直接把 .dll.a 文件喂给链接器，避开 Zig 的搜索策略问题
-                exe.addObjectFile(.{ .cwd_relative = lib_full_path });
-            } else if (std.mem.startsWith(u8, flag, "-L")) {
-                const lib_path_raw = flag[2..];
-                const lib_path = normalizeMsysPathForWindows(b, lib_path_raw);
-                exe.addLibraryPath(.{ .cwd_relative = lib_path });
-            }
-        }
-    } else {
-        // Linux 和其他 Unix 平台：使用 pkg-config
-        exe.linkSystemLibrary("gtk4");
-        exe.linkSystemLibrary("glib-2.0");
-    }
-    // ==================================
-
     // ========== WebUI 测试可执行文件 ==========
     // 导入 webui 依赖
-    const webui_dep = b.dependency("webui", .{
+    // 注释掉WebUI相关构建，因为系统中可能没有安装webui库
+    // const webui_dep = b.dependency("webui", .{
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+
+    // const ui_test_exe = b.addExecutable(.{
+    //     .name = "ui-test",
+    //     .root_module = b.createModule(.{
+    //         .root_source_file = b.path("src/webui_test.zig"),
+    //         .target = target,
+    //         .optimize = optimize,
+    //         .imports = &.{
+    //             .{ .name = "webui", .module = webui_dep.module("webui") },
+    //         },
+    //     }),
+    // });
+
+    // ui_test_exe.linkLibC(); // webui 需要链接 libc
+
+    // b.installArtifact(ui_test_exe);
+    // =========================================
+
+    // ========== 修改后的WebUI测试可执行文件 ==========
+    // const modified_ui_test_exe = b.addExecutable(.{
+    //     .name = "little_timer_webui_test_modified",
+    //     .root_module = b.createModule(.{
+    //         .root_source_file = b.path("src/webui_test_modified.zig"),
+    //         .target = target,
+    //         .optimize = optimize,
+    //         .imports = &.{
+    //             .{ .name = "webui", .module = webui_dep.module("webui") },
+    //         },
+    //     }),
+    // });
+
+    // modified_ui_test_exe.linkLibC(); // webui 需要链接 libc
+
+    // b.installArtifact(modified_ui_test_exe);
+    // =========================================
+
+
+    // ========== 主应用程序 - WebUI版本 ==========
+    const webui_module = b.createModule(.{
+        .root_source_file = b.path("src/main_webui.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "webui", .module = webui_dep.module("webui") },
+        },
     });
 
-    const ui_test_exe = b.addExecutable(.{
-        .name = "ui-test",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/webui_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "webui", .module = webui_dep.module("webui") },
-            },
-        }),
+    const webui_exe = b.addExecutable(.{
+        .name = "little_timer_webui",
+        .root_module = webui_module,
     });
 
-    ui_test_exe.linkLibC(); // webui 需要链接 libc
+    webui_exe.linkLibC(); // webui 需要链接 libc
+    webui_exe.linkSystemLibrary("webui"); // 链接webui库
 
-    b.installArtifact(ui_test_exe);
+    b.installArtifact(webui_exe);
     // =========================================
 
     // This declares intent for the executable to be installed into the

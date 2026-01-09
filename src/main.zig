@@ -2,6 +2,9 @@ const std = @import("std");
 const app = @import("app.zig");
 const clock = @import("clock.zig");
 
+// 在WSL和其他无图形环境中使用WebUI
+pub const USE_WEBUI = true;
+
 pub fn main() !void {
     // 1. 创建内存分配器
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

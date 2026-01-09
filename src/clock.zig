@@ -9,6 +9,9 @@ pub const ModeEnumT = interface.ModeEnumT;
 pub const ClockInterfaceUnion = interface.ClockInterfaceUnion;
 pub const ClockInterfaceData = interface.ClockInterfaceData;
 
+// 用于 tick 计数的全局变量（每隔10个 tick 打印一次日志）
+var tick_count: usize = 0;
+
 // 导出配置类型
 pub const ClockTaskConfigT = union(enum) {
     countdown: struct {
@@ -99,12 +102,27 @@ pub const ClockManager = struct {
     pub fn handleEvent(self: *ClockManager, event: ClockEvent) void {
         switch (event) {
             .tick => {
+                // 每隔几个 tick 打印一次剩余时间（减少日志量）
+                tick_count += 1;
+                if (tick_count % 10 == 0) {
+                    // 获取当前时间用于调试
+                    const display = self.update();
+                    const remaining_ms = display.getTimeInfo() * 1000;
+                    std.debug.print("[Tick] 剩余时间: {:.1} 秒，暂停状态: ", .{@as(f64, @floatFromInt(remaining_ms)) / 1000.0});
+                    switch (self.state) {
+                        .COUNTDOWN_MODE => std.debug.print("COUNTDOWN is_paused={}\n", .{self.state.COUNTDOWN_MODE.is_paused}),
+                        .STOPWATCH_MODE => std.debug.print("STOPWATCH is_paused={}\n", .{self.state.STOPWATCH_MODE.is_paused}),
+                        .WORLD_CLOCK_MODE => std.debug.print("WORLD_CLOCK\n", .{}),
+                    }
+                }
                 self.OnTick(event);
             },
             .user_start_timer => {
+                std.debug.print("Clock: 收到开始事件\n", .{});
                 // 开始计时
                 switch (self.state) {
                     .COUNTDOWN_MODE => {
+                        std.debug.print("  设置暂停=false\n", .{});
                         self.state.COUNTDOWN_MODE.is_paused = false;
                     },
                     .STOPWATCH_MODE => {
@@ -116,9 +134,11 @@ pub const ClockManager = struct {
                 }
             },
             .user_pause_timer => {
+                std.debug.print("Clock: 收到暂停事件\n", .{});
                 // 暂停计时
                 switch (self.state) {
                     .COUNTDOWN_MODE => {
+                        std.debug.print("  设置暂停=true\n", .{});
                         self.state.COUNTDOWN_MODE.is_paused = true;
                     },
                     .STOPWATCH_MODE => {
@@ -130,6 +150,7 @@ pub const ClockManager = struct {
                 }
             },
             .user_reset_timer => {
+                std.debug.print("Clock: 收到重置事件\n", .{});
                 // 重置计时器
                 switch (self.state) {
                     .COUNTDOWN_MODE => {

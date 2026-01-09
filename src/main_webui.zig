@@ -6,6 +6,8 @@ const clock = @import("clock.zig");
 pub const USE_WEBUI = true;
 
 pub fn main() !void {
+    std.debug.print("Little Timer WebUI 启动中...\n", .{});
+
     // 1. 创建内存分配器
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -23,12 +25,21 @@ pub fn main() !void {
     };
 
     // 3. 初始化应用程序（在指针上原地初始化）
-    try main_app.init(allocator, clock_config);
+    std.debug.print("初始化应用程序...\n", .{});
+    main_app.init(allocator, clock_config) catch |err| {
+        std.debug.print("初始化失败: {any}\n", .{err});
+        return err;
+    };
 
     // 4. 设置全局指针（这样回调函数才能访问 app 实例）
+    std.debug.print("设置全局指针...\n", .{});
     main_app.setGlobalApp();
 
     // 5. 运行应用程序
+    std.debug.print("启动 WebUI 主循环...\n", .{});
     // 根据编译选项，这将启动GTK或WebUI主循环
-    try main_app.run();
+    main_app.run() catch |err| {
+        std.debug.print("运行失败: {any}\n", .{err});
+        return err;
+    };
 }

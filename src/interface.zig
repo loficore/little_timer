@@ -48,6 +48,15 @@ pub const ClockInterfaceT = opaque {
         const data: *ClockInterfaceData = @ptrCast(@alignCast(self));
         return data.mode;
     }
+
+    pub fn isPaused(self: *ClockInterfaceT) bool {
+        const data: *ClockInterfaceData = @ptrCast(@alignCast(self));
+        return switch (data.mode) {
+            .COUNTDOWN_MODE => data.info.countdown.is_paused,
+            .STOPWATCH_MODE => data.info.stopwatch.is_paused,
+            .WORLD_CLOCK_MODE => false, // 世界时钟不会暂停
+        };
+    }
 };
 
 /// 时钟事件 - 从 windows 发送给 app/clock

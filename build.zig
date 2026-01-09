@@ -146,6 +146,7 @@ pub fn build(b: *std.Build) void {
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
                 .{ .name = "little_timer", .module = mod },
+                .{ .name = "webui", .module = webui_dep.module("webui") },
             },
         }),
     });
@@ -196,7 +197,6 @@ pub fn build(b: *std.Build) void {
     // b.installArtifact(modified_ui_test_exe);
     // =========================================
 
-
     // ========== 主应用程序 - WebUI版本 ==========
     const webui_module = b.createModule(.{
         .root_source_file = b.path("src/main_webui.zig"),
@@ -213,7 +213,8 @@ pub fn build(b: *std.Build) void {
     });
 
     webui_exe.linkLibC(); // webui 需要链接 libc
-    webui_exe.linkSystemLibrary("webui"); // 链接webui库
+    webui_exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    webui_exe.linkSystemLibrary("webui");
 
     b.installArtifact(webui_exe);
     // =========================================
@@ -248,6 +249,15 @@ pub fn build(b: *std.Build) void {
     // command itself, like this: `zig build run -- arg1 arg2 etc`
     if (b.args) |args| {
         run_cmd.addArgs(args);
+    }
+
+    // WebUI 版本的运行步骤
+    const run_webui_step = b.step("run-webui", "Run the WebUI app");
+    const run_webui_cmd = b.addRunArtifact(webui_exe);
+    run_webui_step.dependOn(&run_webui_cmd.step);
+    run_webui_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_webui_cmd.addArgs(args);
     }
 
     // Creates an executable that will run `test` blocks from the provided module.

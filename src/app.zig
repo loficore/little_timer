@@ -19,6 +19,7 @@ var global_app: ?*MainApplication = null;
 /// 可以使用GTK、WebUI或其他UI后端
 pub const MainApplication = struct {
     clock_manager: clock.ClockManager,
+    mutex: std.Thread.Mutex = .{},
 
     // 窗口管理器 - 只使用WebUI后端
     windows_manager: union(enum) {
@@ -54,7 +55,9 @@ pub const MainApplication = struct {
 
         // 5. 立即更新显示，显示初始时间
         const initial_display = self.clock_manager.update();
-        self.updateDisplay(initial_display);
+        self.updateDisplay(initial_display) catch |err| {
+            std.debug.print("更新显示失败: {any}\n", .{err});
+        };
     }
 
     /// 设置全局 App 指针供回调函数使用
@@ -74,6 +77,7 @@ pub const MainApplication = struct {
     /// 注意：目前WebUI会接管主循环
     /// 未来可以考虑使用WebUI的定时器来实现tick
     pub fn run(self: *MainApplication) !void {
+        // 注意：不再发送自动开始事件，等待用户点击开始按钮
         // 启动WebUI主循环
         return self.windows_manager.webui.run();
     }
@@ -88,6 +92,11 @@ pub const MainApplication = struct {
         // 1. 获取应用程序实例
         const self: *MainApplication = @ptrCast(@alignCast(ctx));
 
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        std.debug.print("Tick: 增量 {} ms\n", .{delta_ms});
+
         // 2. 发送 tick 事件给时钟
         self.clock_manager.handleEvent(.{ .tick = delta_ms });
 
@@ -95,7 +104,9 @@ pub const MainApplication = struct {
         const display_data = self.clock_manager.update();
 
         // 4. 更新窗口显示
-        self.updateDisplay(display_data);
+        self.updateDisplay(display_data) catch |err| {
+            std.debug.print("更新显示失败: {any}\n", .{err});
+        };
     }
 
     /// 更新显示 - 调用WebUI更新方法
@@ -103,8 +114,8 @@ pub const MainApplication = struct {
     /// 参数:
     /// - self: MainApplication实例指针
     /// - display_data: 时钟显示数据
-    fn updateDisplay(self: *MainApplication, display_data: *clock.ClockInterfaceT) void {
-        self.windows_manager.webui.updateDisplay(display_data);
+    fn updateDisplay(self: *MainApplication, display_data: *clock.ClockInterfaceT) !void {
+        try self.windows_manager.webui.updateDisplay(display_data);
     }
 
     /// 处理来自用户界面的事件（回调函数）
@@ -113,14 +124,19 @@ pub const MainApplication = struct {
     /// 参数:
     /// - self: MainApplication实例指针（未使用，通过全局变量访问）
     /// - event: 时钟事件
-    fn handleUserEvent(_: *MainApplication, event: clock.ClockEvent) void {
+    fn handleUserEvent(self: *MainApplication, event: clock.ClockEvent) void {
         if (global_app) |app| {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
             // 将用户事件转发给时钟管理器
             app.clock_manager.handleEvent(event);
 
             // 立即更新显示
             const display_data = app.clock_manager.update();
-            app.updateDisplay(display_data);
+            app.updateDisplay(display_data) catch |err| {
+                std.debug.print("更新显示失败: {any}\n", .{err});
+            };
         }
     }
 
@@ -129,8 +145,12 @@ pub const MainApplication = struct {
     /// 参数:
     /// - event: 时钟事件
     fn handleUserEventWrapper(event: clock.ClockEvent) void {
+        std.debug.print("handleUserEventWrapper 被调用，事件类型: {}\n", .{event});
         if (global_app) |app| {
+            std.debug.print("  调用 app.handleUserEvent\n", .{});
             app.handleUserEvent(event);
+        } else {
+            std.debug.print("  错误: global_app 为 null\n", .{});
         }
     }
 };

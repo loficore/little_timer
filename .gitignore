@@ -5,3 +5,5 @@ zig-out
 .vscode/
 
 QWEN.md
+
+*.sh

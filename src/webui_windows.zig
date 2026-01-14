@@ -2,25 +2,19 @@ const std = @import("std");
 const interface = @import("interface.zig");
 const Thread = std.Thread;
 
-// 检查是否定义了USE_WEBUI
-const use_webui = @hasDecl(@import("root"), "USE_WEBUI") and @import("root").USE_WEBUI;
-
 // 根据是否使用WebUI导入不同的模块
-const webui_module = if (use_webui) @import("webui") else struct {};
+const webui_module = @import("webui");
 
-// Tick函数类型定义 - 用于处理时钟tick事件
+// Tick函数类型定义
 const TickFn = *const fn (ctx: ?*anyopaque, delta_ms: i64) void;
 
-// 用户事件类型别名 - 与interface.zig中的ClockEvent一致
 const UserEventT = interface.ClockEvent;
 
-// 外部参数结构体 - 用于传递上下文和tick处理器
 const ExternParam = struct {
-    ctx: ?*anyopaque, // 应用程序上下文指针
-    tick_handler: TickFn, // tick事件处理器
+    ctx: ?*anyopaque,
+    tick_handler: TickFn,
 };
 
-// 常量定义
 const Constants = struct {
     pub const APP_TITLE = "Little Timer - WebUI";
     pub const WINDOW_WIDTH = 400;
@@ -31,7 +25,7 @@ const Constants = struct {
 ///
 /// - **note** : 该结构体替代了原来的GTK WindowsManager，提供相同的接口
 /// 但使用WebUI作为UI后端，实现跨平台的Web界面
-pub const WebUIManager = if (use_webui) struct {
+pub const WebUIManager = struct {
     // WebUI窗口实例
     window: webui_module,
 
@@ -59,20 +53,15 @@ pub const WebUIManager = if (use_webui) struct {
     /// 初始化WebUI窗口管理器
     ///
     /// 参数:
-    /// - self: WebUIManager实例指针
-    /// - on_user_event_param: 用户事件回调函数
-    /// - extern_param: 外部参数（包含应用程序上下文和tick处理器）
+    /// - **self**: WebUIManager实例指针
+    /// - **on_user_event_param**: 用户事件回调函数
+    /// - **extern_param**: 外部参数（包含应用程序上下文和tick处理器）
     ///
     /// 返回:
     /// - !void: 如果初始化失败则返回错误
     pub fn init(self: *WebUIManager, on_user_event_param: ?*const fn (UserEventT) void, extern_param: ExternParam) !void {
-        // 创建新的WebUI窗口
         self.window = webui_module.newWindow();
-
-        // 保存用户事件回调函数
         self.on_user_event = on_user_event_param;
-
-        // 保存外部参数
         self.extern_param = extern_param;
 
         // 在运行时读取 HTML 文件内容
@@ -148,11 +137,8 @@ pub const WebUIManager = if (use_webui) struct {
 
     /// 获取HTML内容
     ///
-    /// 参数:
-    /// - **self** : WEBUIMananger实例指针，暂时不使用
-    ///
     /// 返回:
-    /// - **![]const u8** : HTML内容字符串，如果读取失败则返回错误
+    /// - **![]const u8**: HTML内容字符串，如果读取失败则返回错误
     fn getHTMLContent(self: *WebUIManager) ![]const u8 {
         _ = self;
 
@@ -193,9 +179,9 @@ pub const WebUIManager = if (use_webui) struct {
     /// 设置事件处理器
     ///
     /// 参数:
-    /// - **self** : WebUIManager实例指针
+    /// - **self**: WebUIManager实例指针
     ///
-    /// 配置JavaScript回调函数，用于处理来自UI的用户事件
+    /// 配置JavaScript回调函数以处理来自UI的用户事件
     fn setupEventHandlers(self: *WebUIManager) void {
         // 注册JavaScript函数，用于处理UI事件
         // 这些函数将被HTML中的按钮点击事件调用
@@ -225,6 +211,12 @@ pub const WebUIManager = if (use_webui) struct {
         };
         std.debug.print("✓ tick 绑定成功\n", .{});
 
+        _ = self.window.bind("mode_change", handleModeChange) catch |err| {
+            std.debug.print("绑定 mode_change 失败: {any}\n", .{err});
+            return;
+        };
+        std.debug.print("✓ mode_change 绑定成功\n", .{});
+
         // 为每个绑定设置上下文，这样回调函数可以访问WebUIManager实例
         self.window.setContext("start", self);
         std.debug.print("✓ start 上下文设置成功\n", .{});
@@ -238,17 +230,18 @@ pub const WebUIManager = if (use_webui) struct {
         self.window.setContext("tick", self);
         std.debug.print("✓ tick 上下文设置成功\n", .{});
 
+        self.window.setContext("mode_change", self);
+        std.debug.print("✓ mode_change 上下文设置成功\n", .{});
+
         std.debug.print("事件绑定已注册\n", .{});
     }
 
-    /// 更新显示（应用程序每帧调用）
+    /// 更新显示
     ///
     /// 参数:
     /// - **self**: WebUIManager实例指针
     /// - **display_data**: 时钟显示数据
-    ///
-    /// 该函数接收来自ClockManager的显示数据，并更新UI显示
-    pub fn updateDisplay(self: *WebUIManager, display_data: *interface.ClockInterfaceT) !void {
+    pub fn updateDisplay(self: *WebUIManager, display_data: *interface.ClockInterface) !void {
         // 从显示数据中获取剩余时间（秒）
         const remaining_seconds = display_data.getTimeInfo();
         const current_mode = display_data.getMode();
@@ -296,11 +289,8 @@ pub const WebUIManager = if (use_webui) struct {
     /// 处理用户事件
     ///
     /// 参数:
-    /// - **self** : WebUIManager实例指针
-    /// - **event** : 用户事件
-    ///
-    /// 备注:
-    /// - **note** : 该函数处理来自UI的用户事件，并将其转发给应用程序
+    /// - **self**: WebUIManager实例指针
+    /// - **event**: 用户事件
     fn handleUserEvent(self: *WebUIManager, event: UserEventT) void {
         std.debug.print("WebUIManager.handleUserEvent 被调用，on_user_event 是否为 null: {}\n", .{self.on_user_event == null});
         if (self.on_user_event) |handler| {
@@ -315,11 +305,6 @@ pub const WebUIManager = if (use_webui) struct {
     ///
     /// 参数:
     /// - **manager_ptr**: WebUIManager实例指针（作为*anyopaque传入）
-    ///
-    ///
-    /// 备注:
-    /// - **note** : 该函数在独立线程中运行，每500ms调用一次tick处理器
-    /// ,直到 is_running 被设置为 false
     fn tickThreadFn(manager_ptr: *anyopaque) void {
         const self = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
         const tick_interval_ms = 500; // 500ms 调用一次 tick
@@ -395,104 +380,109 @@ pub const WebUIManager = if (use_webui) struct {
             std.debug.print("Tick线程已回收\n", .{});
         }
     }
-} else struct {
-    pub fn init(self: *WebUIManager, on_user_event_param: ?*const fn (UserEventT) void, extern_param: ExternParam) !void {
-        _ = self;
-        _ = on_user_event_param;
-        _ = extern_param;
-        @panic("WebUI未启用");
-    }
-
-    pub fn updateDisplay(self: *WebUIManager, display_data: *interface.ClockInterfaceT) !void {
-        _ = self;
-        _ = display_data;
-    }
-
-    pub fn run(self: *WebUIManager) !void {
-        _ = self;
-        @panic("WebUI未启用");
-    }
-
-    pub fn deinit(self: *WebUIManager) void {
-        _ = self;
-    }
 };
 
-// 定义事件处理器函数 - 这些函数在编译时总是存在，但只有在使用WebUI时才被调用
 /// "开始"按钮事件处理器
 ///
-/// 这是一个静态函数，用于处理来自JavaScript的"开始"事件
-/// 它会将用户事件转发给WebUIManager实例
-fn handleStart(e: if (use_webui) *webui_module.Event else void) void {
-    if (use_webui) {
-        std.debug.print("handleStart 被调用\n", .{});
-        // 从事件中获取上下文（WebUIManager实例）
-        const manager_ptr = e.getContext() catch {
-            std.debug.print("无法获取上下文\n", .{});
-            return;
-        };
+/// 参数:
+/// - **e**: JavaScript事件
+fn handleStart(e: *webui_module.Event) void {
+    std.debug.print("handleStart 被调用\n", .{});
+    // 从事件中获取上下文（WebUIManager实例）
+    const manager_ptr = e.getContext() catch {
+        std.debug.print("无法获取上下文\n", .{});
+        return;
+    };
 
-        const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
-
-        // 发送用户开始计时事件到应用程序
-        std.debug.print("发送 user_start_timer 事件\n", .{});
-        manager.handleUserEvent(.{ .user_start_timer = {} });
-    }
+    const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
+    // 发送用户开始计时事件到应用程序
+    std.debug.print("发送 user_start_timer 事件\n", .{});
+    manager.handleUserEvent(.{ .user_start_timer = {} });
 }
 
 /// "暂停"按钮事件处理器
 ///
-/// 这是一个静态函数，用于处理来自JavaScript的"暂停"事件
-fn handlePause(e: if (use_webui) *webui_module.Event else void) void {
-    if (use_webui) {
-        std.debug.print("handlePause 被调用\n", .{});
-        // 从事件中获取上下文（WebUIManager实例）
-        const manager_ptr = e.getContext() catch {
-            std.debug.print("无法获取上下文\n", .{});
-            return;
-        };
+/// 参数:
+/// - **e**: JavaScript事件
+fn handlePause(e: *webui_module.Event) void {
+    std.debug.print("handlePause 被调用\n", .{});
+    // 从事件中获取上下文（WebUIManager实例）
+    const manager_ptr = e.getContext() catch {
+        std.debug.print("无法获取上下文\n", .{});
+        return;
+    };
 
-        const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
-
-        // 发送用户暂停事件到应用程序
-        std.debug.print("发送 user_pause_timer 事件\n", .{});
-        manager.handleUserEvent(.{ .user_pause_timer = {} });
-    }
+    const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
+    // 发送用户暂停事件到应用程序
+    std.debug.print("发送 user_pause_timer 事件\n", .{});
+    manager.handleUserEvent(.{ .user_pause_timer = {} });
 }
 
 /// "重置"按钮事件处理器
 ///
-/// 这是一个静态函数，用于处理来自JavaScript的"重置"事件
-fn handleReset(e: if (use_webui) *webui_module.Event else void) void {
-    if (use_webui) {
-        std.debug.print("handleReset 被调用\n", .{});
-        // 从事件中获取上下文（WebUIManager实例）
-        const manager_ptr = e.getContext() catch {
-            std.debug.print("无法获取上下文\n", .{});
-            return;
-        };
+/// 参数:
+/// - **e**: JavaScript事件
+fn handleReset(e: *webui_module.Event) void {
+    std.debug.print("handleReset 被调用\n", .{});
+    // 从事件中获取上下文（WebUIManager实例）
+    const manager_ptr = e.getContext() catch {
+        std.debug.print("无法获取上下文\n", .{});
+        return;
+    };
 
-        const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
-
-        // 发送用户重置事件到应用程序
-        std.debug.print("发送 user_reset_timer 事件\n", .{});
-        manager.handleUserEvent(.{ .user_reset_timer = {} });
-    }
+    const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
+    // 发送用户重置事件到应用程序
+    std.debug.print("发送 user_reset_timer 事件\n", .{});
+    manager.handleUserEvent(.{ .user_reset_timer = {} });
 }
 
-/// "Tick"事件处理器
-fn handleTick(e: if (use_webui) *webui_module.Event else void) void {
-    if (use_webui) {
-        // 从事件中获取上下文（WebUIManager实例）
-        const manager_ptr = e.getContext() catch {
-            std.debug.print("Tick: 无法获取上下文\n", .{});
-            return;
-        };
+/// Tick 事件处理器
+///
+/// 参数:
+/// - **e**: JavaScript事件
+fn handleTick(e: *webui_module.Event) void {
+    // 从事件中获取上下文（WebUIManager实例）
+    const manager_ptr = e.getContext() catch {
+        std.debug.print("Tick: 无法获取上下文\n", .{});
+        return;
+    };
 
-        const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
+    const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
 
-        // 调用应用程序的 tick 处理器，增量固定为 500ms
-        const delta_ms: i64 = 500;
-        manager.extern_param.tick_handler(manager.extern_param.ctx, delta_ms);
+    // 调用应用程序的 tick 处理器，增量固定为 500ms
+    const delta_ms: i64 = 500;
+    manager.extern_param.tick_handler(manager.extern_param.ctx, delta_ms);
+}
+
+/// "模式切换"事件处理器
+///
+/// 参数:
+/// - **e**: JavaScript事件
+fn handleModeChange(e: *webui_module.Event) void {
+    std.debug.print("handleModeChange 被调用\n", .{});
+    // 从事件中获取上下文（WebUIManager实例）
+    const manager_ptr = e.getContext() catch {
+        std.debug.print("无法获取上下文\n", .{});
+        return;
+    };
+
+    // 从事件参数中获取模式字符串
+    const new_mode = e.getString();
+    var mode_enum: interface.ModeEnumT = undefined;
+
+    if (std.mem.eql(u8, new_mode, "倒计时模式")) {
+        mode_enum = .COUNTDOWN_MODE;
+    } else if (std.mem.eql(u8, new_mode, "正计时模式")) {
+        mode_enum = .STOPWATCH_MODE;
+    } else if (std.mem.eql(u8, new_mode, "世界时钟模式")) {
+        mode_enum = .WORLD_CLOCK_MODE;
+    } else {
+        std.debug.print("未知的模式: {s}\n", .{new_mode});
+        return;
     }
+
+    const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
+    // 发送用户模式切换事件到应用程序
+    std.debug.print("发送 user_change_mode 事件\n", .{});
+    manager.handleUserEvent(.{ .user_change_mode = mode_enum });
 }

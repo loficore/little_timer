@@ -36,6 +36,10 @@
             .url = "https://github.com/webui-dev/zig-webui/archive/main.tar.gz",
             .hash = "zig_webui-2.5.0-beta.4-M4z7zexlAQD-drd9H1BqG1goIZQ-S623XbqUWSYDs5wd",
         },
+        .toml = .{
+            .url = "git+https://github.com/sam701/zig-toml#cf50bd59c6276fb2b6d34b8d71d35486eecc719c",
+            .hash = "toml-0.3.0-bV14Bd-EAQBKoXhpYft303BtA2vgLNlxntUCIWgRUl46",
+        },
     },
     // Specifies the set of files and directories that are included in this package.
     // Only files and directories listed here are included in the `hash` that

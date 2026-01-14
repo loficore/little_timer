@@ -2,9 +2,12 @@ const std = @import("std");
 const app = @import("app.zig");
 const clock = @import("clock.zig");
 
-// 定义USE_WEBUI为true
-pub const USE_WEBUI = true;
-
+/// 应用程序入口函数 (WebUI 版本)
+///
+/// 创建内存分配器、初始化应用程序并运行 WebUI 主循环
+///
+/// 返回:
+/// - !void: 如果运行失败则返回错误
 pub fn main() !void {
     std.debug.print("Little Timer WebUI 启动中...\n", .{});
 
@@ -17,7 +20,7 @@ pub fn main() !void {
     const main_app = try allocator.create(app.MainApplication);
     defer allocator.destroy(main_app);
 
-    const clock_config = clock.ClockTaskConfigT{
+    const clock_config = clock.ClockTaskConfig{
         .countdown = .{
             .duration_seconds = 25 * 60, // 25分钟倒计时
             .loop = false,

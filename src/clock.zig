@@ -2,103 +2,169 @@
 const std = @import("std");
 const interface = @import("interface.zig");
 
-// 重新导出接口模块的公共类型
-pub const ClockInterfaceT = interface.ClockInterfaceT;
+pub const ClockInterface = interface.ClockInterface;
 pub const ClockEvent = interface.ClockEvent;
 pub const ModeEnumT = interface.ModeEnumT;
 pub const ClockInterfaceUnion = interface.ClockInterfaceUnion;
-pub const ClockInterfaceData = interface.ClockInterfaceData;
+pub const _ClockInterfaceData = interface._ClockInterfaceData;
 
-// 用于 tick 计数的全局变量（每隔10个 tick 打印一次日志）
 var tick_count: usize = 0;
 
-// 导出配置类型
-pub const ClockTaskConfigT = union(enum) {
-    countdown: struct {
-        duration_seconds: u64 = 25 * 60, //倒计时秒
-        loop: bool = false, //是否循环倒计时
-        loop_interval_break_seconds: u64 = 0, //循环间隔休息秒数,暂时不实现
-        loop_count: u32 = 0, //循环次数,0表示无限循环，暂时不实现
-    },
-
-    stopwatch: struct {
-        max_seconds: u64, //正计时秒数
-    },
-
-    world_clock: struct {
-        timezone: i8 = 8, // 默认东八区
-    },
-};
+pub const ClockTaskConfig = interface.ClockTaskConfig;
 
 const CountdownState = struct {
-    remaining_ms: i64, // 剩余毫秒数
-    is_paused: bool = true, // 是否暂停
+    duration_ms: u64, // 配置的总时长
+    remaining_ms: i64,
+    loop: bool,
+    loop_interval_seconds: u64,
+    loop_count: u32,
+    loop_remaining: u32, // 0 表示无限循环
+    loop_completed: bool = false, // 标记循环是否全部完成
+    in_rest: bool = false,
+    rest_remaining_ms: i64 = 0,
+    is_paused: bool = true,
     is_finished: bool = false,
 
-    // 逻辑：更新时间
+    /// 更新倒计时状态
+    ///
+    /// 参数:
+    /// - **self**: CountdownState 实例指针
+    /// - **delta_ms**: 增加的毫秒数
     pub fn tick(self: *CountdownState, delta_ms: i64) void {
         if (self.is_paused or self.is_finished) return;
+
+        // 休息阶段倒计时
+        if (self.in_rest) {
+            self.rest_remaining_ms -= delta_ms;
+            if (self.rest_remaining_ms <= 0) {
+                self.in_rest = false;
+                self.is_finished = false;
+                self.remaining_ms = @as(i64, @intCast(self.duration_ms));
+            }
+            return;
+        }
+
         self.remaining_ms -= delta_ms;
         if (self.remaining_ms <= 0) {
             self.remaining_ms = 0;
             self.is_finished = true;
+
+            // 循环逻辑
+            if (self.loop) {
+                if (self.loop_remaining != 0) {
+                    // 非零时代表需要扣次数，扣完为 0 时停止循环
+                    if (self.loop_remaining > 0) self.loop_remaining -= 1;
+                    if (self.loop_remaining == 0) {
+                        self.loop_completed = true; // 标记循环已全部完成
+                        return;
+                    }
+                }
+
+                if (self.loop_interval_seconds > 0) {
+                    self.in_rest = true;
+                    self.rest_remaining_ms = @as(i64, @intCast(self.loop_interval_seconds * 1000));
+                    self.is_finished = false; // 休息中视为未结束，继续流转
+                } else {
+                    // 无休息直接进入下一轮
+                    self.is_finished = false;
+                    self.remaining_ms = @as(i64, @intCast(self.duration_ms));
+                }
+            }
         }
     }
 };
 
 const StopwatchState = struct {
-    esplased_ms: i64,
+    esplased_ms: i64 = 0,
     max_ms: i64,
-    is_paused: bool = true, // 是否暂停
+    is_paused: bool = true,
     is_finished: bool = false,
 
+    /// 更新秒表状态
+    ///
+    /// 参数:
+    /// - **self**: StopwatchState 实例指针
+    /// - **delta_ms**: 增加的毫秒数
     pub fn tick(self: *StopwatchState, delta_ms: i64) void {
         if (self.is_paused or self.is_finished) return;
+
         self.esplased_ms += delta_ms;
-        if (self.esplased_ms > self.max_ms) {
+        if (self.esplased_ms >= self.max_ms) {
             self.esplased_ms = self.max_ms;
             self.is_finished = true;
         }
     }
 };
 
-// 以上类型从 interface.zig 重新导出
+const WorldClockState = struct {
+    timezone: i8 = 8,
+
+    pub fn time(self: *WorldClockState) i64 {
+        // 获取当前时间戳（纳秒）并转换为秒
+        const now_ns = std.time.nanoTimestamp();
+        const now_s = @as(i64, @intCast(@divFloor(now_ns, 1_000_000_000)));
+        // 计算时区偏移（秒）
+        const offset_seconds = @as(i64, @intCast(self.timezone)) * 3600;
+        return now_s + offset_seconds;
+    }
+};
+
 const ClockState = union(ModeEnumT) {
     COUNTDOWN_MODE: CountdownState,
     STOPWATCH_MODE: StopwatchState,
-    WORLD_CLOCK_MODE: void,
+    WORLD_CLOCK_MODE: WorldClockState,
 };
 
 pub const ClockManager = struct {
     state: ClockState,
     last_tick_time: i64 = 0,
-    display_data: ClockInterfaceData = undefined, // 复用的显示数据
-    initial_config: ClockTaskConfigT, // 保存初始配置用于重置
+    display_data: _ClockInterfaceData = undefined, // 复用的显示数据
+    initial_config: ClockTaskConfig, // 保存初始配置用于重置
+    default_config: ClockTaskConfig,
 
-    pub fn init(clock_config: ClockTaskConfigT) ClockManager {
+    /// 初始化时钟管理器
+    ///
+    /// 参数:
+    /// - **clock_config**: 时钟配置参数
+    ///
+    /// 返回:
+    /// - ClockManager: 初始化后的时钟管理器实例
+    pub fn init(clock_config: ClockTaskConfig) ClockManager {
         const state = switch (clock_config) {
             .countdown => ClockState{
                 .COUNTDOWN_MODE = CountdownState{
+                    .duration_ms = clock_config.countdown.duration_seconds * 1000,
                     .remaining_ms = @as(i64, @intCast(clock_config.countdown.duration_seconds * 1000)),
-                    .is_paused = true,
+                    .loop = clock_config.countdown.loop,
+                    .loop_interval_seconds = clock_config.countdown.loop_interval_seconds,
+                    .loop_count = clock_config.countdown.loop_count,
+                    .loop_remaining = clock_config.countdown.loop_count,
                 },
             },
             .stopwatch => ClockState{
                 .STOPWATCH_MODE = StopwatchState{
-                    .esplased_ms = @as(i64, @intCast(clock_config.stopwatch.max_seconds * 1000)),
+                    .esplased_ms = 0,
                     .max_ms = @as(i64, @intCast(clock_config.stopwatch.max_seconds * 1000)),
                 },
             },
             .world_clock => ClockState{
-                .WORLD_CLOCK_MODE = {},
+                .WORLD_CLOCK_MODE = WorldClockState{
+                    .timezone = clock_config.world_clock.timezone,
+                },
             },
         };
         return .{
             .state = state,
             .initial_config = clock_config,
+            .default_config = clock_config,
         };
     }
 
+    /// 处理时钟事件
+    ///
+    /// 参数:
+    /// - **self**: ClockManager 实例指针
+    /// - **event**: 时钟事件
     pub fn handleEvent(self: *ClockManager, event: ClockEvent) void {
         switch (event) {
             .tick => {
@@ -155,6 +221,10 @@ pub const ClockManager = struct {
                 switch (self.state) {
                     .COUNTDOWN_MODE => {
                         self.state.COUNTDOWN_MODE.remaining_ms = @as(i64, @intCast(self.initial_config.countdown.duration_seconds * 1000));
+                        self.state.COUNTDOWN_MODE.loop_remaining = self.initial_config.countdown.loop_count;
+                        self.state.COUNTDOWN_MODE.loop_completed = false;
+                        self.state.COUNTDOWN_MODE.in_rest = false;
+                        self.state.COUNTDOWN_MODE.rest_remaining_ms = 0;
                         self.state.COUNTDOWN_MODE.is_paused = true;
                         self.state.COUNTDOWN_MODE.is_finished = false;
                     },
@@ -168,49 +238,64 @@ pub const ClockManager = struct {
                     },
                 }
             },
-            .user_set_duration => |duration| {
-                // 处理设置时长事件
-                // 如果duration为0，则重置到初始配置
-                switch (self.state) {
-                    .COUNTDOWN_MODE => {
-                        if (duration == 0) {
-                            // 重置到初始配置 - 暂停状态，完整时长
-                            self.state.COUNTDOWN_MODE.remaining_ms = @as(i64, @intCast(self.initial_config.countdown.duration_seconds * 1000));
-                            self.state.COUNTDOWN_MODE.is_paused = true;
-                            self.state.COUNTDOWN_MODE.is_finished = false;
-                        } else {
-                            // 设置新的倒计时时间
-                            self.state.COUNTDOWN_MODE.remaining_ms = @as(i64, @intCast(duration * 1000));
-                            self.state.COUNTDOWN_MODE.is_paused = true; // 设置新时间后暂停
-                            self.state.COUNTDOWN_MODE.is_finished = false;
-                        }
-                    },
-                    .STOPWATCH_MODE => {
-                        // 对于秒表，设置最大时间
-                        if (duration == 0) {
-                            // 重置秒表
-                            self.state.STOPWATCH_MODE.esplased_ms = 0;
-                            self.state.STOPWATCH_MODE.max_ms = @as(i64, @intCast(self.initial_config.stopwatch.max_seconds * 1000));
-                            self.state.STOPWATCH_MODE.is_paused = true;
-                            self.state.STOPWATCH_MODE.is_finished = false;
-                        } else {
-                            // 设置新的最大时间
-                            self.state.STOPWATCH_MODE.max_ms = @as(i64, @intCast(duration * 1000));
-                            self.state.STOPWATCH_MODE.is_paused = true; // 设置新时间后暂停
-                            self.state.STOPWATCH_MODE.is_finished = false;
-                        }
-                    },
-                    .WORLD_CLOCK_MODE => {
-                        // 世界时钟不支持设置时长
-                    },
+            .user_change_mode => {
+                std.debug.print("Clock: 收到更改模式事件\n", .{});
+                // 更改模式 - 暂未实现，预留接口
+                const new_mode = event.user_change_mode;
+                switch (new_mode) {
+                    .COUNTDOWN_MODE => {},
+                    .STOPWATCH_MODE => {},
+                    .WORLD_CLOCK_MODE => {},
                 }
             },
-            .system_low_battery => {
-                // TODO: 处理电量低事件
+            .user_change_config => {
+                std.debug.print("Clock: 收到更改配置事件\n", .{});
+                // 更改配置
+                const new_config = event.user_change_config;
+                switch (new_config) {
+                    .countdown => {
+                        self.state = ClockState{
+                            .COUNTDOWN_MODE = CountdownState{
+                                .duration_ms = new_config.countdown.duration_seconds * 1000,
+                                .remaining_ms = @as(i64, @intCast(new_config.countdown.duration_seconds * 1000)),
+                                .loop = new_config.countdown.loop,
+                                .loop_interval_seconds = new_config.countdown.loop_interval_seconds,
+                                .loop_count = new_config.countdown.loop_count,
+                                .loop_remaining = new_config.countdown.loop_count,
+                                .loop_completed = false,
+                                .is_paused = true,
+                            },
+                        };
+                        self.initial_config = event.user_change_config;
+                    },
+                    .stopwatch => {
+                        self.state = ClockState{
+                            .STOPWATCH_MODE = StopwatchState{
+                                .esplased_ms = 0,
+                                .max_ms = @as(i64, @intCast(new_config.stopwatch.max_seconds * 1000)),
+                                .is_paused = true,
+                            },
+                        };
+                        self.initial_config = event.user_change_config;
+                    },
+                    .world_clock => {
+                        self.state = ClockState{
+                            .WORLD_CLOCK_MODE = WorldClockState{
+                                .timezone = new_config.world_clock.timezone,
+                            },
+                        };
+                        self.initial_config = event.user_change_config;
+                    },
+                }
             },
         }
     }
 
+    /// 处理 tick 事件
+    ///
+    /// 参数:
+    /// - **self**: ClockManager 实例指针
+    /// - **tick**: tick 事件
     fn OnTick(self: *ClockManager, tick: ClockEvent) void {
         switch (self.state) {
             .COUNTDOWN_MODE => {
@@ -226,17 +311,24 @@ pub const ClockManager = struct {
         }
     }
 
-    /// 对外部更新数据的函数
-    /// 返回内部数据的指针，无需分配和释放
-    pub fn update(self: *ClockManager) *ClockInterfaceT {
+    /// 获取时钟显示数据
+    ///
+    /// 参数:
+    /// - **self**: ClockManager 实例指针
+    ///
+    /// 返回:
+    /// - *ClockInterface: 时钟接口指针
+    pub fn update(self: *ClockManager) *ClockInterface {
         switch (self.state) {
             .COUNTDOWN_MODE => {
                 self.display_data.mode = ModeEnumT.COUNTDOWN_MODE;
                 self.display_data.info = ClockInterfaceUnion{
                     .countdown = .{
                         .remaining_ms = self.state.COUNTDOWN_MODE.remaining_ms,
-                        .is_paused = self.state.COUNTDOWN_MODE.is_paused,
-                        .is_finished = self.state.COUNTDOWN_MODE.is_finished,
+                        .duration_ms = self.state.COUNTDOWN_MODE.duration_ms,
+                        .loop = self.state.COUNTDOWN_MODE.loop,
+                        .loop_count = self.state.COUNTDOWN_MODE.loop_count,
+                        .loop_interval_seconds = self.state.COUNTDOWN_MODE.loop_interval_seconds,
                     },
                 };
             },
@@ -246,8 +338,6 @@ pub const ClockManager = struct {
                     .stopwatch = .{
                         .esplased_ms = self.state.STOPWATCH_MODE.esplased_ms,
                         .max_ms = self.state.STOPWATCH_MODE.max_ms,
-                        .is_paused = self.state.STOPWATCH_MODE.is_paused,
-                        .is_finished = self.state.STOPWATCH_MODE.is_finished,
                     },
                 };
             },
@@ -255,8 +345,8 @@ pub const ClockManager = struct {
                 self.display_data.mode = ModeEnumT.WORLD_CLOCK_MODE;
                 self.display_data.info = ClockInterfaceUnion{
                     .worldclock = .{
-                        .timezone = 8,
-                        .time = 0,
+                        .timezone = self.state.WORLD_CLOCK_MODE.timezone,
+                        .time = self.state.WORLD_CLOCK_MODE.time(),
                     },
                 };
             },

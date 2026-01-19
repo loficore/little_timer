@@ -1,0 +1,229 @@
+@import "tailwindcss";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-primary: #121212;
+    --bg-secondary: #1f1f1f;
+    --bg-tertiary: #2a2a2a;
+    --text-primary: #ffffff;
+    --text-secondary: #9CA3AF;
+    --border-color: #2a2a2a;
+    --accent-color: #515BD4;
+    /* 响应式相关变量 */
+    --spacing-xs: 0.5rem;
+    --spacing-sm: 0.75rem;
+    --spacing-md: 1rem;
+    --spacing-lg: 1.5rem;
+    --spacing-xl: 2rem;
+    --font-size-time: 3rem;
+    --font-size-label: 0.875rem;
+    --touch-target-min: 44px;
+  }
+
+  @media (max-width: 480px) {
+    :root {
+      --spacing-xs: 0.25rem;
+      --spacing-sm: 0.5rem;
+      --spacing-md: 0.75rem;
+      --spacing-lg: 1rem;
+      --spacing-xl: 1.5rem;
+      --font-size-time: 2rem;
+      --font-size-label: 0.75rem;
+    }
+  }
+
+  @media (min-width: 768px) {
+    :root {
+      --spacing-xs: 0.75rem;
+      --spacing-sm: 1rem;
+      --spacing-md: 1.5rem;
+      --spacing-lg: 2rem;
+      --spacing-xl: 2.5rem;
+      --font-size-time: 5rem;
+      --font-size-label: 1rem;
+    }
+  }
+
+  html.light-mode {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f5f5;
+    --bg-tertiary: #eeeeee;
+    --text-primary: #000000;
+    --text-secondary: #666666;
+    --border-color: #e0e0e0;
+    --accent-color: #007AFF;
+  }
+
+  html {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background-color 0.3s, color 0.3s;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+      Helvetica, Arial, "Microsoft YaHei", "微软雅黑", sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    /* 移动端触摸优化 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-user-select: none;
+    user-select: none;
+    /* 防止双击缩放 */
+    -webkit-touch-callout: none;
+  }
+
+  /* 触摸友好的最小点击区域 */
+  button, input[type="button"], input[type="checkbox"], input[type="radio"] {
+    min-height: var(--touch-target-min);
+    min-width: var(--touch-target-min);
+  }
+
+  /* 防止输入框自动缩放 */
+  input, select, textarea {
+    font-size: 16px;
+  }
+
+  /* 禁用默认点击反馈 */
+  a, button {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-4 sm:px-6 py-2 sm:py-3 rounded-xl font-medium text-sm sm:text-sm cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 border-none;
+    background-color: var(--accent-color);
+    color: #ffffff;
+    min-height: var(--touch-target-min);
+  }
+
+  .btn-primary:hover {
+    opacity: 0.85;
+    transform: translateY(-2px) scale(1.02);
+  }
+
+  .btn-primary:active {
+    opacity: 0.7;
+    transform: translateY(0) scale(0.98);
+  }
+
+  .btn-secondary {
+    @apply px-4 sm:px-6 py-2 sm:py-3 rounded-xl font-medium text-sm sm:text-sm cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 border;
+    background-color: transparent;
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+    min-height: var(--touch-target-min);
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    border-color: var(--accent-color);
+    transform: scale(1.02);
+  }
+
+  .btn-secondary:active {
+    background-color: var(--bg-tertiary);
+    transform: scale(0.98);
+  }
+
+  /* 响应式容器 */
+  .container-responsive {
+    @apply px-4 sm:px-6 md:px-8;
+  }
+
+  /* 响应式网格 */
+  .grid-responsive {
+    @apply grid gap-3 sm:gap-4 md:gap-6;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+
+  /* 触摸友好的表单元素 */
+  .form-input, .form-select, .form-textarea {
+    @apply min-h-[44px] px-3 sm:px-4 py-2 sm:py-3;
+    font-size: 16px;
+  }
+}
+
+/* 响应式媒体查询优化 */
+@media (max-width: 480px) {
+  @layer components {
+    .text-responsive-lg {
+      @apply text-2xl sm:text-3xl;
+    }
+
+    .text-responsive-title {
+      @apply text-lg sm:text-xl;
+    }
+
+    .text-responsive-body {
+      @apply text-sm sm:text-base;
+    }
+  }
+}
+
+@media (min-width: 768px) {
+  @layer components {
+    .text-responsive-lg {
+      @apply text-5xl lg:text-7xl;
+    }
+
+    .text-responsive-title {
+      @apply text-2xl lg:text-3xl;
+    }
+
+    .text-responsive-body {
+      @apply text-base lg:text-lg;
+    }
+  }
+}
+
+/* 隐藏滚动条但保留功能（跨浏览器） */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* 自定义滚动条样式（可选） */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-secondary);
+}
+
+/* 移动端触摸友好的链接 */
+@media (hover: none) and (pointer: coarse) {
+  button, a, input[type="button"], input[type="checkbox"], input[type="radio"] {
+    padding: 0.5rem;
+  }
+
+  /* 增加点击反馈延迟 */
+  button, a {
+    transition-duration: 100ms;
+  }
+}
+

@@ -1,13 +1,19 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import preact from '@preact/preset-vite' // 使用 preact 插件
+import { viteSingleFile } from 'vite-plugin-singlefile'
+import tailwindcss from '@tailwindcss/vite'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    react({
-      babel: {
-        plugins: [['babel-plugin-react-compiler']],
-      },
-    }),
+    tailwindcss(),
+    preact(), // 代替 react()
+    viteSingleFile(),
   ],
+  resolve: {
+    alias: {
+      'react': 'preact/compat',
+      'react-dom': 'preact/compat',
+      'react/jsx-runtime': 'preact/jsx-runtime',
+    },
+  },
 })

@@ -1,5 +1,12 @@
-import type { FunctionalComponent } from "preact";
-import { useEffect, useState, useRef } from "preact/hooks";
+// import { h } from "preact"; // preact 自动注入，无需显式导入
+import {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+} from "preact/hooks";
+import { memo } from "preact/compat";
 import { logInfo, logSuccess, logError } from "./utils/logger";
 import { Mode } from "./utils/share";
 import { t } from "./utils/i18n";
@@ -28,28 +35,27 @@ const formatTime = (totalSeconds: number): string => {
   return `${hours}:${minutes}:${seconds}`;
 };
 
-export const HomePage: FunctionalComponent<HomePageProps> = ({
-  onSettingsClick,
-}) => {
-  const [time, setTime] = useState("25:00:00");
-  const [mode, setMode] = useState<Mode>(Mode.Countdown);
-  const [isRunning, setIsRunning] = useState(false);
-  const [inRest, setInRest] = useState(false);
-  const [loopRemaining, setLoopRemaining] = useState<number | null>(null);
-  const [loopTotal, setLoopTotal] = useState<number | null>(null);
-  const [restRemaining, setRestRemaining] = useState<number>(0);
+const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
+  // 合并所有状态为一个对象，减少多次 setState
+  const [state, setState] = useState(() => ({
+    time: "25:00:00",
+    mode: Mode.Countdown,
+    isRunning: false,
+    inRest: false,
+    loopRemaining: null as number | null,
+    loopTotal: null as number | null,
+    restRemaining: 0,
+    isFinished: false,
+  }));
   const prevFinishedRef = useRef(false);
 
   useEffect(() => {
     logSuccess("✅ React 应用已加载，准备就绪");
-
-    // 检查 webui 对象是否存在
     if (typeof window.webui !== "undefined") {
       logSuccess("✅ webui 对象已加载");
     } else {
       logError("❌ webui 对象未加载！这可能是一个问题");
     }
-
     // 监听系统主题变化（自动模式）
     const mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
     const handleThemeChange = (e: MediaQueryListEvent) => {
@@ -59,39 +65,23 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
     mediaQuery.addEventListener("change", handleThemeChange);
 
     // 设置全局事件处理函数
-    (
-      window as Window & {
-        webuiEvent?: (event: {
-          function: string;
-          data:
-            | number
-            | string
-            | {
-                isRunning: boolean;
-                isFinished: boolean;
-                inRest: boolean;
-                loopRemaining?: number;
-                loopTotal?: number;
-                restRemaining?: number;
-              };
-        }) => void;
-        updateSettingsDisplay?: (settingsJson: string) => void;
-      }
-    ).webuiEvent = (event) => {
+    (window as any).webuiEvent = (event: any) => {
       logInfo("收到来自后端的事件: " + event.function);
-
       if (event.function === "update_time") {
-        // 后端发送秒数（数字），前端格式化为 HH:MM:SS
+        // 只在 time 变化时 setState
         const seconds = typeof event.data === "number" ? event.data : 0;
         const formatted = formatTime(seconds);
-        setTime(formatted);
+        setState((prev) =>
+          prev.time === formatted ? prev : { ...prev, time: formatted },
+        );
         logInfo("⏱️ 时间已更新: " + seconds + "秒 -> " + formatted);
       } else if (event.function === "update_mode") {
-        setMode(event.data as Mode);
+        setState((prev) =>
+          prev.mode === event.data ? prev : { ...prev, mode: event.data },
+        );
         logInfo("🔄 模式已更新: " + event.data);
       } else if (event.function === "update_state") {
-        // 处理状态更新（运行中、已完成、休息中等）
-        const state = event.data as {
+        const s = event.data as {
           isRunning: boolean;
           isFinished: boolean;
           inRest: boolean;
@@ -99,16 +89,30 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
           loopTotal?: number;
           restRemaining?: number;
         };
-
-        setIsRunning(state.isRunning);
-        setInRest(state.inRest);
-        setLoopRemaining(state.loopRemaining ?? null);
-        setLoopTotal(state.loopTotal ?? null);
-        setRestRemaining(state.restRemaining ?? 0);
-
+        setState((prev) => {
+          // 只有有变化时才 setState，避免无谓重渲染
+          if (
+            prev.isRunning === s.isRunning &&
+            prev.inRest === s.inRest &&
+            prev.loopRemaining === (s.loopRemaining ?? null) &&
+            prev.loopTotal === (s.loopTotal ?? null) &&
+            prev.restRemaining === (s.restRemaining ?? 0) &&
+            prev.isFinished === s.isFinished
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            isRunning: s.isRunning,
+            inRest: s.inRest,
+            loopRemaining: s.loopRemaining ?? null,
+            loopTotal: s.loopTotal ?? null,
+            restRemaining: s.restRemaining ?? 0,
+            isFinished: s.isFinished,
+          };
+        });
         // 完成通知（仅在从未完成到完成时触发一次）
-        if (state.isFinished && !prevFinishedRef.current) {
-          // 播放提示音
+        if (s.isFinished && !prevFinishedRef.current) {
           try {
             const AudioCtx =
               (window as any).AudioContext ||
@@ -128,11 +132,9 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
                 ctx.close();
               }, 300);
             }
-          } catch (e) {
-            // ignore audio errors
+          } catch (_e) {
+            // 忽略音频相关错误
           }
-
-          // 浏览器通知
           try {
             if ("Notification" in window) {
               if (Notification.permission === "granted") {
@@ -144,22 +146,21 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
                 });
               }
             }
-          } catch (e) {}
+          } catch (_e) {
+            // 忽略通知相关错误
+          }
         }
-
-        prevFinishedRef.current = state.isFinished;
-
-        logInfo("📊 状态已更新: " + JSON.stringify(state));
+        prevFinishedRef.current = s.isFinished;
+        logInfo("📊 状态已更新: " + JSON.stringify(s));
       }
     };
-
     logInfo("初始化完成，等待用户交互...");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 应用主题
-  const applyTheme = (theme: string) => {
+  const applyTheme = useCallback((theme: string) => {
     const html = document.documentElement;
-
     if (theme === "light") {
       html.classList.add("light-mode");
       document.body.classList.add("light-mode");
@@ -167,43 +168,45 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
       html.classList.remove("light-mode");
       document.body.classList.remove("light-mode");
     }
-  };
+  }, []);
 
-  const handleStart = () => {
+  // 控制按钮事件全部用 useCallback 包裹，避免不必要的重渲染
+  const handleStart = useCallback(() => {
     logInfo('🚀 "开始"按钮被点击');
     try {
       if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！");
+        logError("❌ webui 对象未定义！后端连接失败");
         return;
       }
       logInfo("✓ webui 对象存在，准备调用 start 函数");
       window.webui.call("start");
-      setIsRunning(true);
+      // 只由后端事件驱动 isRunning 状态
       logSuccess('✓ webui.call("start") 调用成功');
     } catch (e) {
-      logError("❌ 调用 start 时发生错误: " + (e as Error).message);
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError("❌ 调用 start 时发生错误: " + errorMsg);
       console.error(e);
     }
-  };
+  }, []);
 
-  const handlePause = () => {
+  const handlePause = useCallback(() => {
     logInfo('⏸️ "暂停"按钮被点击');
     try {
       if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！");
+        logError("❌ webui 对象未定义！后端连接失败");
         return;
       }
       logInfo("✓ webui 对象存在，准备调用 pause 函数");
       window.webui.call("pause");
-      setIsRunning(false);
       logSuccess('✓ webui.call("pause") 调用成功');
     } catch (e) {
-      logError("❌ 调用 pause 时发生错误: " + (e as Error).message);
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError("❌ 调用 pause 时发生错误: " + errorMsg);
       console.error(e);
     }
-  };
+  }, []);
 
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
     logInfo('🔄 "重置"按钮被点击');
     try {
       if (typeof window.webui === "undefined") {
@@ -212,16 +215,15 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
       }
       logInfo("✓ webui 对象存在，准备调用 reset 函数");
       window.webui.call("reset");
-      setIsRunning(false);
       logSuccess('✓ webui.call("reset") 调用成功');
     } catch (e) {
-      logError("❌ 调用 reset 时发生错误: " + (e as Error).message);
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError("❌ 调用 reset 时发生错误: " + errorMsg);
       console.error(e);
     }
-  };
+  }, []);
 
-  //切换模式
-  const handleModeChange = (newMode: Mode) => {
+  const handleModeChange = useCallback((newMode: Mode) => {
     try {
       if (typeof window.webui === "undefined") {
         logError("❌ webui 对象未定义！");
@@ -231,10 +233,34 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
       window.webui.call("change_mode", newMode);
       logSuccess('✓ webui.call("change_mode") 调用成功');
     } catch (e) {
-      logError("❌ 调用 change_mode 时发生错误: " + (e as Error).message);
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError("❌ 调用 change_mode 时发生错误: " + errorMsg);
       console.error(e);
     }
-  };
+  }, []);
+
+  // 计算 memo 化的状态，避免不必要的渲染
+  const statusMemo = useMemo(() => {
+    return {
+      isRunning: state.isRunning,
+      isFinished: state.isFinished,
+      inRest: state.inRest,
+      loopRemaining: state.loopRemaining,
+      loopTotal: state.loopTotal,
+      restRemaining: state.restRemaining,
+      mode: state.mode,
+      time: state.time,
+    };
+  }, [
+    state.isRunning,
+    state.isFinished,
+    state.inRest,
+    state.loopRemaining,
+    state.loopTotal,
+    state.restRemaining,
+    state.mode,
+    state.time,
+  ]);
 
   return (
     <div className="flex flex-col w-screen h-screen bg-primary-dark dark:bg-primary-dark transition-colors duration-300 animate-fadeIn overflow-hidden">
@@ -261,14 +287,14 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
         >
           <span
             className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium transition-all duration-200 whitespace-nowrap ${
-              isRunning
+              statusMemo.isRunning
                 ? "bg-accent-dark text-white border border-accent-dark animate-pulse"
                 : prevFinishedRef.current
                   ? "bg-green-600 text-white border border-green-600"
                   : "bg-secondary-dark text-text-secondary-dark border border-border-dark"
             }`}
           >
-            {isRunning
+            {statusMemo.isRunning
               ? t("home.status_running")
               : prevFinishedRef.current
                 ? "✅ 已完成"
@@ -276,8 +302,10 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
           </span>
           <span className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium bg-accent-dark text-white border border-accent-dark whitespace-nowrap">
             {(() => {
-              if (mode === Mode.Countdown) return t("home.mode_countdown");
-              if (mode === Mode.Stopwatch) return t("home.mode_stopwatch");
+              if (statusMemo.mode === Mode.Countdown)
+                return t("home.mode_countdown");
+              if (statusMemo.mode === Mode.Stopwatch)
+                return t("home.mode_stopwatch");
               return t("home.mode_world_clock");
             })()}
           </span>
@@ -286,33 +314,35 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
         {/* 时间显示 */}
         <div
           className={`text-4xl sm:text-6xl md:text-8xl font-light tracking-wider text-text-primary-dark font-mono my-4 sm:my-6 md:my-6 text-center transition-all duration-300 animate-slideUp break-all ${
-            isRunning ? "text-accent-dark" : ""
+            statusMemo.isRunning ? "text-accent-dark" : ""
           }`}
           style={{ animationDelay: "0.2s", animationFillMode: "both" }}
         >
-          {time}
+          {statusMemo.time}
         </div>
 
         {/* 循环和休息状态提示 */}
-        {(inRest ||
-          (loopRemaining !== null && loopTotal !== null && loopTotal > 0)) && (
+        {(statusMemo.inRest ||
+          (statusMemo.loopRemaining !== null &&
+            statusMemo.loopTotal !== null &&
+            statusMemo.loopTotal > 0)) && (
           <div
             className="text-center mb-3 sm:mb-4 text-xs sm:text-sm text-text-secondary-dark animate-slideUp w-full px-2"
             style={{ animationDelay: "0.25s", animationFillMode: "both" }}
           >
-            {inRest && (
+            {statusMemo.inRest && (
               <div className="text-accent-dark font-semibold">
-                {t("home.rest_status", { seconds: restRemaining })}
+                {t("home.rest_status", { seconds: statusMemo.restRemaining })}
               </div>
             )}
-            {loopRemaining !== null &&
-              loopTotal !== null &&
-              loopTotal > 0 &&
-              !inRest && (
+            {statusMemo.loopRemaining !== null &&
+              statusMemo.loopTotal !== null &&
+              statusMemo.loopTotal > 0 &&
+              !statusMemo.inRest && (
                 <div className="text-accent-dark font-semibold">
                   {t("home.loop_status", {
-                    remaining: loopRemaining,
-                    total: loopTotal,
+                    remaining: statusMemo.loopRemaining,
+                    total: statusMemo.loopTotal,
                   })}
                 </div>
               )}
@@ -324,7 +354,7 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
           className="flex gap-2 sm:gap-3 md:gap-4 my-4 sm:my-6 md:my-8 justify-center flex-wrap animate-slideUp w-full"
           style={{ animationDelay: "0.3s", animationFillMode: "both" }}
         >
-          {!isRunning ? (
+          {!statusMemo.isRunning ? (
             <button
               onClick={handleStart}
               className="btn-primary flex-1 sm:flex-none sm:w-32 md:w-40 flex items-center justify-center gap-1 sm:gap-2 text-sm sm:text-base"
@@ -378,12 +408,9 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
             ].map(({ key, label, icon }) => (
               <button
                 key={key}
-                onClick={() => {
-                  handleModeChange(key);
-                  setMode(key);
-                }}
+                onClick={() => handleModeChange(key)}
                 className={`p-2 sm:p-3 md:p-4 rounded-xl flex flex-col items-center gap-1 sm:gap-2 text-xs sm:text-sm font-medium transition-all duration-200 hover:scale-105 active:scale-95 min-h-[60px] sm:min-h-[80px] ${
-                  mode === key
+                  statusMemo.mode === key
                     ? "bg-accent-dark border-accent-dark text-white"
                     : "bg-transparent border border-border-dark text-text-secondary-dark hover:bg-secondary-dark hover:border-accent-dark hover:text-text-primary-dark"
                 }`}
@@ -405,4 +432,6 @@ export const HomePage: FunctionalComponent<HomePageProps> = ({
       </div>
     </div>
   );
-};
+});
+
+export { HomePage };

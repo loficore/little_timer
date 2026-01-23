@@ -107,6 +107,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         // 设置超时：如果 2 秒内未收到回调，使用默认配置
         const timeoutId = setTimeout(() => {
           console.warn("⚠️ 加载设置超时，使用默认配置");
+          setSaveMessage(t("errors.offline.message"));
           resolve();
         }, 2000);
 

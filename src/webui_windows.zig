@@ -1,18 +1,40 @@
 const std = @import("std");
 const interface = @import("interface.zig");
+const logger = @import("logger.zig");
 const Thread = std.Thread;
 
 // 根据是否使用WebUI导入不同的模块
 const webui_module = @import("webui");
 
+// 全局 App 实例指针，用于回调函数访问
+var global_app: ?*anyopaque = null;
+
+/// 设置全局 App 指针
+pub fn setGlobalApp(app: ?*anyopaque) void {
+    global_app = app;
+}
+
 // Tick函数类型定义
 const TickFn = *const fn (ctx: ?*anyopaque, delta_ms: i64) void;
 
-const UserEventT = interface.ClockEvent;
+const UserEventT = interface.EventType;
 
 const ExternParam = struct {
     ctx: ?*anyopaque,
     tick_handler: TickFn,
+};
+
+const ModeEnumT = interface.ModeEnumT;
+
+const DisplaySnapshot = struct {
+    seconds: i64,
+    mode: ModeEnumT,
+    is_running: bool,
+    is_finished: bool,
+    in_rest: bool,
+    loop_remaining: u32,
+    loop_total: u32,
+    rest_remaining: i64,
 };
 
 const Constants = struct {
@@ -30,25 +52,28 @@ pub const WebUIManager = struct {
     window: webui_module,
 
     // 事件回调函数指针 - 用于将用户事件传递给应用程序
-    on_user_event: ?*const fn (UserEventT) void,
+    on_user_event: ?*const fn (interface.EventType) void,
 
     // 外部参数 - 保存应用程序上下文和tick处理器
     extern_param: ExternParam,
 
-    // 窗口是否已初始化
-    is_initialized: bool = false,
+    // 内存分配器 - 用于html_content的释放
+    allocator: std.mem.Allocator,
 
-    // 缓存的上一次显示的时间（秒），用于避免重复更新
-    last_displayed_seconds: i64 = -1,
+    // HTML内容缓冲 - 用于deinit时释放
+    html_content: ?[]u8 = null,
 
-    // 缓存的上一次显示的模式
-    last_displayed_mode: interface.ModeEnumT = .COUNTDOWN_MODE,
+    // 显示快照缓存 - 避免重复更新
+    snap_shot: DisplaySnapshot,
 
     // 线程控制 - 用于停止 tick 线程
     is_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     // Tick线程句柄 - 用于管理线程生命周期
     tick_thread: ?std.Thread = null,
+
+    // Tick 间隔（毫秒），默认 1000ms (1秒) - 可在运行时动态配置
+    tick_interval_ms: i64 = 1000,
 
     /// 初始化WebUI窗口管理器
     ///
@@ -59,80 +84,89 @@ pub const WebUIManager = struct {
     ///
     /// 返回:
     /// - !void: 如果初始化失败则返回错误
-    pub fn init(self: *WebUIManager, on_user_event_param: ?*const fn (UserEventT) void, extern_param: ExternParam) !void {
+    pub fn init(self: *WebUIManager, on_user_event_param: ?*const fn (UserEventT) void, extern_param: ExternParam, allocator: std.mem.Allocator) !void {
         self.window = webui_module.newWindow();
         self.on_user_event = on_user_event_param;
         self.extern_param = extern_param;
+        self.allocator = allocator;
 
         // 在运行时读取 HTML 文件内容
         // 尝试多个可能的路径
         const possible_paths = [_][]const u8{
-            "assets/index.html", // 从项目根目录运行
-            "../assets/index.html", // 从 zig-out/bin 运行
+            "assets/dist/index.html", // 从项目根目录运行
         };
 
         var html_content_raw: []u8 = undefined;
         var html_found = false;
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        const allocator = gpa.allocator();
 
         for (possible_paths) |path| {
-            html_content_raw = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| {
-                std.debug.print("无法从 {s} 读取: {any}\n", .{ path, err });
+            html_content_raw = std.fs.cwd().readFileAlloc(self.allocator, path, 1024 * 1024) catch |err| {
+                logger.global_logger.warn("无法从 {s} 读取: {any}", .{ path, err });
                 continue;
             };
-            std.debug.print("✓ 从 {s} 读取 HTML ({} 字节)\n", .{ path, html_content_raw.len });
+            logger.global_logger.info("✓ 从 {s} 读取 HTML ({} 字节)", .{ path, html_content_raw.len });
             html_found = true;
             break;
         }
 
         if (!html_found) {
-            std.debug.print("错误: 无法找到 HTML 文件\n", .{});
+            logger.global_logger.err("错误: 无法找到 HTML 文件", .{});
             return error.HTMLFileNotFound;
         }
 
         // 将内容转换为 null 终止的字符串，show() 方法需要这个类型
-        const html_content = try allocator.dupeZ(u8, html_content_raw);
-        defer allocator.free(html_content_raw); // 释放原始内容
+        const html_content_zdup = try self.allocator.dupeZ(u8, html_content_raw);
+        defer self.allocator.free(html_content_raw); // 释放原始内容
+        self.html_content = html_content_zdup; // 保存指针供deinit释放
 
         // 使用 show() 方法显示 HTML 内容
         // 这会自动启动服务器并提供 /webui.js
-        self.window.show(html_content) catch |err| {
-            std.debug.print("show() 失败: {any}\n", .{err});
-            std.debug.print("注意: show() 方法在某些环境下可能不可用\n", .{});
-            std.debug.print("但服务器应该已经启动，请尝试访问下面的地址\n", .{});
+        self.window.show(html_content_zdup) catch |err| {
+            logger.global_logger.warn("show() 失败: {any}", .{err});
+            logger.global_logger.warn("注意: show() 方法在某些环境下可能不可用", .{});
+            logger.global_logger.warn("但服务器应该已经启动，请尝试访问下面的地址", .{});
         };
 
         // 获取服务器信息
         const port = self.window.getPort() catch |err| blk: {
-            std.debug.print("警告: 获取端口失败: {any}\n", .{err});
+            logger.global_logger.warn("获取端口失败: {any}", .{err});
             break :blk 0;
         };
 
         // getUrl() 可能返回错误，需要特殊处理
         const url_str = self.window.getUrl() catch |err| blk: {
-            std.debug.print("警告: 获取URL失败: {any}\n", .{err});
+            logger.global_logger.warn("获取URL失败: {any}", .{err});
             break :blk "unknown";
         };
 
-        std.debug.print("\n" ++
-            "========================================\n" ++
-            "WebUI 服务器已启动！\n" ++
-            "========================================\n" ++
-            "访问地址: http://localhost:{d}\n" ++
-            "完整URL: {s}\n" ++
-            "========================================\n" ++
-            "请在浏览器中打开上面的地址\n" ++
-            "按 Ctrl+C 停止服务器\n" ++
-            "========================================\n\n", .{ port, url_str });
+        logger.global_logger.info("", .{});
+        logger.global_logger.info("========================================", .{});
+        logger.global_logger.info("WebUI 服务器已启动！", .{});
+        logger.global_logger.info("========================================", .{});
+        logger.global_logger.info("访问地址: http://localhost:{d}", .{port});
+        logger.global_logger.info("完整URL: {s}", .{url_str});
+        logger.global_logger.info("========================================", .{});
+        logger.global_logger.info("请在浏览器中打开上面的地址", .{});
+        logger.global_logger.info("按 Ctrl+C 停止服务器", .{});
+        logger.global_logger.info("========================================", .{});
+        logger.global_logger.info("", .{});
 
         // 设置JavaScript回调函数，用于处理来自UI的事件
         self.setupEventHandlers();
 
-        // 标记为已初始化
-        self.is_initialized = true;
+        // 初始化显示快照（用于被动更新检测）
+        self.snap_shot = DisplaySnapshot{
+            .seconds = 0,
+            .mode = .COUNTDOWN_MODE,
+            .is_running = false,
+            .is_finished = false,
+            .in_rest = false,
+            .loop_remaining = 0,
+            .loop_total = 0,
+            .rest_remaining = 0,
+        };
 
-        std.debug.print("WebUI窗口管理器初始化完成\n", .{});
+        logger.global_logger.info("WebUI窗口管理器初始化完成", .{});
     }
 
     /// 获取HTML内容
@@ -153,7 +187,7 @@ pub const WebUIManager = struct {
         const html_content = std.fs.cwd().readFileAlloc(allocator, "assets/index.html", 1024 * 1024) catch {
             // 如果相对路径失败，尝试从当前工作目录的父目录读取
             return std.fs.cwd().readFileAlloc(allocator, "../assets/index.html", 1024 * 1024) catch |err| {
-                std.debug.print("无法读取HTML文件: {any}\n", .{err});
+                logger.global_logger.err("无法读取HTML文件: {any}", .{err});
                 // 如果文件读取失败，返回一个简单的错误页面
                 return allocator.dupe(u8,
                     \\<!DOCTYPE html>
@@ -185,55 +219,83 @@ pub const WebUIManager = struct {
     fn setupEventHandlers(self: *WebUIManager) void {
         // 注册JavaScript函数，用于处理UI事件
         // 这些函数将被HTML中的按钮点击事件调用
-        std.debug.print("开始绑定事件处理器...\n", .{});
+        logger.global_logger.debug("开始绑定事件处理器...", .{});
 
         _ = self.window.bind("start", handleStart) catch |err| {
-            std.debug.print("绑定 start 失败: {any}\n", .{err});
+            logger.global_logger.warn("绑定 start 失败: {any}", .{err});
             return;
         };
-        std.debug.print("✓ start 绑定成功\n", .{});
+        logger.global_logger.debug("✓ start 绑定成功", .{});
 
         _ = self.window.bind("pause", handlePause) catch |err| {
-            std.debug.print("绑定 pause 失败: {any}\n", .{err});
+            logger.global_logger.warn("绑定 pause 失败: {any}", .{err});
             return;
         };
-        std.debug.print("✓ pause 绑定成功\n", .{});
+        logger.global_logger.debug("✓ pause 绑定成功", .{});
 
         _ = self.window.bind("reset", handleReset) catch |err| {
-            std.debug.print("绑定 reset 失败: {any}\n", .{err});
+            logger.global_logger.warn("绑定 reset 失败: {any}", .{err});
             return;
         };
-        std.debug.print("✓ reset 绑定成功\n", .{});
+        logger.global_logger.debug("✓ reset 绑定成功", .{});
 
         _ = self.window.bind("tick", handleTick) catch |err| {
-            std.debug.print("绑定 tick 失败: {any}\n", .{err});
+            logger.global_logger.warn("绑定 tick 失败: {any}", .{err});
             return;
         };
-        std.debug.print("✓ tick 绑定成功\n", .{});
+        logger.global_logger.debug("✓ tick 绑定成功", .{});
 
         _ = self.window.bind("mode_change", handleModeChange) catch |err| {
-            std.debug.print("绑定 mode_change 失败: {any}\n", .{err});
+            logger.global_logger.warn("绑定 mode_change 失败: {any}", .{err});
             return;
         };
-        std.debug.print("✓ mode_change 绑定成功\n", .{});
+        logger.global_logger.debug("✓ mode_change 绑定成功", .{});
+
+        // 为兼容前端，同时绑定 change_mode
+        _ = self.window.bind("change_mode", handleModeChange) catch |err| {
+            logger.global_logger.warn("绑定 change_mode 失败: {any}", .{err});
+            return;
+        };
+        logger.global_logger.debug("✓ change_mode 绑定成功", .{});
+
+        _ = self.window.bind("get_settings", handleGetSettings) catch |err| {
+            logger.global_logger.warn("绑定 get_settings 失败: {any}", .{err});
+            return;
+        };
+        logger.global_logger.debug("✓ get_settings 绑定成功", .{});
+
+        _ = self.window.bind("change_settings", handleChangeSettings) catch |err| {
+            logger.global_logger.warn("绑定 change_settings 失败: {any}", .{err});
+            return;
+        };
+        logger.global_logger.debug("✓ change_settings 绑定成功", .{});
 
         // 为每个绑定设置上下文，这样回调函数可以访问WebUIManager实例
         self.window.setContext("start", self);
-        std.debug.print("✓ start 上下文设置成功\n", .{});
+        logger.global_logger.debug("✓ start 上下文设置成功", .{});
 
         self.window.setContext("pause", self);
-        std.debug.print("✓ pause 上下文设置成功\n", .{});
+        logger.global_logger.debug("✓ pause 上下文设置成功", .{});
 
         self.window.setContext("reset", self);
-        std.debug.print("✓ reset 上下文设置成功\n", .{});
+        logger.global_logger.debug("✓ reset 上下文设置成功", .{});
 
         self.window.setContext("tick", self);
-        std.debug.print("✓ tick 上下文设置成功\n", .{});
+        logger.global_logger.debug("✓ tick 上下文设置成功", .{});
 
         self.window.setContext("mode_change", self);
-        std.debug.print("✓ mode_change 上下文设置成功\n", .{});
+        logger.global_logger.debug("✓ mode_change 上下文设置成功", .{});
 
-        std.debug.print("事件绑定已注册\n", .{});
+        self.window.setContext("change_mode", self);
+        logger.global_logger.debug("✓ change_mode 上下文设置成功", .{});
+
+        self.window.setContext("get_settings", self);
+        logger.global_logger.debug("✓ get_settings 上下文设置成功", .{});
+
+        self.window.setContext("change_settings", self);
+        logger.global_logger.debug("✓ change_settings 上下文设置成功", .{});
+
+        logger.global_logger.debug("事件绑定已注册", .{});
     }
 
     /// 更新显示
@@ -241,49 +303,73 @@ pub const WebUIManager = struct {
     /// 参数:
     /// - **self**: WebUIManager实例指针
     /// - **display_data**: 时钟显示数据
-    pub fn updateDisplay(self: *WebUIManager, display_data: *interface.ClockInterface) !void {
-        // 从显示数据中获取剩余时间（秒）
-        const remaining_seconds = display_data.getTimeInfo();
-        const current_mode = display_data.getMode();
-
-        // 只有在时间或模式改变时才更新显示，避免过频繁的JavaScript执行
-        if (remaining_seconds == self.last_displayed_seconds and current_mode == self.last_displayed_mode) {
-            return; // 没有改变，跳过更新
-        }
-
-        // 转换为无符号整数以便正确格式化
-        const abs_seconds = if (remaining_seconds < 0) 0 else @as(u64, @intCast(remaining_seconds));
-
-        // 根据显示数据更新时间字符串
-        const hours = @divTrunc(abs_seconds, 3600);
-        const minutes = @divTrunc(@rem(abs_seconds, 3600), 60);
-        const seconds = @rem(abs_seconds, 60);
-
-        // 格式化为 "HH:MM:SS" 格式
-        // 缓冲区大小：8个字符 + 1个null终止符 = 9字节，留足空间避免溢出
-        var time_string_buffer: [10]u8 = undefined;
-        const time_string = try std.fmt.bufPrint(&time_string_buffer, "{:0>2}:{:0>2}:{:0>2}", .{ hours, minutes, seconds });
-
-        std.debug.print("updateDisplay: 时间 = {s}\n", .{time_string});
-
-        // 通过JavaScript更新UI显示
-        // 使用run()执行JavaScript
-        var js_code_buffer: [256:0]u8 = undefined; //JS代码很短，所以直接用栈缓冲区
-        // 创建JavaScript代码 - 同时更新时间和模式，在一个JS调用中完成
-        const mode_text = switch (current_mode) {
-            .COUNTDOWN_MODE => "倒计时模式",
-            .STOPWATCH_MODE => "正计时模式",
-            .WORLD_CLOCK_MODE => "世界时钟模式",
+    ///
+    /// 返回:
+    /// - !void: 如果更新失败则返回错误
+    pub fn updateDisplay(self: *WebUIManager, display_data: *const @import("clock.zig").ClockState) !void {
+        // 1. 构造当前快照（包含所有显示相关状态）
+        const current_snapshot = DisplaySnapshot{
+            .seconds = display_data.getTimeInfo(),
+            .mode = display_data.getMode(),
+            .is_running = !display_data.isPaused(),
+            .is_finished = display_data.isFinished(),
+            .in_rest = display_data.inRest(),
+            .loop_remaining = display_data.getLoopRemaining(),
+            .loop_total = display_data.getLoopTotal(),
+            .rest_remaining = display_data.getRestRemainingTime(),
         };
 
-        const js_code_content = try std.fmt.bufPrintZ(&js_code_buffer, "document.getElementById('time').textContent='{s}';document.getElementById('mode').textContent='{s}';", .{ time_string, mode_text });
+        // 2. 被动更新：仅在状态改变时才执行 JS（而非无条件推送）
+        if (std.mem.eql(u8, std.mem.asBytes(&self.snap_shot), std.mem.asBytes(&current_snapshot))) {
+            // 状态未变化，无需推送任何 JS
+            return;
+        }
 
-        std.debug.print("  执行 JS: {s}\n", .{js_code_content});
-        // 使用run()执行JavaScript
-        self.window.run(js_code_content);
-        // 更新缓存的显示值
-        self.last_displayed_seconds = remaining_seconds;
-        self.last_displayed_mode = current_mode;
+        logger.global_logger.debug("显示状态已改变，准备推送更新", .{});
+
+        // 3. 状态已改变，构造并执行 JavaScript 更新
+        var js_code_buffer: [512:0]u8 = undefined;
+
+        // 模式键（使用稳定的后端键，前端负责本地化）
+        const mode_key = switch (current_snapshot.mode) {
+            .COUNTDOWN_MODE => "countdown",
+            .STOPWATCH_MODE => "stopwatch",
+            .WORLD_CLOCK_MODE => "world_clock",
+        };
+
+        // 发送时间更新事件（从快照取值）
+        const time_event_js = try std.fmt.bufPrintZ(
+            &js_code_buffer,
+            "if(window.webuiEvent){{window.webuiEvent({{function:'update_time',data:{}}});}}",
+            .{current_snapshot.seconds},
+        );
+        self.window.run(time_event_js);
+
+        // 发送模式更新事件
+        const mode_event_js = try std.fmt.bufPrintZ(
+            &js_code_buffer,
+            "if(window.webuiEvent){{window.webuiEvent({{function:'update_mode',data:'{s}'}});}}",
+            .{mode_key},
+        );
+        self.window.run(mode_event_js);
+
+        // 发送完整状态更新事件（从快照取所有字段）
+        const state_event_js = try std.fmt.bufPrintZ(
+            &js_code_buffer,
+            "if(window.webuiEvent){{window.webuiEvent({{function:'update_state',data:{{isRunning:{},isFinished:{},inRest:{},loopRemaining:{},loopTotal:{},restRemaining:{}}}}});}}",
+            .{
+                current_snapshot.is_running,
+                current_snapshot.is_finished,
+                current_snapshot.in_rest,
+                current_snapshot.loop_remaining,
+                current_snapshot.loop_total,
+                current_snapshot.rest_remaining,
+            },
+        );
+        self.window.run(state_event_js);
+
+        // 4. 缓存当前快照，作为下次比较的基准
+        self.snap_shot = current_snapshot;
     }
 
     /// 处理用户事件
@@ -291,13 +377,13 @@ pub const WebUIManager = struct {
     /// 参数:
     /// - **self**: WebUIManager实例指针
     /// - **event**: 用户事件
-    fn handleUserEvent(self: *WebUIManager, event: UserEventT) void {
-        std.debug.print("WebUIManager.handleUserEvent 被调用，on_user_event 是否为 null: {}\n", .{self.on_user_event == null});
+    fn handleUserEvent(self: *WebUIManager, event: interface.EventType) void {
+        logger.global_logger.debug("WebUIManager.handleUserEvent 被调用，on_user_event 是否为 null: {}", .{self.on_user_event == null});
         if (self.on_user_event) |handler| {
-            std.debug.print("  调用用户事件处理器\n", .{});
+            logger.global_logger.debug("  调用用户事件处理器", .{});
             handler(event);
         } else {
-            std.debug.print("警告: 未设置用户事件处理器\n", .{});
+            logger.global_logger.warn("未设置用户事件处理器", .{});
         }
     }
 
@@ -307,10 +393,11 @@ pub const WebUIManager = struct {
     /// - **manager_ptr**: WebUIManager实例指针（作为*anyopaque传入）
     fn tickThreadFn(manager_ptr: *anyopaque) void {
         const self = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
-        const tick_interval_ms = 500; // 500ms 调用一次 tick
-        const sleep_duration = std.time.ns_per_ms * tick_interval_ms;
+        // 使用可配置的 tick 间隔（从 WebUIManager 中读取，默认 1000ms）
+        const tick_interval_ms = self.tick_interval_ms;
+        const sleep_duration: u64 = @intCast(std.time.ns_per_ms * tick_interval_ms);
 
-        std.debug.print("Tick线程已启动，每 {}ms 触发一次 tick\n", .{tick_interval_ms});
+        logger.global_logger.info("Tick线程已启动，每 {}ms 触发一次 tick", .{tick_interval_ms});
 
         while (self.is_running.load(.acquire)) {
             // 调用 tick 处理器
@@ -320,7 +407,7 @@ pub const WebUIManager = struct {
             Thread.sleep(sleep_duration);
         }
 
-        std.debug.print("Tick线程已退出\n", .{});
+        logger.global_logger.info("Tick线程已退出", .{});
     }
 
     /// 运行应用程序主循环
@@ -333,12 +420,8 @@ pub const WebUIManager = struct {
     ///
     /// 该函数启动WebUI主循环和Tick线程，会阻塞直到收到中断信号
     pub fn run(self: *WebUIManager) !void {
-        if (!self.is_initialized) {
-            return error.WebUIManagerNotInitialized;
-        }
-
-        std.debug.print("启动WebUI主循环...\n", .{});
-        std.debug.print("服务器正在运行，前端将通过子线程驱动 tick 更新\n", .{});
+        logger.global_logger.info("启动WebUI主循环...", .{});
+        logger.global_logger.info("服务器正在运行，前端将通过子线程驱动 tick 更新", .{});
 
         // 1. 启动 Tick 线程
         self.is_running.store(true, .release);
@@ -347,15 +430,15 @@ pub const WebUIManager = struct {
             tickThreadFn,
             .{self},
         );
-        std.debug.print("Tick线程已生成\n", .{});
+        logger.global_logger.info("Tick线程已生成", .{});
 
         // 2. 尝试等待 WebUI 事件
         // 由于 show() 失败，这个函数可能会在十几秒后自动返回
         webui_module.wait();
 
-        std.debug.print("WebUI wait() 已返回 (检测到无活跃窗口)\n", .{});
-        std.debug.print(">>> 进入服务器保活模式 <<<\n", .{});
-        std.debug.print("程序将保持运行，直到你按下 Ctrl+C 强制退出\n", .{});
+        logger.global_logger.info("WebUI wait() 已返回 (检测到无活跃窗口)", .{});
+        logger.global_logger.info(">>> 进入服务器保活模式 <<<", .{});
+        logger.global_logger.info("程序将保持运行，直到你按下 Ctrl+C 强制退出", .{});
 
         // 3. 【核心修复】强制阻塞主线程
         // 只要 tick 线程还在跑（is_running 为 true），join 就会一直卡住，程序就不会退出
@@ -364,21 +447,33 @@ pub const WebUIManager = struct {
             self.tick_thread = null;
         }
 
-        // 下面的代码通常只有在 is_running 被设为 false 后才会执行
-        // 但在这个服务器模式下，通常是用户直接杀掉进程，所以甚至不需要执行到这里
-        webui_module.clean();
-        std.debug.print("主循环结束\n", .{});
+        logger.global_logger.info("主循环结束", .{});
     }
 
     pub fn deinit(self: *WebUIManager) void {
-        // 停止Tick线程
+        logger.global_logger.info("WebUIManager.deinit() 开始清理...", .{});
+
+        // 1. 停止Tick线程
         self.is_running.store(false, .release);
 
-        // 等待线程退出
+        // 2. 等待线程退出
         if (self.tick_thread) |thread| {
             thread.join();
-            std.debug.print("Tick线程已回收\n", .{});
+            logger.global_logger.info("Tick线程已回收", .{});
         }
+
+        // 3. 清理WebUI资源
+        webui_module.clean();
+        logger.global_logger.info("WebUI资源已清理", .{});
+
+        // 4. 释放 html_content
+        if (self.html_content) |content| {
+            self.allocator.free(content);
+            self.html_content = null;
+            logger.global_logger.info("HTML内容缓冲已释放", .{});
+        }
+
+        logger.global_logger.info("WebUIManager.deinit() 完成", .{});
     }
 };
 
@@ -387,17 +482,17 @@ pub const WebUIManager = struct {
 /// 参数:
 /// - **e**: JavaScript事件
 fn handleStart(e: *webui_module.Event) void {
-    std.debug.print("handleStart 被调用\n", .{});
+    logger.global_logger.debug("handleStart 被调用", .{});
     // 从事件中获取上下文（WebUIManager实例）
     const manager_ptr = e.getContext() catch {
-        std.debug.print("无法获取上下文\n", .{});
+        logger.global_logger.warn("无法获取上下文", .{});
         return;
     };
 
     const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
     // 发送用户开始计时事件到应用程序
-    std.debug.print("发送 user_start_timer 事件\n", .{});
-    manager.handleUserEvent(.{ .user_start_timer = {} });
+    logger.global_logger.debug("发送 user_start_timer 事件", .{});
+    manager.handleUserEvent(.{ .clock_event = .{ .user_start_timer = {} } });
 }
 
 /// "暂停"按钮事件处理器
@@ -405,17 +500,17 @@ fn handleStart(e: *webui_module.Event) void {
 /// 参数:
 /// - **e**: JavaScript事件
 fn handlePause(e: *webui_module.Event) void {
-    std.debug.print("handlePause 被调用\n", .{});
+    logger.global_logger.debug("handlePause 被调用", .{});
     // 从事件中获取上下文（WebUIManager实例）
     const manager_ptr = e.getContext() catch {
-        std.debug.print("无法获取上下文\n", .{});
+        logger.global_logger.warn("无法获取上下文", .{});
         return;
     };
 
     const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
     // 发送用户暂停事件到应用程序
-    std.debug.print("发送 user_pause_timer 事件\n", .{});
-    manager.handleUserEvent(.{ .user_pause_timer = {} });
+    logger.global_logger.debug("发送 user_pause_timer 事件", .{});
+    manager.handleUserEvent(.{ .clock_event = .{ .user_pause_timer = {} } });
 }
 
 /// "重置"按钮事件处理器
@@ -423,17 +518,17 @@ fn handlePause(e: *webui_module.Event) void {
 /// 参数:
 /// - **e**: JavaScript事件
 fn handleReset(e: *webui_module.Event) void {
-    std.debug.print("handleReset 被调用\n", .{});
+    logger.global_logger.debug("handleReset 被调用", .{});
     // 从事件中获取上下文（WebUIManager实例）
     const manager_ptr = e.getContext() catch {
-        std.debug.print("无法获取上下文\n", .{});
+        logger.global_logger.warn("无法获取上下文", .{});
         return;
     };
 
     const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
     // 发送用户重置事件到应用程序
-    std.debug.print("发送 user_reset_timer 事件\n", .{});
-    manager.handleUserEvent(.{ .user_reset_timer = {} });
+    logger.global_logger.debug("发送 user_reset_timer 事件", .{});
+    manager.handleUserEvent(.{ .clock_event = .{ .user_reset_timer = {} } });
 }
 
 /// Tick 事件处理器
@@ -443,7 +538,7 @@ fn handleReset(e: *webui_module.Event) void {
 fn handleTick(e: *webui_module.Event) void {
     // 从事件中获取上下文（WebUIManager实例）
     const manager_ptr = e.getContext() catch {
-        std.debug.print("Tick: 无法获取上下文\n", .{});
+        logger.global_logger.warn("Tick: 无法获取上下文", .{});
         return;
     };
 
@@ -459,30 +554,150 @@ fn handleTick(e: *webui_module.Event) void {
 /// 参数:
 /// - **e**: JavaScript事件
 fn handleModeChange(e: *webui_module.Event) void {
-    std.debug.print("handleModeChange 被调用\n", .{});
+    logger.global_logger.debug("handleModeChange 被调用", .{});
     // 从事件中获取上下文（WebUIManager实例）
     const manager_ptr = e.getContext() catch {
-        std.debug.print("无法获取上下文\n", .{});
+        logger.global_logger.warn("无法获取上下文", .{});
         return;
     };
 
-    // 从事件参数中获取模式字符串
+    // 从事件参数中获取模式字符串（前端传递的英文名称）
     const new_mode = e.getString();
-    var mode_enum: interface.ModeEnumT = undefined;
+    logger.global_logger.info("收到模式切换请求: {s}", .{new_mode});
 
-    if (std.mem.eql(u8, new_mode, "倒计时模式")) {
-        mode_enum = .COUNTDOWN_MODE;
-    } else if (std.mem.eql(u8, new_mode, "正计时模式")) {
-        mode_enum = .STOPWATCH_MODE;
-    } else if (std.mem.eql(u8, new_mode, "世界时钟模式")) {
-        mode_enum = .WORLD_CLOCK_MODE;
+    var mode_enum: interface.ModeEnumT = undefined;
+    var new_config: interface.ClockTaskConfig = undefined;
+
+    // 从 global_app 获取设置管理器，以构建默认配置
+    if (global_app) |app_ptr| {
+        const app = @import("app.zig").MainApplication;
+        const main_app = @as(*app, @ptrCast(@alignCast(app_ptr)));
+        const settings = &main_app.settings_manager.config;
+
+        // 根据前端传递的英文模式名称匹配
+        if (std.mem.eql(u8, new_mode, "countdown")) {
+            mode_enum = .COUNTDOWN_MODE;
+            new_config = .{
+                .countdown = .{
+                    .duration_seconds = settings.clock_defaults.countdown.duration_seconds,
+                    .loop = settings.clock_defaults.countdown.loop,
+                    .loop_count = settings.clock_defaults.countdown.loop_count,
+                    .loop_interval_seconds = settings.clock_defaults.countdown.loop_interval_seconds,
+                },
+            };
+        } else if (std.mem.eql(u8, new_mode, "stopwatch")) {
+            mode_enum = .STOPWATCH_MODE;
+            new_config = .{
+                .stopwatch = .{
+                    .max_seconds = settings.clock_defaults.stopwatch.max_seconds,
+                },
+            };
+        } else if (std.mem.eql(u8, new_mode, "world_clock")) {
+            mode_enum = .WORLD_CLOCK_MODE;
+            new_config = .{
+                .world_clock = .{
+                    .timezone = settings.basic.timezone,
+                },
+            };
+        } else {
+            logger.global_logger.warn("未知的模式: {s}", .{new_mode});
+            return;
+        }
+
+        const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
+        // 发送模式切换事件
+        logger.global_logger.debug("发送 user_change_mode 事件: {}", .{mode_enum});
+        manager.handleUserEvent(.{ .clock_event = .{ .user_change_mode = mode_enum } });
+
+        // 发送配置更新事件（真正切换模式）
+        logger.global_logger.debug("发送 user_change_config 事件", .{});
+        manager.handleUserEvent(.{ .clock_event = .{ .user_change_config = new_config } });
+
+        logger.global_logger.info("✓ 模式已切换到: {}", .{mode_enum});
     } else {
-        std.debug.print("未知的模式: {s}\n", .{new_mode});
-        return;
+        logger.global_logger.err("无法获取 global_app，模式切换失败", .{});
     }
+}
+
+fn handleGetSettings(e: *webui_module.Event) void {
+    logger.global_logger.debug("handleGetSettings 被调用", .{});
+    // 从事件中获取上下文（WebUIManager实例）
+    const manager_ptr = e.getContext() catch {
+        logger.global_logger.warn("无法获取上下文", .{});
+        return;
+    };
 
     const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
-    // 发送用户模式切换事件到应用程序
-    std.debug.print("发送 user_change_mode 事件\n", .{});
-    manager.handleUserEvent(.{ .user_change_mode = mode_enum });
+
+    // 使用一个简单的栈缓冲区进行事件传递（因为接口需要 [:0]u8）
+    // 但实际的 JSON 由 SettingsManager 动态分配
+    var temp_buffer: [1:0]u8 = .{0};
+
+    // 通过事件系统触发，应用程序内部会调用 toJsonAlloc() 动态生成 JSON
+    manager.handleUserEvent(.{ .settings_event = .{ .get_settings = temp_buffer[0..0 :0] } });
+
+    // 注意：上面的事件处理实际上不使用 temp_buffer
+    // 因为 handleSettingsEvent 会直接调用 toJsonAlloc() 并通过另一种方式返回
+    // 我们需要修改这个接口设计
+
+    // 临时方案：直接从 global_app 获取 settings
+    if (global_app) |app_ptr| {
+        const app = @import("app.zig").MainApplication;
+        const main_app = @as(*app, @ptrCast(@alignCast(app_ptr)));
+
+        // 调用 settings_manager 的 toJsonAlloc 获取动态分配的 JSON
+        const json_str = main_app.settings_manager.toJsonAlloc() catch |err| {
+            logger.global_logger.err("生成设置 JSON 失败: {any}", .{err});
+            return;
+        };
+        defer main_app.settings_manager.allocator.free(json_str);
+
+        // 构建 JavaScript 代码（也使用动态分配）
+        var js_list = std.ArrayList(u8){};
+        defer js_list.deinit(main_app.settings_manager.allocator);
+        const js_writer = js_list.writer(main_app.settings_manager.allocator);
+
+        // 使用反引号包裹 JSON 字符串，避免转义问题
+        js_writer.writeAll("updateSettingsDisplay(`") catch return;
+        js_writer.writeAll(json_str) catch return;
+        js_writer.writeAll("`)") catch return;
+
+        // 转换为 null 终止字符串
+        const js_code = js_list.toOwnedSliceSentinel(main_app.settings_manager.allocator, 0) catch return;
+        defer main_app.settings_manager.allocator.free(js_code);
+
+        logger.global_logger.debug("  执行 JS (长度: {})", .{js_code.len});
+        manager.window.run(js_code);
+    }
+}
+
+fn handleChangeSettings(e: *webui_module.Event) void {
+    logger.global_logger.debug("handleChangeSettings 被调用", .{});
+    // 从事件中获取上下文（WebUIManager实例）
+    const manager_ptr = e.getContext() catch {
+        logger.global_logger.warn("无法获取上下文", .{});
+        return;
+    };
+
+    const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
+    // 从事件参数中获取新的设置 JSON 字符串
+    const new_settings_json = e.getString();
+
+    // 从 global_app 获取应用的 allocator，确保所有权一致
+    if (global_app) |app_ptr| {
+        const app = @import("app.zig").MainApplication;
+        const main_app = @as(*app, @ptrCast(@alignCast(app_ptr)));
+        const allocator = main_app.settings_manager.allocator;
+
+        // 使用应用的 allocator 分配（便于应用层后续释放）
+        const new_settings_json_buffer = allocator.dupeZ(u8, new_settings_json) catch |err| {
+            logger.global_logger.err("复制新设置 JSON 失败: {any}", .{err});
+            return;
+        };
+
+        logger.global_logger.debug("已分配设置 JSON，长度: {}", .{new_settings_json.len});
+        manager.handleUserEvent(.{ .settings_event = .{ .change_settings = new_settings_json_buffer } });
+    } else {
+        logger.global_logger.err("无法获取 global_app，无法分配内存", .{});
+    }
 }

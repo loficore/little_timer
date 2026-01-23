@@ -1,6 +1,31 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
 
+// 导入所有模块以使其测试可以被执行
+const clock = @import("clock.zig");
+const settings = @import("settings.zig");
+const logger_module = @import("logger.zig");
+const interface = @import("interface.zig");
+const error_recovery = @import("error_recovery.zig");
+
+// 在测试时导入单独的测试文件
+comptime {
+    if (@import("builtin").is_test) {
+        _ = @import("test/test_clock.zig");
+        _ = @import("test/test_settings.zig");
+        _ = @import("test/test_logger.zig");
+    }
+}
+
+// 通过编译这些模块，使其中的 test 块被包含
+comptime {
+    _ = clock;
+    _ = settings;
+    _ = logger_module;
+    _ = interface;
+    _ = error_recovery;
+}
+
 /// 使用缓冲输出，输出测试信息
 ///
 /// 返回:

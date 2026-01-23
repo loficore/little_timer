@@ -17,6 +17,14 @@ QWEN.md
 
 *.sh
 
+# Core dumps and backup files
+core.*
+*.bak
+*.backup
+*.tmp
+*.swp
+*~
+
 # Logs
 logs
 *.log
@@ -31,3 +39,6 @@ node_modules/
 dist
 dist-ssr
 *.local
+
+.vscode/
+.github/

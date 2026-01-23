@@ -1,27 +1,19 @@
-#基本设置
-[basic-settings]
-TimeZone = +8 #时区，默认为东八区
-Language = "ZH" #暂时只支持ZH,后续会陆续支持更多的选项
+[basic]
+timezone = 8
+language = "ZH"
+default_mode = "countdown"
+theme_mode = "dark"
 
-#时钟设置
-[clock-settings]
-default.CountDown.DurationTime = 1500 #默认倒计时时间，单位为秒，默认为1500秒（25分钟）
-default.CountDown.Loop = false #默认倒计时循环，true为循环，false为不循环，默认为false
-default.CountDown.LoopCount = 0 #默认倒计时循环次数，0为无限循环，默认为0
-default.CountDown.IntervalTime = 0 #默认倒计时间隔时间，单位为秒，默认为0秒（不启用间隔时间）
+[clock_defaults.countdown]
+duration_seconds = 1500
+loop = false
+loop_count = 0
+loop_interval_seconds = 0
 
-default.StopWatch.MaxDurationTime = 86400 #默认计时器上限，单位为秒，默认为86400秒（一天）
+[clock_defaults.stopwatch]
+max_seconds = 86400
 
-[timer-presents]
-#预设计时器，可以添加多个预设计时器
-[[timer-presents.present1]]
-Type = "CountDown" #计时器类型，CountDown为倒计时，StopWatch为计时器
-DurationTime = 1500 #时长，单位为秒
-Loop = true #是否循环，true为循环，false为不循环
-LoopCount = 0 #循环次数，0为无限循环
-IntervalTime = 300 #间隔时间，单位为秒
-[[timer-presents.present2]]
-Type = "StopWatch" #计时器类型，CountDown为倒计时，StopWatch为计时器
-MaxDurationTime = 86400 #计时器上限，单位为秒，默认为86400秒（一天）
-[[timer-presents.present3]]
-Type = "WorldClock" 
+[logging]
+level = "INFO"
+enable_timestamp = true
+tick_interval_ms = 1000  # Tick 间隔（毫秒），默认 1000ms (1秒)，范围 100-5000

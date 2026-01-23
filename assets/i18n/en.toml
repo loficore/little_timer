@@ -98,3 +98,20 @@ list_count = "Presets ({count}/10)"
 
 [settings.messages]
 apply_success = "⚡ Preset applied, click save"
+[errors.connection]
+disconnected = "Cannot connect to backend"
+unknown = "Unknown error occurred"
+
+[errors.status]
+connected = "✅ Connection restored"
+disconnected = "❌ Connection lost"
+reconnecting = "🔄 Reconnecting... (attempt {attempt}/5)"
+error = "❌ Connection error"
+
+[errors.offline]
+title = "⚠️ Offline mode"
+message = "Backend service is unavailable. Some features may be limited. Please check network or restart the app."
+
+[validation]
+load_error = "Failed to load settings: {error}"
+save_error = "Failed to save settings: {error}"

@@ -98,3 +98,20 @@ list_count = "已保存的预设 ({count}/10)"
 
 [settings.messages]
 apply_success = "⚡ 已应用预设，请点击保存"
+[errors.connection]
+disconnected = "无法连接到后端服务"
+unknown = "发生未知错误"
+
+[errors.status]
+connected = "✅ 连接已恢复"
+disconnected = "❌ 连接已断开"
+reconnecting = "🔄 正在重新连接... (尝试 {attempt}/5)"
+error = "❌ 连接出现错误"
+
+[errors.offline]
+title = "⚠️ 离线模式"
+message = "后端服务暂时不可用，部分功能可能受限。请检查网络连接或重启应用。"
+
+[validation]
+load_error = "加载设置失败: {error}"
+save_error = "保存设置失败: {error}"

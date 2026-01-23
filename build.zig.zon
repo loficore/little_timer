@@ -33,12 +33,16 @@
     // internet connectivity.
     .dependencies = .{
         .webui = .{
-            .url = "https://github.com/webui-dev/zig-webui/archive/main.tar.gz",
-            .hash = "zig_webui-2.5.0-beta.4-M4z7zexlAQD-drd9H1BqG1goIZQ-S623XbqUWSYDs5wd",
+            .url = "https://github.com/webui-dev/zig-webui/archive/bf8c1784d26411932764ac1c6480e6ae6a05d95b.tar.gz",
+            .hash = "zig_webui-2.5.0-beta.4-M4z7zfBlAQDm7VVsOShCKu-VqoXZb7mk3hcQUxy3BOR2",
         },
         .toml = .{
-            .url = "git+https://github.com/sam701/zig-toml#cf50bd59c6276fb2b6d34b8d71d35486eecc719c",
+            .url = "https://github.com/sam701/zig-toml/archive/cf50bd59c6276fb2b6d34b8d71d35486eecc719c.tar.gz",
             .hash = "toml-0.3.0-bV14Bd-EAQBKoXhpYft303BtA2vgLNlxntUCIWgRUl46",
+        },
+        .android = .{
+            .url = "https://github.com/silbinarywolf/zig-android-sdk/archive/refs/tags/v0.3.0.tar.gz",
+            .hash = "android-0.3.0-7iz7QuLTAQAvVw7BFyhlf4GsEjxrYGtMpcvGQRbZ6K9X",
         },
     },
     // Specifies the set of files and directories that are included in this package.
@@ -53,6 +57,7 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "LICENSE",
         // For example...
         //"LICENSE",
         //"README.md",

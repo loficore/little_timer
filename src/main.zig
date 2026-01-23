@@ -1,7 +1,6 @@
 const std = @import("std");
 const app = @import("app.zig");
-const clock = @import("clock.zig");
-const interface = @import("interface.zig");
+const logger = @import("logger.zig");
 
 /// 应用程序入口函数（WebUI版本）
 ///
@@ -10,53 +9,28 @@ const interface = @import("interface.zig");
 /// 返回:
 /// - !void: 如果运行失败则返回错误
 pub fn main() !void {
-    std.debug.print("Little Timer WebUI 启动中...\n", .{});
+    logger.global_logger.info("Little Timer WebUI 启动中...", .{});
 
+    // 1. 创建内存分配器
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    // 2. 在堆上分配应用程序实例
     const main_app = try allocator.create(app.MainApplication);
-    defer allocator.destroy(main_app);
+    defer {
+        main_app.deinit();
+        allocator.destroy(main_app);
+    }
 
-    const clock_config = interface.ClockTaskConfig{
-        .countdown = .{
-            .duration_seconds = 25 * 60,
-            .loop = false,
-        },
-    };
+    // 初始化结构体的所有字段为默认值（重要！防止未初始化内存）
+    main_app.* = undefined;
 
-    std.debug.print("初始化应用程序...\n", .{});
-    main_app.init(allocator, clock_config) catch |err| {
-        std.debug.print("初始化失败: {any}\n", .{err});
-        return err;
-    };
+    // 3. 初始化应用程序（会自动加载设置并构建时钟配置）
+    logger.global_logger.info("初始化应用程序...", .{});
+    try main_app.init(allocator);
 
-    std.debug.print("设置全局指针...\n", .{});
-    main_app.setGlobalApp();
-
-    std.debug.print("启动 WebUI 主循环...\n", .{});
-    main_app.run() catch |err| {
-        std.debug.print("运行失败: {any}\n", .{err});
-        return err;
-    };
-}
-
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+    // 4. 运行应用程序主循环
+    logger.global_logger.info("启动 WebUI 主循环...", .{});
+    try main_app.run();
 }

@@ -11,6 +11,10 @@ pub const SettingsError = error{
     InvalidLanguage, // 语言代码格式不正确
     PresetNameConflict, // 预设名称已存在
     PresetNameEmpty, // 预设名称为空
+    PresetListFull, // 预设列表已满
+    InvalidDuration, // 倒计时时长超出范围
+    InvalidLoopCount, // 循环次数超出范围
+    InvalidMaxSeconds, // 正计时上限超出范围
 };
 // 为基本设置创建类型别名以便使用
 pub const BasicConfig = struct {
@@ -190,7 +194,11 @@ pub const SettingsManager = struct {
             return error.InvalidTimezone;
         }
 
-        // 语言代码已经是固定 2 字符，无需额外验证
+        // 验证语言代码长度（问题6：添加语言代码验证）
+        if (basic_config.language.len == 0 or basic_config.language.len > 10) {
+            logger.global_logger.err("错误: 语言代码长度必须在 1-10 之间，输入长度: {}", .{basic_config.language.len});
+            return error.InvalidLanguage;
+        }
 
         self.config.basic.timezone = basic_config.timezone;
         self.config.basic.language = basic_config.language;
@@ -226,7 +234,7 @@ pub const SettingsManager = struct {
         // 检查是否已满
         if (self.preset_count >= 10) {
             logger.global_logger.err("错误: 预设列表已满（最多10个）", .{});
-            return error.PresetNameEmpty; // 复用错误类型
+            return error.PresetListFull; // 问题5：使用正确的错误类型
         }
 
         // 添加新预设
@@ -374,17 +382,25 @@ pub const SettingsManager = struct {
             if (basic_val.object.get("timezone")) |tz_val| {
                 if (tz_val.integer >= -12 and tz_val.integer <= 14) {
                     self.config.basic.timezone = @intCast(tz_val.integer);
+                } else {
+                    // 问题7：时区验证不完整 - 添加日志
+                    logger.global_logger.warn("⚠️ JSON中时区超出范围 [-12, 14]，当前值: {d}，保持旧值: {}", .{ tz_val.integer, self.config.basic.timezone });
                 }
             }
 
             if (basic_val.object.get("language")) |lang_val| {
-                // 释放旧的动态分配的字符串
-                if (self.owned_language) |old| {
-                    self.allocator.free(old);
+                // 问题6：验证语言代码长度
+                if (lang_val.string.len == 0 or lang_val.string.len > 10) {
+                    logger.global_logger.warn("⚠️ JSON中语言代码长度无效: {}, 保持旧值: {s}", .{ lang_val.string.len, self.config.basic.language });
+                } else {
+                    // 释放旧的动态分配的字符串
+                    if (self.owned_language) |old| {
+                        self.allocator.free(old);
+                    }
+                    // 复制新字符串
+                    self.owned_language = try self.allocator.dupe(u8, lang_val.string);
+                    self.config.basic.language = self.owned_language.?;
                 }
-                // 复制新字符串
-                self.owned_language = try self.allocator.dupe(u8, lang_val.string);
-                self.config.basic.language = self.owned_language.?;
             }
 
             if (basic_val.object.get("default_mode")) |mode_val| {
@@ -412,7 +428,12 @@ pub const SettingsManager = struct {
         if (root.object.get("clock_defaults")) |defaults_val| {
             if (defaults_val.object.get("countdown")) |countdown_val| {
                 if (countdown_val.object.get("duration_seconds")) |dur_val| {
-                    self.config.clock_defaults.countdown.duration_seconds = @intCast(dur_val.integer);
+                    // 问题4：@intCast 未检查溢出 - 验证范围
+                    if (dur_val.integer < 1 or dur_val.integer > 86400) { // 最多24小时
+                        logger.global_logger.warn("⚠️ JSON中倒计时时长超出范围 [1, 86400], 当前值: {d}，保持旧值: {}", .{ dur_val.integer, self.config.clock_defaults.countdown.duration_seconds });
+                    } else {
+                        self.config.clock_defaults.countdown.duration_seconds = @intCast(dur_val.integer);
+                    }
                 }
                 if (countdown_val.object.get("loop")) |loop_val| {
                     self.config.clock_defaults.countdown.loop = switch (loop_val) {
@@ -422,16 +443,31 @@ pub const SettingsManager = struct {
                     };
                 }
                 if (countdown_val.object.get("loop_count")) |count_val| {
-                    self.config.clock_defaults.countdown.loop_count = @intCast(count_val.integer);
+                    // 问题4：@intCast 未检查溢出 - 验证范围
+                    if (count_val.integer < 0 or count_val.integer > 1000) { // 最多1000次循环
+                        logger.global_logger.warn("⚠️ JSON中循环次数超出范围 [0, 1000], 当前值: {d}，保持旧值: {}", .{ count_val.integer, self.config.clock_defaults.countdown.loop_count });
+                    } else {
+                        self.config.clock_defaults.countdown.loop_count = @intCast(count_val.integer);
+                    }
                 }
                 if (countdown_val.object.get("loop_interval_seconds")) |interval_val| {
-                    self.config.clock_defaults.countdown.loop_interval_seconds = @intCast(interval_val.integer);
+                    // 问题4：@intCast 未检查溢出 - 验证范围
+                    if (interval_val.integer < 0 or interval_val.integer > 3600) { // 最多1小时休息
+                        logger.global_logger.warn("⚠️ JSON中循环间隔超出范围 [0, 3600], 当前值: {d}，保持旧值: {}", .{ interval_val.integer, self.config.clock_defaults.countdown.loop_interval_seconds });
+                    } else {
+                        self.config.clock_defaults.countdown.loop_interval_seconds = @intCast(interval_val.integer);
+                    }
                 }
             }
 
             if (defaults_val.object.get("stopwatch")) |stopwatch_val| {
                 if (stopwatch_val.object.get("max_seconds")) |max_val| {
-                    self.config.clock_defaults.stopwatch.max_seconds = @intCast(max_val.integer);
+                    // 问题4：@intCast 未检查溢出 - 验证范围
+                    if (max_val.integer <= 0 or max_val.integer > 86400 * 365) { // 最多365天
+                        logger.global_logger.warn("⚠️ JSON中正计时上限超出范围 (0, 31536000], 当前值: {d}，保持旧值: {}", .{ max_val.integer, self.config.clock_defaults.stopwatch.max_seconds });
+                    } else {
+                        self.config.clock_defaults.stopwatch.max_seconds = @intCast(max_val.integer);
+                    }
                 }
             }
         }

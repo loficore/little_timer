@@ -1,64 +1,27 @@
 const std = @import("std");
-const builtin = @import("builtin");
-
-// 在编译时导入 android 构建工具
-const androidbuild = @import("android");
 
 pub fn build(b: *std.Build) void {
     const root_target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
-    // 使用 standardTargets 获取 Android 目标列表
-    const android_targets = androidbuild.standardTargets(b, root_target);
-
-    // 确定实际要编译的目标列表
-    var root_target_single = [_]std.Build.ResolvedTarget{root_target};
-    const targets: []std.Build.ResolvedTarget = if (android_targets.len == 0)
-        root_target_single[0..]
-    else
-        android_targets;
 
     const mod = b.addModule("little_timer", .{
         .root_source_file = b.path("src/root.zig"),
         .target = root_target,
     });
 
-    // 导入 toml 依赖（桌面和 Android 都需要）
+    // 导入 toml 依赖
     const toml_dep = b.dependency("toml", .{
         .target = root_target,
         .optimize = optimize,
     });
 
-    // 为 mod 添加 toml 导入
     mod.addImport("toml", toml_dep.module("toml"));
 
-    // 如果有 Android 目标，创建 APK
-    const android_apk: ?*androidbuild.Apk = blk: {
-        if (android_targets.len == 0) break :blk null;
-
-        const android_sdk = androidbuild.Sdk.create(b, .{});
-        const apk = android_sdk.createApk(.{
-            .api_level = .android8, // 调整为 API 26，提升设备覆盖率
-            .build_tools_version = "35.0.1",
-            .ndk_version = "26.1.10909125",
-        });
-
-        // TODO: 需要创建这些文件
-        apk.setAndroidManifest(b.path("android/AndroidManifest.xml"));
-        apk.addResourceDirectory(b.path("android/res"));
-
-        // 创建测试用的 keystore
-        const key_store_file = android_sdk.createKeyStore(.example);
-        apk.setKeyStore(key_store_file);
-
-        break :blk apk;
-    };
-
-    // 遍历所有目标（桌面或多个 Android 架构）
-    for (targets) |target_item| {
+    // 创建桌面应用模块（仅当不跨编译到 Android 时）
+    if (!root_target.result.abi.isAndroid()) {
         const app_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
-            .target = target_item,
+            .target = root_target,
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "little_timer", .module = mod },
@@ -66,71 +29,97 @@ pub fn build(b: *std.Build) void {
             },
         });
 
-        // 如果是 Android 目标，构建共享库并添加到 APK
-        if (target_item.result.abi.isAndroid()) {
-            const apk: *androidbuild.Apk = android_apk orelse @panic("Android APK should be initialized");
+        // 桌面: 导入 webui 依赖
+        const webui_dep = b.dependency("webui", .{
+            .target = root_target,
+            .optimize = optimize,
+        });
+        app_module.addImport("webui", webui_dep.module("webui"));
 
-            // 获取 android 依赖并添加到模块
-            const android_dep = b.dependency("android", .{
-                .target = target_item,
-                .optimize = optimize,
-            });
-            app_module.addImport("android", android_dep.module("android"));
+        // 构建桌面可执行文件
+        const exe = b.addExecutable(.{
+            .name = "little_timer",
+            .root_module = app_module,
+        });
 
-            const lib = b.addLibrary(.{
-                .name = "little_timer",
-                .root_module = app_module,
-                .linkage = .dynamic,
-            });
+        exe.linkLibC();
+        b.installArtifact(exe);
 
-            // 添加库到 APK
-            apk.addArtifact(lib);
-        } else {
-            // 桌面构建 - 导入 webui
-            const webui_dep = b.dependency("webui", .{
-                .target = target_item,
-                .optimize = optimize,
-            });
-            app_module.addImport("webui", webui_dep.module("webui"));
-
-            const exe = b.addExecutable(.{
-                .name = "little_timer",
-                .root_module = app_module,
-            });
-
-            exe.linkLibC();
-            b.installArtifact(exe);
-
-            // 如果只有一个目标，添加 "run" 步骤
-            if (targets.len == 1) {
-                const run_step = b.step("run", "Run the app");
-                const run_cmd = b.addRunArtifact(exe);
-                run_step.dependOn(&run_cmd.step);
-                if (b.args) |args| {
-                    run_cmd.addArgs(args);
-                }
-            }
+        // 添加 run 步骤
+        const run_step = b.step("run", "Run the app");
+        const run_cmd = b.addRunArtifact(exe);
+        run_step.dependOn(&run_cmd.step);
+        if (b.args) |args| {
+            run_cmd.addArgs(args);
         }
-    }
 
-    // 如果有 Android APK，安装它
-    if (android_apk) |apk| {
-        const installed_apk = apk.addInstallApk();
-        b.getInstallStep().dependOn(&installed_apk.step);
-
-        const android_sdk = apk.sdk;
-        const run_step = b.step("run", "Install and run the application on an Android device");
-        const adb_install = android_sdk.addAdbInstall(installed_apk.source);
-        const adb_start = android_sdk.addAdbStart("com.zig.little_timer/android.app.NativeActivity");
-        adb_start.step.dependOn(&adb_install.step);
-        run_step.dependOn(&adb_start.step);
-    } else {
-        // 桌面测试
+        // 添加测试步骤
         const test_step = b.step("test", "Run tests");
         const mod_tests = b.addTest(.{
             .root_module = mod,
         });
         const run_mod_tests = b.addRunArtifact(mod_tests);
         test_step.dependOn(&run_mod_tests.step);
+    } else {
+        // Android: 提供 lib 目标，生成 .so
+        const ndk_home = std.process.getEnvVarOwned(b.allocator, "ANDROID_NDK_HOME") catch |err| {
+            std.debug.print("❌ 未设置 ANDROID_NDK_HOME: {}\n", .{err});
+            @panic("ANDROID_NDK_HOME not set");
+        };
+
+        const sysroot_path = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home});
+        b.sysroot = sysroot_path; // 设置全局 Sysroot
+
+        const webui_dep = b.dependency("webui", .{
+            .target = root_target,
+            .optimize = optimize,
+        });
+
+        // ✅ 关键改动 1：手动创建一个只包含 Zig 绑定的模块，不触发依赖包的 C 编译逻辑
+        const webui_module = b.createModule(.{
+            .root_source_file = webui_dep.path("src/webui.zig"), // 直接指向源码中的 Zig 绑定文件
+        });
+
+        const app_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = root_target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "little_timer", .module = mod },
+                .{ .name = "toml", .module = toml_dep.module("toml") },
+                .{ .name = "webui", .module = webui_module }, // 使用我们手动定义的模块
+            },
+        });
+
+        const lib = b.addLibrary(.{
+            .name = "little_timer",
+            .root_module = app_module,
+            .linkage = .dynamic, // 生成 liblittle_timer.so
+        });
+
+        // 注意：zig_webui-2.5.0-beta.4 只包含 Zig 绑定，不包含 C 源码
+        // WebUI C 依赖应通过 Zig 绑定的 @cImport 机制自动处理
+
+        // ✅ 关键改动 3：补齐所有 Include 路径
+        lib.addIncludePath(webui_dep.path("include"));
+        lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sysroot_path}) });
+        lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/aarch64-linux-android", .{sysroot_path}) });
+
+        // 核心修正：显式添加 Android 系统库搜索路径，避免链接阶段找不到 liblog/libandroid
+        const api_level = "26"; // 与目标 Android API Level 保持一致
+        // 使用以 "/" 开头的路径，使 Zig 在有 sysroot 时自动前缀 sysroot
+        const lib_path = b.fmt("/usr/lib/aarch64-linux-android/{s}", .{api_level});
+        lib.addLibraryPath(.{ .cwd_relative = lib_path });
+
+        lib.linkLibC();
+        lib.linkSystemLibrary("log"); // 链接 Android 日志库
+        lib.linkSystemLibrary("android"); // 链接 Android 系统库
+
+        const install_lib = b.addInstallArtifact(lib, .{
+            .dest_dir = .{ .override = .lib },
+        });
+
+        const lib_build = b.step("lib", "Build Android shared library");
+        lib_build.dependOn(&install_lib.step);
     }
 }

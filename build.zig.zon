@@ -40,10 +40,6 @@
             .url = "https://github.com/sam701/zig-toml/archive/cf50bd59c6276fb2b6d34b8d71d35486eecc719c.tar.gz",
             .hash = "toml-0.3.0-bV14Bd-EAQBKoXhpYft303BtA2vgLNlxntUCIWgRUl46",
         },
-        .android = .{
-            .url = "https://github.com/silbinarywolf/zig-android-sdk/archive/refs/tags/v0.3.0.tar.gz",
-            .hash = "android-0.3.0-7iz7QuLTAQAvVw7BFyhlf4GsEjxrYGtMpcvGQRbZ6K9X",
-        },
     },
     // Specifies the set of files and directories that are included in this package.
     // Only files and directories listed here are included in the `hash` that

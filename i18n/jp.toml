@@ -25,6 +25,9 @@ switch_mode = "モード切替"
 mode_countdown = "カウントダウン"
 mode_stopwatch = "ストップウォッチ"
 mode_world_clock = "ワールドクロック"
+rest_status = "休憩中... 残り {seconds} 秒"
+loop_status = "ラウンド {remaining}/{total}"
+finished_notification = "⏰ 計時完了！"
 
 [settings.tabs]
 basic = "基本"
@@ -95,15 +98,3 @@ list_count = "プリセット ({count}/10)"
 
 [settings.messages]
 apply_success = "⚡ プリセットを適用しました。保存してください"
-
-[validation]
-input_required = "このフィールドは必須です"
-input_out_of_range = "値は {min} から {max} の間である必要があります"
-input_invalid = "無効な入力"
-input_min_value = "最小値は {min}"
-input_max_value = "最大値は {max}"
-preset_name_required = "プリセット名を入力してください"
-preset_name_exists = "プリセット名は既に存在します"
-network_error = "ネットワークエラーです。接続を確認してください"
-save_error = "保存に失敗しました: {error}"
-load_error = "読み込みに失敗しました: {error}"

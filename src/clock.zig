@@ -30,9 +30,20 @@ const CountdownState = struct {
     pub fn tick(self: *CountdownState, delta_ms: i64) void {
         if (self.is_paused or self.is_finished) return;
 
+        // 问题2：检查负数 tick
+        if (delta_ms < 0) {
+            logger.global_logger.warn("⚠️ 错误: tick 值为负数 {} ms，将被忽略", .{delta_ms});
+            return;
+        }
+
+        if (delta_ms == 0) {
+            return; // 无效 tick
+        }
+
         // 休息阶段倒计时
         if (self.in_rest) {
             self.rest_remaining_ms -= delta_ms;
+            // 问题3：改进休息时间边界逻辑（不允许成负值）
             if (self.rest_remaining_ms <= 0) {
                 self.in_rest = false;
                 self.is_finished = false;
@@ -88,6 +99,16 @@ const StopwatchState = struct {
     /// - **delta_ms**: 增加的毫秒数
     pub fn tick(self: *StopwatchState, delta_ms: i64) void {
         if (self.is_paused or self.is_finished) return;
+
+        // 问题2：检查负数 tick
+        if (delta_ms < 0) {
+            logger.global_logger.warn("⚠️ 错误: tick 值为负数 {} ms，将被忽略", .{delta_ms});
+            return;
+        }
+
+        if (delta_ms == 0) {
+            return;
+        }
 
         self.esplased_ms += delta_ms;
         if (self.esplased_ms >= self.max_ms) {
@@ -189,6 +210,15 @@ pub const ClockManager = struct {
     last_tick_time: i64 = 0,
     initial_config: ClockTaskConfig, // 保存初始配置用于重置
 
+    /// 整数溢出检查辅助函数
+    /// 检查 duration_seconds * 1000 是否会溢出 i64
+    fn checkDurationOverflow(duration_seconds: u64) bool {
+        // i64::MAX = 9223372036854775807
+        // i64::MAX / 1000 ≈ 9223372036854775
+        const max_safe_duration = 9223372036854775;
+        return duration_seconds > max_safe_duration;
+    }
+
     /// 初始化时钟管理器
     ///
     /// 参数:
@@ -199,6 +229,30 @@ pub const ClockManager = struct {
     pub fn init(
         clock_config: ClockTaskConfig,
     ) ClockManager {
+        // 问题1：检查整数溢出
+        if (ClockManager.checkDurationOverflow(clock_config.countdown.duration_seconds) or
+            ClockManager.checkDurationOverflow(clock_config.stopwatch.max_seconds)) {
+            logger.global_logger.err("错误: 时间配置超出最大值（大于 9223372036854775 秒）", .{});
+            // 降级处理：使用默认值
+            const safe_config: ClockTaskConfig = .{
+                .countdown = .{
+                    .duration_seconds = 25 * 60,
+                    .loop = false,
+                    .loop_count = 0,
+                    .loop_interval_seconds = 0,
+                },
+                .stopwatch = .{
+                    .max_seconds = 24 * 60 * 60,
+                },
+                .world_clock = clock_config.world_clock,
+            };
+            return ClockManager.initSafe(safe_config);
+        }
+        return ClockManager.initSafe(clock_config);
+    }
+
+    /// 安全初始化时钟管理器（验证后）
+    fn initSafe(clock_config: ClockTaskConfig) ClockManager {
         // 根据 clock_config.default_mode 决定初始化哪种模式
         const state = switch (clock_config.default_mode) {
             .COUNTDOWN_MODE => ClockState{

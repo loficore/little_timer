@@ -146,6 +146,30 @@ pub const ErrorRecoveryManager = struct {
         logger.global_logger.info("错误恢复管理器已重置", .{});
     }
 
+    /// 清空错误记录（别名方法）
+    ///
+    /// 参数:
+    /// - **self**: ErrorRecoveryManager实例指针
+    pub fn clearErrors(self: *ErrorRecoveryManager) void {
+        self.reset();
+    }
+
+    /// 检查是否处于恢复状态
+    ///
+    /// 返回:
+    /// - bool: true 表示处于恢复状态
+    pub fn isRecovering(self: *const ErrorRecoveryManager) bool {
+        return self.is_recovering;
+    }
+
+    /// 获取恢复尝试次数
+    ///
+    /// 返回:
+    /// - u32: 当前恢复尝试次数
+    pub fn getRecoveryAttempts(self: *const ErrorRecoveryManager) u32 {
+        return self.recovery_attempts;
+    }
+
     /// 清理资源
     ///
     /// 参数:

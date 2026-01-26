@@ -68,25 +68,28 @@ pub const Logger = struct {
             return "";
         }
 
-        // 获取当前时间戳（纳秒）并转换为秒
-        const now_ns = std.time.nanoTimestamp();
-        const now_s = @divFloor(now_ns, 1_000_000_000);
+        // 使用 UTC 时间并输出 ISO8601（Z 后缀），避免依赖未提供的本地时区 API
+        const now_s = std.time.timestamp();
+        if (now_s < 0) return ""; // UTC 秒钟为负数时直接跳过
 
-        // 简单的时间计算（不考虑日期，只显示时刻）
-        const seconds_per_day = 86400;
-        const seconds_per_hour = 3600;
-        const seconds_per_minute = 60;
+        // 使用 std.time.epoch 将 UTC 秒转换为公历日期时间
+        const es = std.time.epoch.EpochSeconds{ .secs = @as(u64, @intCast(now_s)) };
+        const yd = es.getEpochDay().calculateYearDay();
+        const md = yd.calculateMonthDay();
+        const ds = es.getDaySeconds();
 
-        // 获取当天的秒数（假设UTC+0，实际应该根据timezone调整）
-        const day_seconds = @mod(now_s, seconds_per_day);
-        const hours = @divFloor(day_seconds, seconds_per_hour);
-        const minutes = @divFloor(@mod(day_seconds, seconds_per_hour), seconds_per_minute);
-        const seconds = @mod(day_seconds, seconds_per_minute);
+        const year: u16 = yd.year;
+        const month: u4 = md.month.numeric();
+        const day: u5 = md.day_index + 1; // day_index 从 0 开始
+        const hour: u5 = ds.getHoursIntoDay();
+        const minute: u6 = ds.getMinutesIntoHour();
+        const second: u6 = ds.getSecondsIntoMinute();
 
+        // 毫秒精度目前固定为 000（若后续需要，可改为调用平台实时毫秒 API）
         const timestamp_str = std.fmt.bufPrint(
             buf,
-            "[{:0>2}:{:0>2}:{:0>2}] ",
-            .{ hours, minutes, seconds },
+            "[{d:0>4}-{:0>2}-{:0>2}T{:0>2}:{:0>2}:{:0>2}.000Z] ",
+            .{ year, month, day, hour, minute, second },
         ) catch return "";
 
         return timestamp_str;

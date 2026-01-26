@@ -1,9 +1,8 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const interface = @import("interface.zig");
 const logger = @import("logger.zig");
 const Thread = std.Thread;
-
-// 根据是否使用WebUI导入不同的模块
 const webui_module = @import("webui");
 
 // 全局 App 实例指针，用于回调函数访问
@@ -35,6 +34,7 @@ const DisplaySnapshot = struct {
     loop_remaining: u32,
     loop_total: u32,
     rest_remaining: i64,
+    timezone: i8, // 世界时钟使用，单位小时
 };
 
 const Constants = struct {
@@ -96,6 +96,8 @@ pub const WebUIManager = struct {
             "assets/dist/index.html", // 从项目根目录运行
         };
 
+        var selected_path: []const u8 = "";
+
         var html_content_raw: []u8 = undefined;
         var html_found = false;
 
@@ -105,6 +107,7 @@ pub const WebUIManager = struct {
                 continue;
             };
             logger.global_logger.info("✓ 从 {s} 读取 HTML ({} 字节)", .{ path, html_content_raw.len });
+            selected_path = path;
             html_found = true;
             break;
         }
@@ -119,13 +122,31 @@ pub const WebUIManager = struct {
         defer self.allocator.free(html_content_raw); // 释放原始内容
         self.html_content = html_content_zdup; // 保存指针供deinit释放
 
-        // 使用 show() 方法显示 HTML 内容
-        // 这会自动启动服务器并提供 /webui.js
-        self.window.show(html_content_zdup) catch |err| {
-            logger.global_logger.warn("show() 失败: {any}", .{err});
-            logger.global_logger.warn("注意: show() 方法在某些环境下可能不可用", .{});
-            logger.global_logger.warn("但服务器应该已经启动，请尝试访问下面的地址", .{});
+        // 关闭 WebUI 的文件夹监控线程，避免在 Android 上使用 pthread_cancel
+        webui_module.setConfig(.folder_monitor, false);
+
+        // 优先设置固定端口（需在 show/startServer 之前）
+        const default_port: usize = 12889;
+        self.window.setPort(default_port) catch |err| {
+            logger.global_logger.warn("设置端口 {d} 失败，可能已被占用: {any}", .{ default_port, err });
         };
+
+        // 在不同平台采用不同的启动方式：Android 使用 startServer，其它平台使用 show
+        if (builtin.target.abi == .android) {
+            const path_z = try self.allocator.dupeZ(u8, selected_path);
+            defer self.allocator.free(path_z);
+            _ = self.window.startServer(path_z) catch |err| {
+                logger.global_logger.err("startServer() 失败: {any}", .{err});
+            };
+        } else {
+            // 使用 show() 方法显示 HTML 内容（桌面平台）
+            // 这会自动启动服务器并提供 /webui.js
+            self.window.show(html_content_zdup) catch |err| {
+                logger.global_logger.warn("show() 失败: {any}", .{err});
+                logger.global_logger.warn("注意: show() 方法在某些环境下可能不可用", .{});
+                logger.global_logger.warn("但服务器应该已经启动，请尝试访问下面的地址", .{});
+            };
+        }
 
         // 获取服务器信息
         const port = self.window.getPort() catch |err| blk: {
@@ -164,6 +185,7 @@ pub const WebUIManager = struct {
             .loop_remaining = 0,
             .loop_total = 0,
             .rest_remaining = 0,
+            .timezone = 8,
         };
 
         logger.global_logger.info("WebUI窗口管理器初始化完成", .{});
@@ -317,15 +339,34 @@ pub const WebUIManager = struct {
             .loop_remaining = display_data.getLoopRemaining(),
             .loop_total = display_data.getLoopTotal(),
             .rest_remaining = display_data.getRestRemainingTime(),
+            .timezone = switch (display_data.*) {
+                .WORLD_CLOCK_MODE => |worldclock| worldclock.timezone,
+                else => self.snap_shot.timezone,
+            },
         };
 
         // 2. 被动更新：仅在状态改变时才执行 JS（而非无条件推送）
-        if (std.mem.eql(u8, std.mem.asBytes(&self.snap_shot), std.mem.asBytes(&current_snapshot))) {
+        // 关键修复：逐字段比较而非字节比较，避免内存对齐问题
+        const snapshot_changed = (self.snap_shot.seconds != current_snapshot.seconds) or
+            (self.snap_shot.mode != current_snapshot.mode) or
+            (self.snap_shot.is_running != current_snapshot.is_running) or
+            (self.snap_shot.is_finished != current_snapshot.is_finished) or
+            (self.snap_shot.in_rest != current_snapshot.in_rest) or
+            (self.snap_shot.loop_remaining != current_snapshot.loop_remaining) or
+            (self.snap_shot.loop_total != current_snapshot.loop_total) or
+            (self.snap_shot.rest_remaining != current_snapshot.rest_remaining) or
+            (self.snap_shot.timezone != current_snapshot.timezone);
+
+        if (!snapshot_changed) {
             // 状态未变化，无需推送任何 JS
             return;
         }
 
-        logger.global_logger.debug("显示状态已改变，准备推送更新", .{});
+        logger.global_logger.debug("显示状态已改变，准备推送更新 (old_mode={}, new_mode={}, mode_changed={})", .{
+            self.snap_shot.mode,
+            current_snapshot.mode,
+            self.snap_shot.mode != current_snapshot.mode,
+        });
 
         // 3. 状态已改变，构造并执行 JavaScript 更新
         var js_code_buffer: [512:0]u8 = undefined;
@@ -356,7 +397,7 @@ pub const WebUIManager = struct {
         // 发送完整状态更新事件（从快照取所有字段）
         const state_event_js = try std.fmt.bufPrintZ(
             &js_code_buffer,
-            "if(window.webuiEvent){{window.webuiEvent({{function:'update_state',data:{{isRunning:{},isFinished:{},inRest:{},loopRemaining:{},loopTotal:{},restRemaining:{}}}}});}}",
+            "if(window.webuiEvent){{window.webuiEvent({{function:'update_state',data:{{isRunning:{},isFinished:{},inRest:{},loopRemaining:{},loopTotal:{},restRemaining:{},timezone:{}}}}});}}",
             .{
                 current_snapshot.is_running,
                 current_snapshot.is_finished,
@@ -364,6 +405,7 @@ pub const WebUIManager = struct {
                 current_snapshot.loop_remaining,
                 current_snapshot.loop_total,
                 current_snapshot.rest_remaining,
+                current_snapshot.timezone,
             },
         );
         self.window.run(state_event_js);
@@ -578,23 +620,32 @@ fn handleModeChange(e: *webui_module.Event) void {
         if (std.mem.eql(u8, new_mode, "countdown")) {
             mode_enum = .COUNTDOWN_MODE;
             new_config = .{
+                .default_mode = .COUNTDOWN_MODE,
                 .countdown = .{
                     .duration_seconds = settings.clock_defaults.countdown.duration_seconds,
                     .loop = settings.clock_defaults.countdown.loop,
                     .loop_count = settings.clock_defaults.countdown.loop_count,
                     .loop_interval_seconds = settings.clock_defaults.countdown.loop_interval_seconds,
                 },
+                .stopwatch = settings.clock_defaults.stopwatch,
+                .world_clock = .{ .timezone = settings.basic.timezone },
             };
         } else if (std.mem.eql(u8, new_mode, "stopwatch")) {
             mode_enum = .STOPWATCH_MODE;
             new_config = .{
+                .default_mode = .STOPWATCH_MODE,
+                .countdown = settings.clock_defaults.countdown,
                 .stopwatch = .{
                     .max_seconds = settings.clock_defaults.stopwatch.max_seconds,
                 },
+                .world_clock = .{ .timezone = settings.basic.timezone },
             };
         } else if (std.mem.eql(u8, new_mode, "world_clock")) {
             mode_enum = .WORLD_CLOCK_MODE;
             new_config = .{
+                .default_mode = .WORLD_CLOCK_MODE,
+                .countdown = settings.clock_defaults.countdown,
+                .stopwatch = settings.clock_defaults.stopwatch,
                 .world_clock = .{
                     .timezone = settings.basic.timezone,
                 },

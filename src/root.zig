@@ -14,6 +14,8 @@ comptime {
         _ = @import("test/test_clock.zig");
         _ = @import("test/test_settings.zig");
         _ = @import("test/test_logger.zig");
+        _ = @import("test/test_error_recovery.zig");
+        _ = @import("test/test_boundary_conditions.zig");
     }
 }
 

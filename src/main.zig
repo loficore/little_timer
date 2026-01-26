@@ -1,6 +1,7 @@
 const std = @import("std");
 const app = @import("app.zig");
 const logger = @import("logger.zig");
+const builtin = @import("builtin");
 
 /// 应用程序入口函数（WebUI版本）
 ///
@@ -33,4 +34,48 @@ pub fn main() !void {
     // 4. 运行应用程序主循环
     logger.global_logger.info("启动 WebUI 主循环...", .{});
     try main_app.run();
+}
+
+/// Android 入口：供 Java 调用以启动后端逻辑（WebUI Server + Tick 线程）
+/// 注意：JNI 命名规则对包名中的下划线需要使用 `_1` 转义。
+/// 包名: com.zig.little_timer -> com_zig_little_1timer
+pub export fn Java_com_zig_little_1timer_MainActivity_startZigLogic(env: ?*anyopaque, thiz: ?*anyopaque) void {
+    _ = env;
+    _ = thiz;
+    // 仅在 Android 下运行此逻辑
+    if (builtin.target.abi != .android) return;
+
+    // 后台启动应用逻辑，避免阻塞 UI 线程
+    const start_fn = struct {
+        fn run() void {
+            logger.global_logger.info("Android: 启动 Zig 后端逻辑", .{});
+
+            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+            const allocator = gpa.allocator();
+
+            const main_app = allocator.create(app.MainApplication) catch {
+                logger.global_logger.err("Android: 创建 MainApplication 失败", .{});
+                return;
+            };
+            main_app.* = undefined;
+
+            main_app.init(allocator) catch |err| {
+                logger.global_logger.err("Android: MainApplication.init 失败: {any}", .{err});
+                return;
+            };
+
+            // 在子线程中运行主循环（内部会启动 tick 线程并使用 startServer）
+            std.Thread.spawn(.{}, struct {
+                fn t(app_ptr: *app.MainApplication) void {
+                    app_ptr.run() catch |err| {
+                        logger.global_logger.err("Android: MainApplication.run 失败: {any}", .{err});
+                    };
+                }
+            }.t, .{main_app}) catch |err| {
+                logger.global_logger.err("Android: 启动运行线程失败: {any}", .{err});
+            };
+        }
+    }.run;
+
+    start_fn();
 }

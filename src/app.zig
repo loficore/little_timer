@@ -1,6 +1,7 @@
 const std = @import("std");
 const app = @import("app.zig");
 const logger = @import("logger.zig");
+const builtin = @import("builtin");
 
 const webui_windows = @import("webui_windows.zig");
 const clock = @import("clock.zig");
@@ -17,12 +18,11 @@ const EventThrottle = struct {
 /// 全局 App 实例指针，用于回调函数访问
 var global_app: ?*MainApplication = null;
 
-/// 主应用程序结构体 - 单向数据流的协调中心
 pub const MainApplication = struct {
     clock_manager: clock.ClockManager,
     settings_manager: settings.SettingsManager,
     mutex: std.Thread.Mutex = .{},
-    webui: @import("webui_windows.zig").WebUIManager,
+    webui: webui_windows.WebUIManager,
     allocator: std.mem.Allocator,
     /// 错误恢复管理器 - 用于处理和追踪错误
     error_recovery: error_recovery.ErrorRecoveryManager,

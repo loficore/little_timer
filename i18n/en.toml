@@ -25,6 +25,9 @@ switch_mode = "Switch mode"
 mode_countdown = "Countdown"
 mode_stopwatch = "Stopwatch"
 mode_world_clock = "World clock"
+rest_status = "Resting... {seconds} sec remaining"
+loop_status = "Round {remaining}/{total}"
+finished_notification = "⏰ Timer complete!"
 
 [settings.tabs]
 basic = "Basic"
@@ -95,15 +98,20 @@ list_count = "Presets ({count}/10)"
 
 [settings.messages]
 apply_success = "⚡ Preset applied, click save"
+[errors.connection]
+disconnected = "Cannot connect to backend"
+unknown = "Unknown error occurred"
+
+[errors.status]
+connected = "✅ Connection restored"
+disconnected = "❌ Connection lost"
+reconnecting = "🔄 Reconnecting... (attempt {attempt}/5)"
+error = "❌ Connection error"
+
+[errors.offline]
+title = "⚠️ Offline mode"
+message = "Backend service is unavailable. Some features may be limited. Please check network or restart the app."
 
 [validation]
-input_required = "This field is required"
-input_out_of_range = "Value must be between {min} and {max}"
-input_invalid = "Invalid input"
-input_min_value = "Minimum value is {min}"
-input_max_value = "Maximum value is {max}"
-preset_name_required = "Preset name cannot be empty"
-preset_name_exists = "Preset name already exists"
-network_error = "Network error, please check connection"
-save_error = "Save failed: {error}"
-load_error = "Load failed: {error}"
+load_error = "Failed to load settings: {error}"
+save_error = "Failed to save settings: {error}"

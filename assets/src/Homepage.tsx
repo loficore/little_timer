@@ -24,28 +24,54 @@ declare global {
   }
 }
 
-const formatTime = (totalSeconds: number): string => {
+// 倒计时/秒表用：格式化持续时间（秒）
+const formatDuration = (totalSeconds: number): string => {
   const hours = Math.floor(totalSeconds / 3600)
     .toString()
     .padStart(2, "0");
   const minutes = Math.floor((totalSeconds % 3600) / 60)
     .toString()
     .padStart(2, "0");
-  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+  const seconds = Math.floor(totalSeconds % 60)
+    .toString()
+    .padStart(2, "0");
   return `${hours}:${minutes}:${seconds}`;
 };
 
+// 世界时钟用：格式化 Unix 秒为本地时区时间
+const formatClockTime = (unixSeconds: number): string => {
+  const d = new Date(unixSeconds * 1000);
+  // 使用 UTC 视角读取，避免本地时区再次偏移（否则会双重偏移）
+  const h = d.getUTCHours().toString().padStart(2, "0");
+  const m = d.getUTCMinutes().toString().padStart(2, "0");
+  const s = d.getUTCSeconds().toString().padStart(2, "0");
+  return `${h}:${m}:${s}`;
+};
+
+interface HomeState {
+  time: string;
+  mode: Mode;
+  isRunning: boolean;
+  inRest: boolean;
+  loopRemaining: number | null;
+  loopTotal: number | null;
+  restRemaining: number;
+  isFinished: boolean;
+  timezone: number; // 前端本地 world clock 时区（来自 settings），单位小时
+}
+
 const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
   // 合并所有状态为一个对象，减少多次 setState
-  const [state, setState] = useState(() => ({
+  const [state, setState] = useState<HomeState>(() => ({
     time: "25:00:00",
     mode: Mode.Countdown,
     isRunning: false,
     inRest: false,
-    loopRemaining: null as number | null,
-    loopTotal: null as number | null,
+    loopRemaining: null,
+    loopTotal: null,
     restRemaining: 0,
     isFinished: false,
+    timezone: 8,
   }));
   const prevFinishedRef = useRef(false);
 
@@ -70,16 +96,31 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
       if (event.function === "update_time") {
         // 只在 time 变化时 setState
         const seconds = typeof event.data === "number" ? event.data : 0;
-        const formatted = formatTime(seconds);
-        setState((prev) =>
-          prev.time === formatted ? prev : { ...prev, time: formatted },
-        );
-        logInfo("⏱️ 时间已更新: " + seconds + "秒 -> " + formatted);
+        setState((prev) => {
+          // 世界时钟交给前端自驱动，不使用后端时间
+          if (prev.mode === Mode.WorldClock) return prev;
+          const formatted = formatDuration(seconds);
+          if (prev.time === formatted) return prev;
+          logInfo("⏱️ 时间已更新: " + seconds + "秒 -> " + formatted);
+          return { ...prev, time: formatted };
+        });
       } else if (event.function === "update_mode") {
-        setState((prev) =>
-          prev.mode === event.data ? prev : { ...prev, mode: event.data },
+        const newMode = event.data as Mode;
+        logInfo(
+          "🔄 收到模式更新事件，新模式值: " +
+            newMode +
+            " (类型: " +
+            typeof newMode +
+            ")",
         );
-        logInfo("🔄 模式已更新: " + event.data);
+        setState((prev) => {
+          if (prev.mode === newMode) {
+            logInfo("🔄 模式相同，跳过更新");
+            return prev;
+          }
+          logSuccess("🔄 模式已更新: " + prev.mode + " -> " + newMode);
+          return { ...prev, mode: newMode };
+        });
       } else if (event.function === "update_state") {
         const s = event.data as {
           isRunning: boolean;
@@ -88,6 +129,7 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
           loopRemaining?: number;
           loopTotal?: number;
           restRemaining?: number;
+          timezone?: number;
         };
         setState((prev) => {
           // 只有有变化时才 setState，避免无谓重渲染
@@ -97,7 +139,8 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
             prev.loopRemaining === (s.loopRemaining ?? null) &&
             prev.loopTotal === (s.loopTotal ?? null) &&
             prev.restRemaining === (s.restRemaining ?? 0) &&
-            prev.isFinished === s.isFinished
+            prev.isFinished === s.isFinished &&
+            prev.timezone === (s.timezone ?? prev.timezone)
           ) {
             return prev;
           }
@@ -109,6 +152,7 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
             loopTotal: s.loopTotal ?? null,
             restRemaining: s.restRemaining ?? 0,
             isFinished: s.isFinished,
+            timezone: s.timezone ?? prev.timezone,
           };
         });
         // 完成通知（仅在从未完成到完成时触发一次）
@@ -132,7 +176,7 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
                 ctx.close();
               }, 300);
             }
-          } catch (_e) {
+          } catch {
             // 忽略音频相关错误
           }
           try {
@@ -146,7 +190,7 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
                 });
               }
             }
-          } catch (_e) {
+          } catch {
             // 忽略通知相关错误
           }
         }
@@ -155,8 +199,22 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
       }
     };
     logInfo("初始化完成，等待用户交互...");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 世界时钟前端自驱 tick：根据 settings 时区每秒刷新
+  useEffect(() => {
+    if (state.mode !== Mode.WorldClock) return;
+
+    const tick = () => {
+      const now = Math.floor(Date.now() / 1000);
+      const shifted = now + state.timezone * 3600;
+      setState((prev) => ({ ...prev, time: formatClockTime(shifted) }));
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [state.mode, state.timezone]);
 
   // 应用主题
   const applyTheme = useCallback((theme: string) => {

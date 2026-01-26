@@ -16,4 +16,5 @@ export default defineConfig({
       'react/jsx-runtime': 'preact/jsx-runtime',
     },
   },
+  assetsInclude: ['**/*.toml'], // 允许 TOML 文件作为资产导入
 })

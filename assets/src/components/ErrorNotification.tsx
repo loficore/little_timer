@@ -137,7 +137,7 @@ export const ErrorNotification: FunctionalComponent<ErrorNotificationProps> = ({
               onDismiss?.();
             }}
             className="flex-shrink-0 ml-2 text-white hover:opacity-75 transition-opacity p-1 rounded"
-            title="关闭"
+            title={t("common.close")}
           >
             ✕
           </button>

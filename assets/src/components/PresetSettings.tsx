@@ -8,13 +8,14 @@ import { t } from "../utils/i18n";
 
 export interface TimerPreset {
   name: string;
-  mode: "countdown" | "stopwatch";
+  mode: "countdown" | "stopwatch" | "world_clock";
   config: {
     duration_seconds?: number;
     loop?: boolean;
     loop_count?: number;
     loop_interval_seconds?: number;
     max_seconds?: number;
+    timezone?: number;
   };
 }
 
@@ -31,25 +32,33 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [newPresetName, setNewPresetName] = useState("");
-  const [newPresetMode, setNewPresetMode] = useState<"countdown" | "stopwatch">(
-    "countdown",
-  );
+  const [newPresetMode, setNewPresetMode] = useState<
+    "countdown" | "stopwatch" | "world_clock"
+  >("countdown");
+  const [formError, setFormError] = useState("");
   const [newPresetDurationMinutes, setNewPresetDurationMinutes] = useState(25);
   const [newPresetLoop, setNewPresetLoop] = useState(false);
   const [newPresetLoopCount, setNewPresetLoopCount] = useState(0);
   const [newPresetLoopIntervalSeconds, setNewPresetLoopIntervalSeconds] =
     useState(0);
   const [newPresetMaxHours, setNewPresetMaxHours] = useState(24);
+  const [newPresetTimezone, setNewPresetTimezone] = useState(8);
+
+  // 复用时区选项
+  const timezones = Array.from({ length: 27 }, (_, i) => i - 12).map((tz) => ({
+    value: tz,
+    label: `UTC${tz >= 0 ? "+" : ""}${tz}`,
+  }));
 
   const handleAddPreset = () => {
     if (!newPresetName.trim()) {
-      alert(t("validation.preset_name_required"));
+      setFormError(t("validation.preset_name_required"));
       return;
     }
 
     // 检查名称是否已存在
     if (presets.some((p) => p.name === newPresetName.trim())) {
-      alert(t("validation.preset_name_exists"));
+      setFormError(t("validation.preset_name_exists"));
       return;
     }
 
@@ -64,20 +73,26 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
               loop_count: newPresetLoopCount,
               loop_interval_seconds: newPresetLoopIntervalSeconds,
             }
-          : {
-              max_seconds: newPresetMaxHours * 3600,
-            },
+          : newPresetMode === "stopwatch"
+            ? {
+                max_seconds: newPresetMaxHours * 3600,
+              }
+            : {
+                timezone: newPresetTimezone,
+              },
     };
 
     onChange([...presets, newPreset]);
 
     // 重置表单
     setNewPresetName("");
+    setFormError("");
     setNewPresetDurationMinutes(25);
     setNewPresetLoop(false);
     setNewPresetLoopCount(0);
     setNewPresetLoopIntervalSeconds(0);
     setNewPresetMaxHours(24);
+    setNewPresetTimezone(8);
     setIsAdding(false);
   };
 
@@ -107,9 +122,12 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
           }`
         : "";
       return `${minutes} ${t("settings.countdown.duration_minutes")} ${loopInfo}`;
-    } else {
+    } else if (preset.mode === "stopwatch") {
       const hours = Math.floor((preset.config.max_seconds || 0) / 3600);
       return `${t("settings.stopwatch.max_hours")}: ${hours}`;
+    } else {
+      const tz = preset.config.timezone ?? 8;
+      return `${t("settings.world_clock.timezone")}: UTC${tz >= 0 ? "+" : ""}${tz}`;
     }
   };
 
@@ -144,7 +162,9 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
                     <span className="px-2 py-1 text-xs rounded bg-tertiary-dark text-text-secondary-dark">
                       {preset.mode === "countdown"
                         ? t("settings.presets.saved_badge_countdown")
-                        : t("settings.presets.saved_badge_stopwatch")}
+                        : preset.mode === "stopwatch"
+                          ? t("settings.presets.saved_badge_stopwatch")
+                          : t("settings.tabs.world_clock")}
                     </span>
                   </div>
                   <p className="text-xs text-text-secondary-dark">
@@ -193,14 +213,18 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
             <input
               type="text"
               value={newPresetName}
-              onChange={(e) =>
-                setNewPresetName((e.target as HTMLInputElement).value)
-              }
+              onChange={(e) => {
+                setNewPresetName((e.target as HTMLInputElement).value);
+                setFormError("");
+              }}
               placeholder={t("settings.presets.name_placeholder")}
               maxLength={20}
               className="w-full px-3 py-2 rounded-lg bg-primary-dark border border-border-dark text-text-primary-dark focus:border-accent-dark outline-none"
             />
           </SettingItem>
+          {formError && (
+            <div className="text-xs text-red-500 font-medium">{formError}</div>
+          )}
 
           {/* 模式选择 */}
           <SettingItem label={t("settings.presets.mode_label")}>
@@ -215,9 +239,15 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
                   value: "stopwatch",
                   label: t("settings.presets.saved_badge_stopwatch"),
                 },
+                {
+                  value: "world_clock",
+                  label: t("settings.tabs.world_clock"),
+                },
               ]}
               onChange={(value) =>
-                setNewPresetMode(value as "countdown" | "stopwatch")
+                setNewPresetMode(
+                  value as "countdown" | "stopwatch" | "world_clock",
+                )
               }
             />
           </SettingItem>
@@ -273,6 +303,17 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
                 </>
               )}
             </>
+          )}
+
+          {/* 世界时钟配置 */}
+          {newPresetMode === "world_clock" && (
+            <SettingItem label={t("settings.world_clock.timezone")}>
+              <SelectInput
+                value={newPresetTimezone}
+                options={timezones}
+                onChange={(value) => setNewPresetTimezone(parseInt(value, 10))}
+              />
+            </SettingItem>
           )}
 
           {/* 正计时配置 */}

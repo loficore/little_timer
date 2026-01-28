@@ -1,5 +1,6 @@
 import type { FunctionalComponent } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { Header } from "./components/Header";
 import { TabPanel } from "./components/TabPanel";
 import { BasicSettings } from "./components/BasicSettings";
 import { CountdownSettings } from "./components/CountdownSettings";
@@ -30,6 +31,7 @@ interface SettingsConfig {
       max_seconds: number;
     };
   };
+  presets?: TimerPreset[];
 }
 
 const DEFAULT_CONFIG: SettingsConfig = {
@@ -50,6 +52,7 @@ const DEFAULT_CONFIG: SettingsConfig = {
       max_seconds: 86400,
     },
   },
+  presets: [],
 };
 
 const TABS = [
@@ -117,6 +120,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           try {
             const parsedConfig = JSON.parse(settingsJson) as SettingsConfig;
             setConfig(parsedConfig);
+            setPresets(parsedConfig.presets || []);
             console.log("✅ 设置已加载:", parsedConfig);
           } catch (parseError) {
             console.error("❌ 解析设置 JSON 失败:", parseError);
@@ -162,7 +166,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
 
     try {
       // 调用后端保存设置
-      const configJson = JSON.stringify(config);
+      const configJson = JSON.stringify({ ...config, presets });
       window.webui?.call("change_settings", configJson);
 
       setTimeout(() => {
@@ -180,6 +184,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   const handleReset = () => {
     if (confirm(t("common.reset_confirm"))) {
       setConfig(DEFAULT_CONFIG);
+      setPresets([]);
       setSaveMessage(t("common.save_hint"));
     }
   };
@@ -191,17 +196,11 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         className="flex justify-between items-center px-4 sm:px-6 md:px-8 py-3 sm:py-4 md:py-6 border-b border-border-dark animate-slideUp flex-shrink-0"
         style={{ animationDelay: "0.1s", animationFillMode: "both" }}
       >
-        <button
-          onClick={onBackClick}
-          title={t("common.back")}
-          className="w-10 h-10 flex items-center justify-center rounded-xl bg-transparent border border-border-dark text-text-secondary-dark font-semibold cursor-pointer transition-all duration-200 hover:bg-secondary-dark hover:border-accent-dark hover:text-text-primary-dark hover:scale-110 active:bg-tertiary-dark active:scale-95"
-        >
-          ←
-        </button>
-        <h1 className="text-lg sm:text-xl md:text-2xl font-semibold">
-          ⚙ {t("common.settings_title")}
-        </h1>
-        <div className="w-10"></div>
+        <Header
+          title={`⚙ ${t("common.settings_title")}`}
+          showBack={true}
+          onBackClick={onBackClick}
+        />
       </div>
 
       {/* 标签页和内容 */}
@@ -315,6 +314,15 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
                     stopwatch: {
                       max_seconds: preset.config.max_seconds,
                     },
+                  },
+                });
+              } else if (preset.mode === "world_clock") {
+                setConfig({
+                  ...config,
+                  basic: {
+                    ...config.basic,
+                    default_mode: "world_clock",
+                    timezone: preset.config.timezone ?? config.basic.timezone,
                   },
                 });
               }

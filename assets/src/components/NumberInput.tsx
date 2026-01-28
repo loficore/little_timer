@@ -6,7 +6,10 @@ interface NumberInputProps {
   min?: number;
   max?: number;
   onChange: (value: number) => void;
+  label?: string;
+  unit?: string;
   hint?: string;
+  disabled?: boolean;
 }
 
 export const NumberInput = ({
@@ -14,7 +17,10 @@ export const NumberInput = ({
   min,
   max,
   onChange,
+  label,
+  unit,
   hint,
+  disabled = false,
 }: NumberInputProps) => {
   const [error, setError] = useState<string>("");
 
@@ -41,12 +47,12 @@ export const NumberInput = ({
 
     // 范围检查
     if (min !== undefined && numValue < min) {
-      setError(t("validation.input_min_value", { min }));
+      onChange(min);
       return;
     }
 
     if (max !== undefined && numValue > max) {
-      setError(t("validation.input_max_value", { max }));
+      onChange(max);
       return;
     }
 
@@ -63,17 +69,30 @@ export const NumberInput = ({
 
   return (
     <>
-      <input
-        type="number"
-        min={min}
-        max={max}
-        value={value}
-        onChange={handleChange}
-        onBlur={handleBlur}
-        className={`form-input input-base px-3 sm:px-4 py-2 sm:py-3 border rounded-lg text-xs sm:text-sm bg-secondary-dark text-text-primary-dark focus:border-accent-dark transition-colors duration-200 ${
-          error ? "border-red-500 focus:border-red-500" : "border-border-dark"
-        }`}
-      />
+      {label && (
+        <label className="block text-xs sm:text-sm font-medium text-text-primary-dark mb-2">
+          {label}
+        </label>
+      )}
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={min}
+          max={max}
+          value={value}
+          disabled={disabled}
+          onChange={handleChange}
+          onBlur={handleBlur}
+          className={`form-input input-base flex-1 px-3 sm:px-4 py-2 sm:py-3 border rounded-lg text-xs sm:text-sm bg-secondary-dark text-text-primary-dark focus:border-accent-dark transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+            error ? "border-red-500 focus:border-red-500" : "border-border-dark"
+          }`}
+        />
+        {unit && (
+          <span className="text-xs sm:text-sm text-text-secondary-dark whitespace-nowrap">
+            {unit}
+          </span>
+        )}
+      </div>
       {error && (
         <span className="text-xs text-red-500 font-medium">{error}</span>
       )}

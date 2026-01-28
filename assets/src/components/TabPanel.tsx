@@ -39,7 +39,7 @@ export const TabPanel = ({
             onClick={() => onTabChange(tab.id)}
             className={`px-3 sm:px-4 md:px-6 py-3 sm:py-4 font-medium text-xs sm:text-sm whitespace-nowrap flex items-center gap-1 sm:gap-2 transition-all duration-200 border-b-2 hover:scale-105 active:scale-95 min-h-[44px] ${
               activeTab === tab.id
-                ? "text-text-primary-dark border-accent-dark"
+                ? "text-accent-dark border-accent-dark"
                 : "text-text-secondary-dark border-transparent hover:text-text-primary-dark"
             }`}
           >

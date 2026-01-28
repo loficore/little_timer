@@ -49,7 +49,7 @@ test "时区校验 - 超出范围低于 -12" {
     defer manager.deinit();
 
     const result = manager.updateBasic(.{ .timezone = -13, .language = "ZH", .default_mode = .countdown });
-    try std.testing.expectError(settings_module.SettingsError.InvalidTimezone, result);
+    try std.testing.expectError(settings_module.ValidationError.InvalidTimezone, result);
 }
 
 test "时区校验 - 超出范围高于 14" {
@@ -58,7 +58,7 @@ test "时区校验 - 超出范围高于 14" {
     defer manager.deinit();
 
     const result = manager.updateBasic(.{ .timezone = 15, .language = "ZH", .default_mode = .countdown });
-    try std.testing.expectError(settings_module.SettingsError.InvalidTimezone, result);
+    try std.testing.expectError(settings_module.ValidationError.InvalidTimezone, result);
 }
 
 test "时区边界值 0" {
@@ -229,17 +229,17 @@ test "添加单个预设" {
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
 
-    const name = try allocator.dupe(u8, "番茄钟");
     const preset: interface.TimerPreset = .{
-        .name = name,
+        .name = "番茄钟",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 1500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
 
     try manager.addPreset(preset);
 
-    try std.testing.expectEqual(manager.preset_count, 1);
-    try std.testing.expect(std.mem.eql(u8, manager.timer_presets[0].name, "番茄钟"));
+    try std.testing.expectEqual(@as(usize, 1), manager.presets.count());
+    const p0 = manager.presets.get(0).?;
+    try std.testing.expect(std.mem.eql(u8, p0.name, "番茄钟"));
 }
 
 test "添加多个预设" {
@@ -247,16 +247,14 @@ test "添加多个预设" {
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
 
-    const name1 = try allocator.dupe(u8, "番茄钟");
     const preset1: interface.TimerPreset = .{
-        .name = name1,
+        .name = "番茄钟",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 1500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
 
-    const name2 = try allocator.dupe(u8, "短休息");
     const preset2: interface.TimerPreset = .{
-        .name = name2,
+        .name = "短休息",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 300, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
@@ -264,9 +262,11 @@ test "添加多个预设" {
     try manager.addPreset(preset1);
     try manager.addPreset(preset2);
 
-    try std.testing.expectEqual(manager.preset_count, 2);
-    try std.testing.expect(std.mem.eql(u8, manager.timer_presets[0].name, "番茄钟"));
-    try std.testing.expect(std.mem.eql(u8, manager.timer_presets[1].name, "短休息"));
+    try std.testing.expectEqual(@as(usize, 2), manager.presets.count());
+    const p1 = manager.presets.get(0).?;
+    try std.testing.expect(std.mem.eql(u8, p1.name, "番茄钟"));
+    const p2 = manager.presets.get(1).?;
+    try std.testing.expect(std.mem.eql(u8, p2.name, "短休息"));
 }
 
 test "预设名称冲突检测" {
@@ -274,27 +274,22 @@ test "预设名称冲突检测" {
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
 
-    const name1 = try allocator.dupe(u8, "番茄钟");
     const preset: interface.TimerPreset = .{
-        .name = name1,
+        .name = "番茄钟",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 1500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
 
     try manager.addPreset(preset);
 
-    const name2 = try allocator.dupe(u8, "番茄钟");
     const duplicate_preset: interface.TimerPreset = .{
-        .name = name2,
+        .name = "番茄钟",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 600, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
 
     const result = manager.addPreset(duplicate_preset);
-    try std.testing.expectError(settings_module.SettingsError.PresetNameConflict, result);
-
-    // 冲突时名称应该被释放
-    allocator.free(name2);
+    try std.testing.expectError(settings_module.PresetsError.PresetNameConflict, result);
 }
 
 test "预设名称为空检测" {
@@ -309,7 +304,7 @@ test "预设名称为空检测" {
     };
 
     const result = manager.addPreset(empty_preset);
-    try std.testing.expectError(settings_module.SettingsError.PresetNameEmpty, result);
+    try std.testing.expectError(settings_module.PresetsError.PresetNameEmpty, result);
 }
 
 test "buildClockConfig 倒计时模式" {
@@ -458,16 +453,14 @@ test "预设持久化 - savePresetsToFile() 和 loadPresetsFromFile()" {
     defer manager.deinit();
 
     // 添加预设
-    const name1 = try allocator.dupe(u8, "Test Preset 1");
     const preset1: interface.TimerPreset = .{
-        .name = name1,
+        .name = "Test Preset 1",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 900, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
 
-    const name2 = try allocator.dupe(u8, "Test Preset 2");
     const preset2: interface.TimerPreset = .{
-        .name = name2,
+        .name = "Test Preset 2",
         .mode = .STOPWATCH_MODE,
         .config = .{ .stopwatch = .{ .max_seconds = 3600 } },
     };
@@ -485,9 +478,11 @@ test "预设持久化 - savePresetsToFile() 和 loadPresetsFromFile()" {
     try manager2.loadPresetsFromFile();
 
     // 验证预设已加载
-    try std.testing.expectEqual(manager2.preset_count, 2);
-    try std.testing.expect(std.mem.eql(u8, manager2.timer_presets[0].name, "Test Preset 1"));
-    try std.testing.expect(std.mem.eql(u8, manager2.timer_presets[1].name, "Test Preset 2"));
+    try std.testing.expectEqual(@as(usize, 2), manager2.presets.count());
+    const p2 = manager2.presets.get(0).?;
+    try std.testing.expect(std.mem.eql(u8, p2.name, "Test Preset 1"));
+    const p3 = manager2.presets.get(1).?;
+    try std.testing.expect(std.mem.eql(u8, p3.name, "Test Preset 2"));
 
     // 清理
     std.fs.cwd().deleteFile(test_file_path) catch {};
@@ -539,9 +534,8 @@ test "resetToDefaults() 重置配置" {
     manager.config.clock_defaults.countdown.duration_seconds = 100;
 
     // 添加预设
-    const name = try allocator.dupe(u8, "Test Preset");
     const preset: interface.TimerPreset = .{
-        .name = name,
+        .name = "Test Preset",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
@@ -553,7 +547,7 @@ test "resetToDefaults() 重置配置" {
     // 验证配置已重置
     try std.testing.expectEqual(manager.config.basic.timezone, 8);
     try std.testing.expect(std.mem.eql(u8, manager.config.basic.language, "ZH"));
-    try std.testing.expectEqual(manager.preset_count, 0); // 预设应该被清空
+    try std.testing.expectEqual(@as(usize, 0), manager.presets.count()); // 预设应该被清空
     try std.testing.expect(manager.is_dirty);
 }
 

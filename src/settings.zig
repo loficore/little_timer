@@ -3,19 +3,15 @@ const std = @import("std");
 const toml = @import("toml");
 const interface = @import("interface.zig");
 const logger = @import("logger.zig");
+const validator = @import("settings_validator.zig");
+const presets_mod = @import("settings_presets.zig");
 pub const SettingsConfig = interface.SettingsConfig;
 const fs = std.fs;
 
-pub const SettingsError = error{
-    InvalidTimezone, // 时区超出范围 (-12 到 14)
-    InvalidLanguage, // 语言代码格式不正确
-    PresetNameConflict, // 预设名称已存在
-    PresetNameEmpty, // 预设名称为空
-    PresetListFull, // 预设列表已满
-    InvalidDuration, // 倒计时时长超出范围
-    InvalidLoopCount, // 循环次数超出范围
-    InvalidMaxSeconds, // 正计时上限超出范围
-};
+// 重新导出子模块类型，方便外部使用
+pub const ValidationError = validator.ValidationError;
+pub const PresetsError = presets_mod.PresetsError;
+pub const PresetsManager = presets_mod.PresetsManager;
 // 为基本设置创建类型别名以便使用
 pub const BasicConfig = struct {
     timezone: i8,
@@ -30,10 +26,8 @@ pub const SettingsManager = struct {
     file_path: []const u8,
     presets_file_path: []u8, // 预设文件完整路径（动态分配）
     is_dirty: bool = false,
-    /// 定时器预设列表（固定大小数组，最多10个预设）
-    timer_presets: [10]interface.TimerPreset = undefined,
-    /// 实际预设个数
-    preset_count: u32 = 0,
+    /// 预设管理器（动态数组，最多999个预设）
+    presets: PresetsManager,
     /// 动态分配的字符串字段（用于 JSON 解析后的内存管理）
     owned_language: ?[]u8 = null,
     owned_theme_mode: ?[]u8 = null,
@@ -57,6 +51,7 @@ pub const SettingsManager = struct {
             .file_path = file_path,
             .presets_file_path = presets_path,
             .config = SettingsConfig{},
+            .presets = PresetsManager.init(allocator),
         };
         return settings_manager;
     }
@@ -116,7 +111,7 @@ pub const SettingsManager = struct {
         logger.global_logger.info("✓ 设置文件加载成功", .{});
 
         // 尝试加载预设文件（独立 JSON 持久化）
-        self.loadPresetsFromFile() catch |err| {
+        self.presets.loadFromFile(self.presets_file_path, self.config.basic.timezone) catch |err| {
             logger.global_logger.warn("加载预设失败（将忽略）：{}", .{err});
         };
     }
@@ -163,7 +158,7 @@ pub const SettingsManager = struct {
         logger.global_logger.info("✓ 设置文件保存成功", .{});
 
         // 单独保存预设 JSON
-        self.savePresetsToFile() catch |err| {
+        self.presets.saveToFile(self.presets_file_path) catch |err| {
             logger.global_logger.err("保存预设失败: {}", .{err});
         };
     }
@@ -186,19 +181,11 @@ pub const SettingsManager = struct {
     /// - **basic_config**: 新的基本配置
     ///
     /// 返回:
-    /// - SettingsError!void: 如果参数无效则返回错误
-    pub fn updateBasic(self: *SettingsManager, basic_config: BasicConfig) SettingsError!void {
-        // 验证时区
-        if (basic_config.timezone < -12 or basic_config.timezone > 14) {
-            logger.global_logger.err("错误: 时区必须在 -12 到 14 之间，输入值: {}", .{basic_config.timezone});
-            return error.InvalidTimezone;
-        }
-
-        // 验证语言代码长度（问题6：添加语言代码验证）
-        if (basic_config.language.len == 0 or basic_config.language.len > 10) {
-            logger.global_logger.err("错误: 语言代码长度必须在 1-10 之间，输入长度: {}", .{basic_config.language.len});
-            return error.InvalidLanguage;
-        }
+    /// - ValidationError!void: 如果参数无效则返回错误
+    pub fn updateBasic(self: *SettingsManager, basic_config: BasicConfig) ValidationError!void {
+        // 使用 validator 模块进行验证
+        try validator.validateTimezone(basic_config.timezone);
+        try validator.validateLanguage(basic_config.language);
 
         self.config.basic.timezone = basic_config.timezone;
         self.config.basic.language = basic_config.language;
@@ -215,34 +202,10 @@ pub const SettingsManager = struct {
     /// - **preset**: 要添加的计时器预设
     ///
     /// 返回:
-    /// - SettingsError!void: 如果预设名称无效或已存在则返回错误
-    pub fn addPreset(self: *SettingsManager, preset: interface.TimerPreset) SettingsError!void {
-        // 验证预设名称不为空
-        if (preset.name.len == 0) {
-            logger.global_logger.err("错误: 预设名称不能为空", .{});
-            return error.PresetNameEmpty;
-        }
-
-        // 检查是否已存在同名预设
-        for (0..self.preset_count) |i| {
-            if (std.mem.eql(u8, self.timer_presets[i].name, preset.name)) {
-                logger.global_logger.err("错误: 预设名称 '{s}' 已存在", .{preset.name});
-                return error.PresetNameConflict;
-            }
-        }
-
-        // 检查是否已满
-        if (self.preset_count >= 10) {
-            logger.global_logger.err("错误: 预设列表已满（最多10个）", .{});
-            return error.PresetListFull; // 问题5：使用正确的错误类型
-        }
-
-        // 添加新预设
-        self.timer_presets[self.preset_count] = preset;
-        self.preset_count += 1;
+    /// - !void: 如果预设名称无效或已存在则返回错误
+    pub fn addPreset(self: *SettingsManager, preset: interface.TimerPreset) !void {
+        try self.presets.add(preset);
         self.is_dirty = true;
-
-        logger.global_logger.info("✓ 预设 '{s}' 已添加 (共 {} 个预设)", .{ preset.name, self.preset_count });
     }
 
     /// 根据默认模式构建时钟配置
@@ -315,11 +278,11 @@ pub const SettingsManager = struct {
         try w.writeAll(",\"tick_interval_ms\":");
         try w.print("{}", .{self.config.logging.tick_interval_ms});
 
-        // 添加预设序列化
+        // 添加预设序列化（使用动态预设列表）
         try w.writeAll("},\"presets\":[");
-        for (0..self.preset_count) |i| {
+        const preset_items = self.presets.presets.items;
+        for (preset_items, 0..) |preset, i| {
             if (i > 0) try w.writeByte(',');
-            const preset = self.timer_presets[i];
 
             try w.writeAll("{\"name\":\"");
             // 转义字符串中的特殊字符
@@ -502,11 +465,11 @@ pub const SettingsManager = struct {
         // 解析 presets（可选）
         if (root.object.get("presets")) |presets_val| {
             if (presets_val == .array) {
-                // 清空现有预设计数
-                self.preset_count = 0;
+                // 清空现有预设
+                self.presets.clear();
 
                 for (presets_val.array.items) |pval| {
-                    if (self.preset_count >= 10) break;
+                    if (self.presets.count() >= self.presets.max_count) break;
                     if (pval != .object) continue;
 
                     const pobj = pval.object;
@@ -519,37 +482,57 @@ pub const SettingsManager = struct {
                     const cfg_val = cfg_val_opt.?;
                     if (name_val != .string or mode_val != .string or cfg_val != .object) continue;
 
-                    // 复制名称
-                    const name_dup = try self.allocator.dupe(u8, name_val.string);
-
                     var config_union: interface.ClockTaskConfig = undefined;
                     var mode_enum: interface.ModeEnumT = undefined;
                     if (std.mem.eql(u8, mode_val.string, "countdown")) {
-                        const dur = if (cfg_val.object.get("duration_seconds")) |v| @as(u64, @intCast(v.integer)) else 25 * 60;
+                        const dur = if (cfg_val.object.get("duration_seconds")) |v|
+                            validator.safeU64FromJson(v.integer, 1, 86400) orelse 25 * 60
+                        else
+                            25 * 60;
                         const loop = if (cfg_val.object.get("loop")) |v| switch (v) {
                             .bool => |b| b,
                             .integer => |i| i != 0,
                             else => false,
                         } else false;
-                        const loop_count = if (cfg_val.object.get("loop_count")) |v| @as(u32, @intCast(v.integer)) else 0;
-                        const loop_interval = if (cfg_val.object.get("loop_interval_seconds")) |v| @as(u64, @intCast(v.integer)) else 0;
+                        const loop_count = if (cfg_val.object.get("loop_count")) |v|
+                            validator.safeU32FromJson(v.integer, 1000) orelse 0
+                        else
+                            0;
+                        const loop_interval = if (cfg_val.object.get("loop_interval_seconds")) |v|
+                            validator.safeU64FromJson(v.integer, 0, 3600) orelse 0
+                        else
+                            0;
                         config_union = .{ .countdown = .{ .duration_seconds = dur, .loop = loop, .loop_count = loop_count, .loop_interval_seconds = loop_interval }, .stopwatch = .{ .max_seconds = 24 * 3600 }, .world_clock = .{ .timezone = 8 } };
                         mode_enum = .COUNTDOWN_MODE;
                     } else if (std.mem.eql(u8, mode_val.string, "stopwatch")) {
-                        const max = if (cfg_val.object.get("max_seconds")) |v| @as(u64, @intCast(v.integer)) else 24 * 3600;
+                        const max = if (cfg_val.object.get("max_seconds")) |v|
+                            validator.safeU64FromJson(v.integer, 1, 86400 * 365) orelse 24 * 3600
+                        else
+                            24 * 3600;
                         config_union = .{ .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 }, .stopwatch = .{ .max_seconds = max }, .world_clock = .{ .timezone = 8 } };
                         mode_enum = .STOPWATCH_MODE;
                     } else if (std.mem.eql(u8, mode_val.string, "world_clock")) {
-                        const tz = if (cfg_val.object.get("timezone")) |v| @as(i8, @intCast(v.integer)) else self.config.basic.timezone;
+                        const tz = if (cfg_val.object.get("timezone")) |v|
+                            validator.safeI8FromJson(v.integer, -12, 14) orelse self.config.basic.timezone
+                        else
+                            self.config.basic.timezone;
                         config_union = .{ .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 }, .stopwatch = .{ .max_seconds = 24 * 3600 }, .world_clock = .{ .timezone = tz } };
                         mode_enum = .WORLD_CLOCK_MODE;
                     } else {
-                        self.allocator.free(name_dup);
                         continue;
                     }
 
-                    self.timer_presets[self.preset_count] = .{ .name = name_dup, .mode = mode_enum, .config = config_union };
-                    self.preset_count += 1;
+                    const preset: interface.TimerPreset = .{
+                        .name = name_val.string,
+                        .mode = mode_enum,
+                        .config = config_union,
+                    };
+
+                    // 使用 PresetsManager 来处理拷贝与去重
+                    self.presets.add(preset) catch |err| {
+                        logger.global_logger.warn("⚠️ 添加预设失败: {any}", .{err});
+                        continue;
+                    };
                 }
             }
         }
@@ -608,11 +591,8 @@ pub const SettingsManager = struct {
         if (self.owned_theme_mode) |old| self.allocator.free(old);
         if (self.owned_log_level) |old| self.allocator.free(old);
 
-        // 释放所有预设名称的内存
-        for (0..self.preset_count) |i| {
-            self.allocator.free(self.timer_presets[i].name);
-        }
-        self.preset_count = 0;
+        // 清空预设
+        self.presets.clear();
 
         // 重置为默认配置（使用 SettingsConfig 的默认初始化值）
         self.config = SettingsConfig{};
@@ -663,10 +643,8 @@ pub const SettingsManager = struct {
     /// 参数:
     /// - **self**: SettingsManager实例指针
     pub fn deinit(self: *SettingsManager) void {
-        // 释放所有预设名称的内存
-        for (0..self.preset_count) |i| {
-            self.allocator.free(self.timer_presets[i].name);
-        }
+        // 清理预设管理器
+        self.presets.deinit();
         // 释放预设文件路径
         self.allocator.free(self.presets_file_path);
 
@@ -678,133 +656,11 @@ pub const SettingsManager = struct {
 
     /// 将预设保存到单独的 JSON 文件（与 settings.toml 同目录）
     pub fn savePresetsToFile(self: *SettingsManager) !void {
-        const file = fs.cwd().createFile(self.presets_file_path, .{ .truncate = true }) catch |err| {
-            logger.global_logger.err("无法创建预设文件 {s}: {}", .{ self.presets_file_path, err });
-            return err;
-        };
-        defer file.close();
-
-        // 使用 ArrayList 动态构建 JSON
-        var json_list = std.ArrayList(u8){};
-        defer json_list.deinit(self.allocator);
-        const w = json_list.writer(self.allocator);
-
-        // 简单字符串转义（仅处理 \ 和 "）
-        const writeEscapedString = struct {
-            fn write(writer: anytype, s: []const u8) !void {
-                try writer.writeByte('"');
-                for (s) |ch| {
-                    switch (ch) {
-                        '"' => try writer.writeAll("\\\""),
-                        '\\' => try writer.writeAll("\\\\"),
-                        else => try writer.writeByte(ch),
-                    }
-                }
-                try writer.writeByte('"');
-            }
-        }.write;
-
-        try w.writeAll("{\"presets\":[");
-        for (0..self.preset_count) |i| {
-            const p = self.timer_presets[i];
-            if (i != 0) try w.writeByte(',');
-
-            try w.writeByte('{');
-            try w.writeAll("\"name\":");
-            try writeEscapedString(w, p.name);
-            try w.writeAll(",\"mode\":");
-            switch (p.mode) {
-                .COUNTDOWN_MODE => try w.writeAll("\"countdown\""),
-                .STOPWATCH_MODE => try w.writeAll("\"stopwatch\""),
-                .WORLD_CLOCK_MODE => try w.writeAll("\"world_clock\""),
-            }
-            try w.writeAll(",\"config\":{");
-            switch (p.mode) {
-                .COUNTDOWN_MODE => {
-                    try w.print("\"duration_seconds\":{},\"loop\":{},\"loop_count\":{},\"loop_interval_seconds\":{}", .{ p.config.countdown.duration_seconds, @intFromBool(p.config.countdown.loop), p.config.countdown.loop_count, p.config.countdown.loop_interval_seconds });
-                },
-                .STOPWATCH_MODE => {
-                    try w.print("\"max_seconds\":{}", .{p.config.stopwatch.max_seconds});
-                },
-                .WORLD_CLOCK_MODE => {
-                    try w.print("\"timezone\":{}", .{p.config.world_clock.timezone});
-                },
-            }
-            try w.writeAll("}}");
-        }
-        try w.writeAll("]}");
-        // 将 ArrayList 内容写入文件
-        _ = try file.writeAll(json_list.items);
-        logger.global_logger.info("✓ 预设已保存到 {s}", .{self.presets_file_path});
+        try self.presets.saveToFile(self.presets_file_path);
     }
 
     /// 从预设文件加载预设（与 settings.toml 同目录）
     pub fn loadPresetsFromFile(self: *SettingsManager) !void {
-        const file = fs.cwd().openFile(self.presets_file_path, .{}) catch |err| {
-            // 文件可能不存在，不是致命错误
-            logger.global_logger.debug("预设文件 {s} 不存在或无法打开: {}", .{ self.presets_file_path, err });
-            return err;
-        };
-        defer file.close();
-
-        const size = try file.getEndPos();
-        const buf = try self.allocator.alloc(u8, @intCast(size));
-        defer self.allocator.free(buf);
-
-        _ = try file.readAll(buf);
-
-        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, buf, .{});
-        defer parsed.deinit();
-        const root = parsed.value;
-        if (root.object.get("presets")) |presets_val| {
-            if (presets_val == .array) {
-                self.preset_count = 0;
-                for (presets_val.array.items) |pval| {
-                    if (self.preset_count >= 10) break;
-                    if (pval != .object) continue;
-                    const pobj = pval.object;
-                    const name_val_opt = pobj.get("name");
-                    const mode_val_opt = pobj.get("mode");
-                    const cfg_val_opt = pobj.get("config");
-                    if (name_val_opt == null or mode_val_opt == null or cfg_val_opt == null) continue;
-                    const name_val = name_val_opt.?;
-                    const mode_val = mode_val_opt.?;
-                    const cfg_val = cfg_val_opt.?;
-                    if (name_val != .string or mode_val != .string or cfg_val != .object) continue;
-
-                    const name_dup = try self.allocator.dupe(u8, name_val.string);
-
-                    var config_union: interface.ClockTaskConfig = undefined;
-                    var mode_enum: interface.ModeEnumT = undefined;
-                    if (std.mem.eql(u8, mode_val.string, "countdown")) {
-                        const dur = if (cfg_val.object.get("duration_seconds")) |v| @as(u64, @intCast(v.integer)) else 25 * 60;
-                        const loop = if (cfg_val.object.get("loop")) |v| switch (v) {
-                            .bool => |b| b,
-                            .integer => |i| i != 0,
-                            else => false,
-                        } else false;
-                        const loop_count = if (cfg_val.object.get("loop_count")) |v| @as(u32, @intCast(v.integer)) else 0;
-                        const loop_interval = if (cfg_val.object.get("loop_interval_seconds")) |v| @as(u64, @intCast(v.integer)) else 0;
-                        config_union = .{ .countdown = .{ .duration_seconds = dur, .loop = loop, .loop_count = loop_count, .loop_interval_seconds = loop_interval }, .stopwatch = .{ .max_seconds = 24 * 3600 }, .world_clock = .{ .timezone = 8 } };
-                        mode_enum = .COUNTDOWN_MODE;
-                    } else if (std.mem.eql(u8, mode_val.string, "stopwatch")) {
-                        const max = if (cfg_val.object.get("max_seconds")) |v| @as(u64, @intCast(v.integer)) else 24 * 3600;
-                        config_union = .{ .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 }, .stopwatch = .{ .max_seconds = max }, .world_clock = .{ .timezone = 8 } };
-                        mode_enum = .STOPWATCH_MODE;
-                    } else if (std.mem.eql(u8, mode_val.string, "world_clock")) {
-                        const tz = if (cfg_val.object.get("timezone")) |v| @as(i8, @intCast(v.integer)) else self.config.basic.timezone;
-                        config_union = .{ .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 }, .stopwatch = .{ .max_seconds = 24 * 3600 }, .world_clock = .{ .timezone = tz } };
-                        mode_enum = .WORLD_CLOCK_MODE;
-                    } else {
-                        self.allocator.free(name_dup);
-                        continue;
-                    }
-
-                    self.timer_presets[self.preset_count] = .{ .name = name_dup, .mode = mode_enum, .config = config_union };
-                    self.preset_count += 1;
-                }
-                logger.global_logger.info("✓ 已从 {s} 加载 {} 个预设", .{ self.presets_file_path, self.preset_count });
-            }
-        }
+        try self.presets.loadFromFile(self.presets_file_path, self.config.basic.timezone);
     }
 };

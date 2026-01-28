@@ -96,6 +96,9 @@ pub const MainApplication = struct {
             self.webui.tick_interval_ms = 1000;
         }
 
+        // 读取设置中的时区（用于前端世界时钟和状态同步）
+        self.webui.setTimezone(self.settings_manager.config.basic.timezone);
+
         self.setGlobalApp();
 
         // 更新初始显示
@@ -263,6 +266,11 @@ pub const MainApplication = struct {
             self.clock_manager = clock.ClockManager.init(
                 new_clock_config,
             );
+
+            // 更新前端的默认时区，确保世界时钟模式立即反映设置变化
+            self.webui.setTimezone(self.settings_manager.config.basic.timezone);
+            // 设置变更后立即推送最新配置到前端
+            self.webui.pushSettings();
             logger.global_logger.info("✓ 设置已更新，时钟已重新初始化", .{});
         }
     }

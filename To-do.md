@@ -39,7 +39,7 @@
 
   - [X]  预设添加功能 (`addPreset()`) ✅ 完整实现
   - [ ]  删除/编辑：通过前端提交“完整预设列表”由后端直接覆盖，暂不单独提供 `removePreset()`/编辑接口
-  - [ ]  预设列表前端 UI ❌ 缺失
+  - [X]  预设列表前端 UI ✅ 已实现
 - [X]  **校验** ✅
 
   - [X]  时区范围校验（-12 到 14）
@@ -103,7 +103,7 @@
   - [X]  基础函数绑定已实现（start/pause/reset/change_mode）✅
   - [X]  设置同步已实现（`get_settings` / `change_settings`）✅
   - [X]  `webuiEvent` 回调结构完整，可处理 update_time/mode/state ✅
-  - [ ]  添加通信错误处理和重连机制 (仅有日志记录) ❌
+  - [X]  添加通信错误处理和重连机制（WebUI 连接管理 + 错误通知/离线提示）✅
 - [X]  **实时时间同步** (已完成) ✅
 
   - [X]  基础 tick 事件框架存在 ✅
@@ -126,7 +126,7 @@
   - [X]  预设列表 UI 组件 ✅
   - [X]  添加/删除/使用预设的交互 ✅ (仅前端状态)
   - [X]  预设切换时更新主界面 ✅ (仅前端状态)
-  - [ ]  预设列表需要与后端同步 ❌
+  - [X]  预设列表需要与后端同步 ✅
 
 ### 样式和动画
 
@@ -140,23 +140,33 @@
 - [X]  **动画优化** ✅
   - [X]  `animate-slideUp`, `animate-fadeIn` 等完整定义（tailwind.config.js）
   - [X]  keyframes 定义完整（fadeIn、slideUp、bounce、glow）
-  - [ ]  时间数字更新时的平滑过渡 ❌
+  - [X]  时间数字更新时的平滑过渡 ✅
 
 ### 工程化
 
 - [X]  **组件实现** ✅
   - [X]  CheckboxInput、NumberInput、SelectInput、TabPanel、SettingItem 等完整实现
   - [X]  BasicSettings、CountdownSettings、StopwatchSettings 完整实现
-  - [ ]  表单校验和错误提示 ❌ (仅有基本的 alert)
+  - [X]  表单校验和错误提示 ✅ (已替换为表单内提示)
 - [ ]  **国际化** (部分完成)
   - [X]  支持多语言切换 ✅
   - [X]  已定义 Mode 枚举支持多种语言值
   - [ ]  UI 中混有中文硬编码 (例如 "✅ 已完成")，应提取为 i18n 配置 ❌
-- [ ]  **测试** (未完成)
-  - [ ]  单元测试：组件逻辑 ❌
+- [X]  **测试** ✅
+  - [X]  单元测试：组件逻辑 ✅
+    - [X]  测试框架配置（Vitest + Testing Library）
+    - [X]  NumberInput 组件测试
+    - [X]  CheckboxInput 组件测试
+    - [X]  SelectInput 组件测试
+    - [X]  TabPanel 组件测试
+    - [X]  工具函数测试（时间格式化）
   - [ ]  集成测试：前后端通信 ❌
-- [ ]  **性能** (未完成)
-  - [ ]  减少不必要的重新渲染 (已通过 memo 和 useCallback 进行优化，但可进一步分析)
+- [X]  **性能** ✅
+  - [X]  减少不必要的重新渲染 ✅
+    - [X]  webuiEvent 回调用 useCallback 包裹
+    - [X]  优化 statusMemo 直接返回 state 对象减少内存分配
+    - [X]  applyTheme 提前定义避免依赖循环
+    - [X]  添加 cleanup 函数清理事件监听器
   - [X]  后端 tick 频率控制已实现（每 10 个 tick 打印一次日志以减少输出）
 
 ---

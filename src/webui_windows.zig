@@ -188,6 +188,9 @@ pub const WebUIManager = struct {
             .timezone = 8,
         };
 
+        // 初始化时主动推送设置到前端，避免等待用户请求
+        self.pushSettings();
+
         logger.global_logger.info("WebUI窗口管理器初始化完成", .{});
     }
 
@@ -412,6 +415,44 @@ pub const WebUIManager = struct {
 
         // 4. 缓存当前快照，作为下次比较的基准
         self.snap_shot = current_snapshot;
+    }
+
+    /// 配置前端使用的默认时区（非世界时钟模式也会携带此字段）
+    pub fn setTimezone(self: *WebUIManager, timezone: i8) void {
+        self.snap_shot.timezone = timezone;
+        logger.global_logger.info("✓ WebUI 时区已更新为 {}", .{timezone});
+    }
+
+    /// 主动推送设置 JSON 到前端（用于初始化或设置变更后）
+    pub fn pushSettings(self: *WebUIManager) void {
+        if (global_app) |app_ptr| {
+            const app = @import("app.zig").MainApplication;
+            const main_app = @as(*app, @ptrCast(@alignCast(app_ptr)));
+            const allocator = main_app.settings_manager.allocator;
+
+            const json_str = main_app.settings_manager.toJsonAlloc() catch |err| {
+                logger.global_logger.err("生成设置 JSON 失败: {any}", .{err});
+                return;
+            };
+            defer allocator.free(json_str);
+
+            var js_list = std.ArrayList(u8){};
+            defer js_list.deinit(allocator);
+            const js_writer = js_list.writer(allocator);
+
+            js_writer.writeAll("updateSettingsDisplay(`") catch return;
+            js_writer.writeAll(json_str) catch return;
+            js_writer.writeAll("`)") catch return;
+
+            const js_code = js_list.toOwnedSliceSentinel(allocator, 0) catch return;
+            defer allocator.free(js_code);
+
+            logger.global_logger.debug("pushSettings: 执行 JS (长度: {})", .{js_code.len});
+            self.window.run(js_code);
+            logger.global_logger.info("✓ 设置已推送到前端", .{});
+        } else {
+            logger.global_logger.warn("pushSettings: global_app 为 null，无法推送设置", .{});
+        }
     }
 
     /// 处理用户事件
@@ -670,56 +711,21 @@ fn handleModeChange(e: *webui_module.Event) void {
     }
 }
 
+/// "获取设置"事件处理器
+///
+/// 参数:
+/// - **e**: JavaScript事件
 fn handleGetSettings(e: *webui_module.Event) void {
     logger.global_logger.debug("handleGetSettings 被调用", .{});
-    // 从事件中获取上下文（WebUIManager实例）
+
     const manager_ptr = e.getContext() catch {
         logger.global_logger.warn("无法获取上下文", .{});
         return;
     };
-
     const manager = @as(*WebUIManager, @ptrCast(@alignCast(manager_ptr)));
 
-    // 使用一个简单的栈缓冲区进行事件传递（因为接口需要 [:0]u8）
-    // 但实际的 JSON 由 SettingsManager 动态分配
-    var temp_buffer: [1:0]u8 = .{0};
-
-    // 通过事件系统触发，应用程序内部会调用 toJsonAlloc() 动态生成 JSON
-    manager.handleUserEvent(.{ .settings_event = .{ .get_settings = temp_buffer[0..0 :0] } });
-
-    // 注意：上面的事件处理实际上不使用 temp_buffer
-    // 因为 handleSettingsEvent 会直接调用 toJsonAlloc() 并通过另一种方式返回
-    // 我们需要修改这个接口设计
-
-    // 临时方案：直接从 global_app 获取 settings
-    if (global_app) |app_ptr| {
-        const app = @import("app.zig").MainApplication;
-        const main_app = @as(*app, @ptrCast(@alignCast(app_ptr)));
-
-        // 调用 settings_manager 的 toJsonAlloc 获取动态分配的 JSON
-        const json_str = main_app.settings_manager.toJsonAlloc() catch |err| {
-            logger.global_logger.err("生成设置 JSON 失败: {any}", .{err});
-            return;
-        };
-        defer main_app.settings_manager.allocator.free(json_str);
-
-        // 构建 JavaScript 代码（也使用动态分配）
-        var js_list = std.ArrayList(u8){};
-        defer js_list.deinit(main_app.settings_manager.allocator);
-        const js_writer = js_list.writer(main_app.settings_manager.allocator);
-
-        // 使用反引号包裹 JSON 字符串，避免转义问题
-        js_writer.writeAll("updateSettingsDisplay(`") catch return;
-        js_writer.writeAll(json_str) catch return;
-        js_writer.writeAll("`)") catch return;
-
-        // 转换为 null 终止字符串
-        const js_code = js_list.toOwnedSliceSentinel(main_app.settings_manager.allocator, 0) catch return;
-        defer main_app.settings_manager.allocator.free(js_code);
-
-        logger.global_logger.debug("  执行 JS (长度: {})", .{js_code.len});
-        manager.window.run(js_code);
-    }
+    // 直接复用 pushSettings 方法，避免重复逻辑validator + presets 可行后再拆 JSON？
+    manager.pushSettings();
 }
 
 fn handleChangeSettings(e: *webui_module.Event) void {

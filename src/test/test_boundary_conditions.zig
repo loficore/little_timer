@@ -201,12 +201,15 @@ test "问题5: 预设列表满返回正确错误类型" {
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
 
+    // 缩小上限以验证满载错误分支
+    manager.presets.max_count = 10;
+
     // 添加 10 个预设（达到上限）
     for (0..10) |i| {
         var buf: [50]u8 = undefined;
         const name = try std.fmt.bufPrint(&buf, "预设{d}", .{i});
         const preset: interface.TimerPreset = .{
-            .name = try allocator.dupe(u8, name),
+            .name = name,
             .mode = .COUNTDOWN_MODE,
             .config = .{ .countdown = .{ .duration_seconds = 1500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
         };
@@ -214,19 +217,15 @@ test "问题5: 预设列表满返回正确错误类型" {
     }
 
     // 尝试添加第 11 个（应该返回 PresetListFull）
-    const name = try allocator.dupe(u8, "预设10");
     const preset: interface.TimerPreset = .{
-        .name = name,
+        .name = "预设10",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 1500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
 
     const result = manager.addPreset(preset);
 
-    try std.testing.expectError(settings_module.SettingsError.PresetListFull, result);
-
-    // 清理
-    allocator.free(name);
+    try std.testing.expectError(settings_module.PresetsError.PresetListFull, result);
 }
 
 test "问题6: 语言代码过长被拒绝" {
@@ -282,7 +281,7 @@ test "问题6: updateBasic 方法验证语言代码长度" {
         .default_mode = .countdown,
     });
 
-    try std.testing.expectError(settings_module.SettingsError.InvalidLanguage, result);
+    try std.testing.expectError(settings_module.ValidationError.InvalidLanguage, result);
 }
 
 test "问题6: updateBasic 方法验证语言代码不为空" {
@@ -297,5 +296,5 @@ test "问题6: updateBasic 方法验证语言代码不为空" {
         .default_mode = .countdown,
     });
 
-    try std.testing.expectError(settings_module.SettingsError.InvalidLanguage, result);
+    try std.testing.expectError(settings_module.ValidationError.InvalidLanguage, result);
 }

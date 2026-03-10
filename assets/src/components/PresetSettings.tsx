@@ -1,6 +1,7 @@
 import type { FunctionalComponent } from "preact";
 import { useState } from "preact/hooks";
 import { SettingItem } from "./SettingItem";
+import { TimeInput } from "./TimeInput";
 import { NumberInput } from "./NumberInput";
 import { CheckboxInput } from "./CheckboxInput";
 import { SelectInput } from "./SelectInput";
@@ -36,12 +37,12 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
     "countdown" | "stopwatch" | "world_clock"
   >("countdown");
   const [formError, setFormError] = useState("");
-  const [newPresetDurationMinutes, setNewPresetDurationMinutes] = useState(25);
+  const [newPresetDurationSeconds, setNewPresetDurationSeconds] = useState(1500);
   const [newPresetLoop, setNewPresetLoop] = useState(false);
   const [newPresetLoopCount, setNewPresetLoopCount] = useState(0);
   const [newPresetLoopIntervalSeconds, setNewPresetLoopIntervalSeconds] =
     useState(0);
-  const [newPresetMaxHours, setNewPresetMaxHours] = useState(24);
+  const [newPresetMaxSeconds, setNewPresetMaxSeconds] = useState(86400);
   const [newPresetTimezone, setNewPresetTimezone] = useState(8);
 
   // 复用时区选项
@@ -68,14 +69,14 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
       config:
         newPresetMode === "countdown"
           ? {
-              duration_seconds: newPresetDurationMinutes * 60,
+              duration_seconds: newPresetDurationSeconds,
               loop: newPresetLoop,
               loop_count: newPresetLoopCount,
               loop_interval_seconds: newPresetLoopIntervalSeconds,
             }
           : newPresetMode === "stopwatch"
             ? {
-                max_seconds: newPresetMaxHours * 3600,
+                max_seconds: newPresetMaxSeconds,
               }
             : {
                 timezone: newPresetTimezone,
@@ -87,11 +88,11 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
     // 重置表单
     setNewPresetName("");
     setFormError("");
-    setNewPresetDurationMinutes(25);
+    setNewPresetDurationSeconds(1500);
     setNewPresetLoop(false);
     setNewPresetLoopCount(0);
     setNewPresetLoopIntervalSeconds(0);
-    setNewPresetMaxHours(24);
+    setNewPresetMaxSeconds(86400);
     setNewPresetTimezone(8);
     setIsAdding(false);
   };
@@ -256,20 +257,19 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
           {newPresetMode === "countdown" && (
             <>
               <SettingItem label={t("settings.presets.duration_label")}>
-                <NumberInput
-                  value={newPresetDurationMinutes}
-                  min={1}
-                  max={1440}
-                  onChange={(value) => setNewPresetDurationMinutes(value || 1)}
+                <TimeInput
+                  value={newPresetDurationSeconds}
+                  maxHours={24}
+                  onChange={(value) => setNewPresetDurationSeconds(value)}
                   hint={t("settings.countdown.duration_hint", {
-                    minutes: newPresetDurationMinutes,
+                    minutes: Math.floor(newPresetDurationSeconds / 60),
                   })}
                 />
               </SettingItem>
 
               <SettingItem label={t("settings.presets.loop_label")}>
                 <CheckboxInput
-                  checked={newPresetLoop}
+                  value={newPresetLoop}
                   onChange={(checked) => setNewPresetLoop(checked)}
                   label={t("settings.countdown.loop_enable")}
                 />
@@ -290,12 +290,12 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
                   <SettingItem
                     label={t("settings.presets.loop_interval_label")}
                   >
-                    <NumberInput
+                    <TimeInput
                       value={newPresetLoopIntervalSeconds}
-                      min={0}
-                      max={3600}
+                      maxHours={1}
+                      showHours={false}
                       onChange={(value) =>
-                        setNewPresetLoopIntervalSeconds(value || 0)
+                        setNewPresetLoopIntervalSeconds(value)
                       }
                       hint={t("settings.countdown.loop_interval_hint")}
                     />
@@ -319,13 +319,12 @@ export const PresetSettings: FunctionalComponent<PresetSettingsProps> = ({
           {/* 正计时配置 */}
           {newPresetMode === "stopwatch" && (
             <SettingItem label={t("settings.presets.max_hours_label")}>
-              <NumberInput
-                value={newPresetMaxHours}
-                min={1}
-                max={168}
-                onChange={(value) => setNewPresetMaxHours(value || 1)}
+              <TimeInput
+                value={newPresetMaxSeconds}
+                maxHours={168}
+                onChange={(value) => setNewPresetMaxSeconds(value)}
                 hint={t("settings.stopwatch.max_hours_hint", {
-                  hours: newPresetMaxHours,
+                  hours: Math.floor(newPresetMaxSeconds / 3600),
                 })}
               />
             </SettingItem>

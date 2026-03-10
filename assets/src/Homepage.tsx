@@ -79,8 +79,6 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     timezone: 8,
   }));
   const prevFinishedRef = useRef(false);
-  const [isTimeAnimating, setIsTimeAnimating] = useState(false);
-  const timeAnimTimerRef = useRef<number | null>(null);
 
   // 应用主题（提前定义以便在 useEffect 中使用）
   const applyTheme = useCallback((theme: string) => {
@@ -226,22 +224,7 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     };
   }, [applyTheme, handleWebuiEvent]);
 
-  // 时间变化时触发平滑过渡动画
-  useEffect(() => {
-    if (timeAnimTimerRef.current) {
-      window.clearTimeout(timeAnimTimerRef.current);
-    }
-    setIsTimeAnimating(true);
-    timeAnimTimerRef.current = window.setTimeout(() => {
-      setIsTimeAnimating(false);
-    }, 180);
-
-    return () => {
-      if (timeAnimTimerRef.current) {
-        window.clearTimeout(timeAnimTimerRef.current);
-      }
-    };
-  }, [state.time]);
+  // 移除时间动画逻辑 - 采用极简设计，数字瞬间更新
 
   // 世界时钟前端自驱 tick：根据 settings 时区每秒刷新
   useEffect(() => {
@@ -394,8 +377,6 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
         <TimeDisplay
           time={statusMemo.time}
           isRunning={statusMemo.isRunning}
-          isAnimating={isTimeAnimating}
-          animationDelay="0.2s"
         />
 
         {/* 循环和休息状态提示 */}

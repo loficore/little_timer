@@ -4,21 +4,30 @@
 // - key = "string" | integer | boolean
 // - 不支持数组、内联表，请在语言文件中避免
 
-import zhRaw from "../../i18n/zh.toml?raw";
-import enRaw from "../../i18n/en.toml?raw";
-import jpRaw from "../../i18n/jp.toml?raw";
+// 使用 Vite 的 glob + eager 将所有语言文件内嵌进打包产物
+// 这样不会在运行时依赖外部 i18n 文件，适配单文件/内嵌发布
+const rawI18n = import.meta.glob("../../i18n/*.toml", {
+  as: "raw",
+  eager: true,
+}) as Record<string, string>;
 
 type Messages = Record<string, unknown>;
 
 type LangCode = "ZH" | "EN" | "JP";
 
-const loaders: Record<LangCode, () => Promise<string>> = {
-  ZH: async () => zhRaw,
-  EN: async () => enRaw,
-  JP: async () => jpRaw,
+const embeddedLangs: Record<LangCode, string> = {
+  ZH: rawI18n["../../i18n/zh.toml"] ?? "",
+  EN: rawI18n["../../i18n/en.toml"] ?? "",
+  JP: rawI18n["../../i18n/jp.toml"] ?? "",
 };
 
-const defaultMessages = parseToml(zhRaw);
+const loaders: Record<LangCode, () => Promise<string>> = {
+  ZH: async () => embeddedLangs.ZH,
+  EN: async () => embeddedLangs.EN,
+  JP: async () => embeddedLangs.JP,
+};
+
+const defaultMessages = parseToml(embeddedLangs.ZH);
 let messages: Messages = defaultMessages;
 let currentLang: LangCode = "ZH";
 

@@ -1,5 +1,5 @@
 // 测试环境设置文件
-import { expect, afterEach, vi } from 'vitest'
+import { afterEach, vi } from 'vitest'
 import { cleanup } from '@testing-library/preact'
 
 // 每个测试后清理

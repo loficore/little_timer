@@ -118,10 +118,16 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         (window as any).updateSettingsDisplay = (settingsJson: string) => {
           clearTimeout(timeoutId);
           try {
+            console.log("收到后端设置 JSON:", settingsJson);
             const parsedConfig = JSON.parse(settingsJson) as SettingsConfig;
             setConfig(parsedConfig);
-            setPresets(parsedConfig.presets || []);
-            console.log("✅ 设置已加载:", parsedConfig);
+            // 只在预设数据存在且非空时更新预设，避免后端返回空预设时清空本地数据
+            if (parsedConfig.presets && parsedConfig.presets.length > 0) {
+              setPresets(parsedConfig.presets);
+              console.log("✅ 设置已加载，预设数量:", parsedConfig.presets.length);
+            } else {
+              console.log("✅ 设置已加载，后端返回空预设，保留本地预设:", presets.length);
+            }
           } catch (parseError) {
             console.error("❌ 解析设置 JSON 失败:", parseError);
             setSaveMessage(
@@ -160,13 +166,26 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     );
   }, [config.basic.language]);
 
+  // 保护预设数据：确保config更新时presets不会被丢失
+  useEffect(() => {
+    // 如果config更新但presets为空（非初次加载），尝试从config中恢复presets
+    if (presets.length === 0 && config.presets && config.presets.length > 0) {
+      console.log("从config中恢复预设数据:", config.presets.length);
+      setPresets([...config.presets]);
+    }
+  }, [config]);
+
   const handleSave = () => {
     setIsSaving(true);
     setSaveMessage("");
 
     try {
-      // 调用后端保存设置
-      const configJson = JSON.stringify({ ...config, presets });
+      // 确保保存时包含当前的预设数据
+      const configWithPresets = { ...config, presets: [...presets] };
+      const configJson = JSON.stringify(configWithPresets);
+      console.log("保存配置，预设数量:", presets.length);
+      console.log("预设详情:", JSON.stringify(presets, null, 2));
+      console.log("发送 JSON:", configJson);
       window.webui?.call("change_settings", configJson);
 
       setTimeout(() => {
@@ -284,6 +303,8 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
             presets={presets}
             onChange={setPresets}
             onUsePreset={(preset) => {
+              // 使用预设时只更新配置，不保存到后端
+              // 避免意外清空现有预设
               if (
                 preset.mode === "countdown" &&
                 preset.config.duration_seconds
@@ -297,8 +318,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
                       duration_seconds: preset.config.duration_seconds,
                       loop: !!preset.config.loop,
                       loop_count: preset.config.loop_count ?? 0,
-                      loop_interval_seconds:
-                        preset.config.loop_interval_seconds ?? 0,
+                      loop_interval_seconds: preset.config.loop_interval_seconds ?? 0,
                     },
                   },
                 });
@@ -326,9 +346,12 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
                   },
                 });
               }
+              // 只显示应用成功的消息，不自动保存
               setSaveMessage(
                 t("settings.presets.applied", { name: preset.name }),
               );
+              // 3秒后清除消息
+              setTimeout(() => setSaveMessage(""), 3000);
             }}
           />
         )}

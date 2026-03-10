@@ -259,25 +259,15 @@
   }
 }
 
-/* 时间数字更新平滑过渡 */
+/* 时间数字更新 - 极简设计：无动画，瞬间更新 */
 .time-transition {
   display: inline-block;
-  will-change: transform, opacity;
 }
 
 .time-transition--active {
-  animation: timeTick 180ms ease-out;
-}
-
-@keyframes timeTick {
-  from {
-    opacity: 0.65;
-    transform: translateY(4px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  /* 移除淡入淡出动画，保持瞬间更新 */
+  /* 保留will-change以优化性能，即使没有动画 */
+  will-change: transform;
 }
 
 @layer utilities {

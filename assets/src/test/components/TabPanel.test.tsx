@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent, screen } from "@testing-library/preact";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, fireEvent } from "@testing-library/preact";
 import { TabPanel } from "../../components/TabPanel";
 
 describe("TabPanel 组件", () => {

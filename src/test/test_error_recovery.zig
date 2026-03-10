@@ -1,6 +1,6 @@
 //! 错误恢复模块单元测试
 const std = @import("std");
-const error_recovery = @import("../error_recovery.zig");
+const error_recovery = @import("../core/utils/error_recovery.zig");
 
 // ============ 初始化和基本状态测试 ============
 

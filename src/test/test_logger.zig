@@ -1,6 +1,6 @@
 //! 日志系统模块单元测试
 const std = @import("std");
-const logger = @import("../logger.zig");
+const logger = @import("../core/logger.zig");
 
 // ============ 日志等级测试 ============
 
@@ -385,4 +385,117 @@ test "多个占位符" {
     };
 
     test_logger.info("值1: {d}, 值2: {d}, 值3: {s}", .{ 42, 3, "test" });
+}
+
+// ============ 文件输出测试 ============
+
+test "Logger 文件输出 - 打开和关闭日志文件" {
+    var test_logger = logger.Logger{
+        .current_level = .DEBUG,
+        .enable_timestamp = false,
+    };
+
+    // 打开临时日志文件
+    try test_logger.openLogFile("/tmp/test_logger_output.log");
+    try std.testing.expect(test_logger.log_file != null);
+
+    // 写入测试日志
+    test_logger.info("文件输出测试消息", .{});
+
+    // 关闭日志文件
+    test_logger.closeLogFile();
+    try std.testing.expect(test_logger.log_file == null);
+}
+
+test "Logger 文件输出 - 写入日志内容" {
+    var test_logger = logger.Logger{
+        .current_level = .DEBUG,
+        .enable_timestamp = false,
+    };
+
+    const test_path = "/tmp/test_logger_content.log";
+    try test_logger.openLogFile(test_path);
+
+    // 写入不同级别的日志
+    test_logger.debug("调试消息", .{});
+    test_logger.info("信息消息", .{});
+    test_logger.warn("警告消息", .{});
+    test_logger.err("错误消息", .{});
+
+    test_logger.closeLogFile();
+
+    // 验证文件内容
+    const file = try std.fs.openFileAbsolute(test_path, .{});
+    defer file.close();
+
+    const content = try file.readToEndAlloc(std.testing.allocator, 1024);
+    defer std.testing.allocator.free(content);
+
+    try std.testing.expect(std.mem.indexOf(u8, content, "调试消息") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "信息消息") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "警告消息") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "错误消息") != null);
+}
+
+test "Logger 文件输出 - 带时间戳的日志" {
+    var test_logger = logger.Logger{
+        .current_level = .DEBUG,
+        .enable_timestamp = true,
+    };
+
+    const test_path = "/tmp/test_logger_timestamp.log";
+    try test_logger.openLogFile(test_path);
+
+    test_logger.info("带时间戳的消息", .{});
+
+    test_logger.closeLogFile();
+
+    // 验证时间戳格式 [YYYY-MM-DDThh:mm:ss.000Z]
+    const file = try std.fs.openFileAbsolute(test_path, .{});
+    defer file.close();
+
+    const content = try file.readToEndAlloc(std.testing.allocator, 1024);
+    defer std.testing.allocator.free(content);
+
+    try std.testing.expect(std.mem.indexOf(u8, content, "[") != null);
+}
+
+test "Logger 文件输出 - 等级过滤" {
+    var test_logger = logger.Logger{
+        .current_level = .WARN,
+        .enable_timestamp = false,
+    };
+
+    const test_path = "/tmp/test_logger_filter.log";
+    try test_logger.openLogFile(test_path);
+
+    // 只有 WARN 和 ERROR 应该输出
+    test_logger.debug("这条不应出现", .{});
+    test_logger.info("这条也不应出现", .{});
+    test_logger.warn("警告消息", .{});
+    test_logger.err("错误消息", .{});
+
+    test_logger.closeLogFile();
+
+    const file = try std.fs.openFileAbsolute(test_path, .{});
+    defer file.close();
+
+    const content = try file.readToEndAlloc(std.testing.allocator, 1024);
+    defer std.testing.allocator.free(content);
+
+    try std.testing.expect(std.mem.indexOf(u8, content, "这条不应出现") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "这条也不应出现") == null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "警告消息") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "错误消息") != null);
+}
+
+test "Logger 文件路径初始化" {
+    const test_logger = logger.Logger{
+        .current_level = .INFO,
+        .enable_timestamp = true,
+    };
+
+    // 验证文件路径初始为 null
+    try std.testing.expect(test_logger.log_file_path == null);
+    try std.testing.expect(test_logger.log_file == null);
 }

@@ -1,7 +1,7 @@
 //! 设置管理模块单元测试
 const std = @import("std");
-const settings_module = @import("../settings.zig");
-const interface = @import("../interface.zig");
+const settings_module = @import("../settings/settings_manager.zig");
+const interface = @import("../core/interface.zig");
 
 // ============ 设置配置初始化测试 ============
 
@@ -228,9 +228,11 @@ test "添加单个预设" {
     const allocator = std.testing.allocator;
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
+    defer manager.presets.clear();
+    defer if (manager.sqlite_db) |db| db.clearAllPresets() catch {};
 
     const preset: interface.TimerPreset = .{
-        .name = "番茄钟",
+        .name = "测试_添加单个预设_番茄钟",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 1500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
@@ -239,22 +241,24 @@ test "添加单个预设" {
 
     try std.testing.expectEqual(@as(usize, 1), manager.presets.count());
     const p0 = manager.presets.get(0).?;
-    try std.testing.expect(std.mem.eql(u8, p0.name, "番茄钟"));
+    try std.testing.expect(std.mem.eql(u8, p0.name, "测试_添加单个预设_番茄钟"));
 }
 
 test "添加多个预设" {
     const allocator = std.testing.allocator;
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
+    defer manager.presets.clear();
+    defer if (manager.sqlite_db) |db| db.clearAllPresets() catch {};
 
     const preset1: interface.TimerPreset = .{
-        .name = "番茄钟",
+        .name = "测试_添加多个预设_番茄钟",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 1500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
 
     const preset2: interface.TimerPreset = .{
-        .name = "短休息",
+        .name = "测试_添加多个预设_短休息",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 300, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
@@ -264,18 +268,20 @@ test "添加多个预设" {
 
     try std.testing.expectEqual(@as(usize, 2), manager.presets.count());
     const p1 = manager.presets.get(0).?;
-    try std.testing.expect(std.mem.eql(u8, p1.name, "番茄钟"));
+    try std.testing.expect(std.mem.eql(u8, p1.name, "测试_添加多个预设_番茄钟"));
     const p2 = manager.presets.get(1).?;
-    try std.testing.expect(std.mem.eql(u8, p2.name, "短休息"));
+    try std.testing.expect(std.mem.eql(u8, p2.name, "测试_添加多个预设_短休息"));
 }
 
 test "预设名称冲突检测" {
     const allocator = std.testing.allocator;
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
+    defer manager.presets.clear();
+    defer if (manager.sqlite_db) |db| db.clearAllPresets() catch {};
 
     const preset: interface.TimerPreset = .{
-        .name = "番茄钟",
+        .name = "测试_预设名称冲突检测_唯一名称",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 1500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
@@ -283,7 +289,7 @@ test "预设名称冲突检测" {
     try manager.addPreset(preset);
 
     const duplicate_preset: interface.TimerPreset = .{
-        .name = "番茄钟",
+        .name = "测试_预设名称冲突检测_唯一名称",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 600, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
@@ -444,23 +450,28 @@ test "预设持久化 - savePresetsToFile() 和 loadPresetsFromFile()" {
     defer tmp_dir.close();
 
     const allocator = std.testing.allocator;
-    const test_file_path = "test_tmp/test_presets.json";
+    const test_file_path = "test_tmp/test_presets_persistence.json";
+    const test_settings_path = "test_tmp/test_settings_persistence.toml";
 
     // 清理旧文件
     std.fs.cwd().deleteFile(test_file_path) catch {};
+    std.fs.cwd().deleteFile(test_settings_path) catch {};
+    std.fs.cwd().deleteFile("test_tmp/presets.json") catch {};
 
-    var manager = try settings_module.SettingsManager.init(allocator, "test_tmp/test_settings.toml");
+    var manager = try settings_module.SettingsManager.init(allocator, test_settings_path);
     defer manager.deinit();
+    defer manager.presets.clear();
+    defer if (manager.sqlite_db) |db| db.clearAllPresets() catch {};
 
     // 添加预设
     const preset1: interface.TimerPreset = .{
-        .name = "Test Preset 1",
+        .name = "预设持久化_测试1",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 900, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };
 
     const preset2: interface.TimerPreset = .{
-        .name = "Test Preset 2",
+        .name = "预设持久化_测试2",
         .mode = .STOPWATCH_MODE,
         .config = .{ .stopwatch = .{ .max_seconds = 3600 } },
     };
@@ -472,21 +483,24 @@ test "预设持久化 - savePresetsToFile() 和 loadPresetsFromFile()" {
     try manager.savePresetsToFile();
 
     // 创建新管理器并加载预设
-    var manager2 = try settings_module.SettingsManager.init(allocator, "test_tmp/test_settings.toml");
+    var manager2 = try settings_module.SettingsManager.init(allocator, test_settings_path);
     defer manager2.deinit();
+    defer manager2.presets.clear();
+    defer if (manager2.sqlite_db) |db| db.clearAllPresets() catch {};
 
     try manager2.loadPresetsFromFile();
 
     // 验证预设已加载
     try std.testing.expectEqual(@as(usize, 2), manager2.presets.count());
     const p2 = manager2.presets.get(0).?;
-    try std.testing.expect(std.mem.eql(u8, p2.name, "Test Preset 1"));
+    try std.testing.expect(std.mem.eql(u8, p2.name, "预设持久化_测试1"));
     const p3 = manager2.presets.get(1).?;
-    try std.testing.expect(std.mem.eql(u8, p3.name, "Test Preset 2"));
+    try std.testing.expect(std.mem.eql(u8, p3.name, "预设持久化_测试2"));
 
     // 清理
     std.fs.cwd().deleteFile(test_file_path) catch {};
-    std.fs.cwd().deleteFile("test_tmp/test_settings.toml") catch {};
+    std.fs.cwd().deleteFile(test_settings_path) catch {};
+    std.fs.cwd().deleteFile("test_tmp/presets.json") catch {};
 }
 
 test "损坏的文件恢复 - backupCorruptedFile()" {
@@ -528,6 +542,8 @@ test "resetToDefaults() 重置配置" {
     const allocator = std.testing.allocator;
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
+    defer manager.presets.clear();
+    defer if (manager.sqlite_db) |db| db.clearAllPresets() catch {};
 
     // 修改配置
     manager.config.basic.timezone = -10;
@@ -535,7 +551,7 @@ test "resetToDefaults() 重置配置" {
 
     // 添加预设
     const preset: interface.TimerPreset = .{
-        .name = "Test Preset",
+        .name = "测试_resetToDefaults_预设",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };

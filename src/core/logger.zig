@@ -55,6 +55,28 @@ pub const Logger = struct {
     /// 是否启用时间戳
     enable_timestamp: bool = true,
 
+    /// 日志文件路径（为空时不输出到文件）
+    log_file_path: ?[]const u8 = null,
+
+    /// 日志文件句柄（内部使用）
+    log_file: ?std.fs.File = null,
+
+    /// 打开日志文件
+    pub fn openLogFile(self: *Logger, path: []const u8) !void {
+        self.log_file_path = path;
+        self.log_file = try std.fs.createFileAbsolute(path, .{});
+        self.info("日志文件已打开: {s}", .{path});
+    }
+
+    /// 关闭日志文件
+    pub fn closeLogFile(self: *Logger) void {
+        if (self.log_file) |*file| {
+            file.close();
+            self.log_file = null;
+            self.log_file_path = null;
+        }
+    }
+
     /// 获取当前Unix时间戳（秒）并格式化为HH:MM:SS
     ///
     /// 参数:
@@ -115,13 +137,41 @@ pub const Logger = struct {
         var timestamp_buf: [32]u8 = undefined;
         const timestamp_str = self.formatTimestamp(&timestamp_buf);
 
-        // 输出日志
-        if (self.enable_timestamp and timestamp_str.len > 0) {
-            std.debug.print("{s}", .{timestamp_str});
+        // 构建日志内容
+        var log_buf: [1024]u8 = undefined;
+        const log_content = std.fmt.bufPrint(&log_buf, "[{s}] {s} ", .{ level.toString(), level.emoji() }) catch {
+            return;
+        };
+
+        // 输出到控制台
+        const builtin = @import("builtin");
+        if (builtin.is_test) {
+            const stderr_file = std.fs.File.stderr();
+            if (self.enable_timestamp and timestamp_str.len > 0) {
+                stderr_file.writeAll(timestamp_str) catch {};
+            }
+            stderr_file.writeAll(log_content) catch {};
+            var msg_buf: [1024]u8 = undefined;
+            const msg = std.fmt.bufPrint(&msg_buf, fmt ++ "\n", args) catch "格式错误";
+            stderr_file.writeAll(msg) catch {};
+        } else {
+            if (self.enable_timestamp and timestamp_str.len > 0) {
+                std.debug.print("{s}", .{timestamp_str});
+            }
+            std.debug.print("{s}", .{log_content});
+            std.debug.print(fmt ++ "\n", args);
         }
 
-        std.debug.print("[{s}] {s} ", .{ level.toString(), level.emoji() });
-        std.debug.print(fmt ++ "\n", args);
+        // 输出到日志文件
+        if (self.log_file) |file| {
+            if (self.enable_timestamp and timestamp_str.len > 0) {
+                file.writeAll(timestamp_str) catch {};
+            }
+            file.writeAll(log_content) catch {};
+            var msg_buf: [1024]u8 = undefined;
+            const msg = std.fmt.bufPrint(&msg_buf, fmt ++ "\n", args) catch "格式错误";
+            file.writeAll(msg) catch {};
+        }
     }
 
     /// DEBUG等级日志（最详细的调试信息）

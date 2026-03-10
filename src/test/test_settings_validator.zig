@@ -1,5 +1,5 @@
 const std = @import("std");
-const validator = @import("../settings_validator.zig");
+const validator = @import("../settings/settings_validator.zig");
 
 // 验证范围测试
 test "validate timezone and language" {

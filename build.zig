@@ -4,37 +4,53 @@ pub fn build(b: *std.Build) void {
     const root_target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // 构建选项：是否将前端 HTML 内嵌到可执行文件
+    const embed_ui = b.option(bool, "embed_ui", "Embed UI HTML into binary") orelse false;
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "embed_ui", embed_ui);
+    // 当内嵌 UI 时，把 HTML 内容注入到 build_options 中
+    // 这样避免 @embedFile 访问包外路径的问题
+    if (embed_ui) {
+        const html = std.fs.cwd().readFileAlloc(b.allocator, "assets/dist/index.html", 1024 * 1024) catch |err| {
+            std.debug.print("❌ 无法读取 assets/dist/index.html: {any}\n", .{err});
+            @panic("missing assets/dist/index.html, please run assets build first");
+        };
+        build_options.addOption([]const u8, "embedded_html", html);
+    } else {
+        build_options.addOption([]const u8, "embedded_html", "");
+    }
+
     const mod = b.addModule("little_timer", .{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/main_entry.zig"),
         .target = root_target,
     });
 
-    // 导入 toml 依赖
-    const toml_dep = b.dependency("toml", .{
+    const httpz_dep = b.dependency("httpz", .{
         .target = root_target,
         .optimize = optimize,
     });
+    mod.addImport("httpz", httpz_dep.module("httpz"));
 
-    mod.addImport("toml", toml_dep.module("toml"));
+    // 添加 build_options 到模块（供 webui_windows 等文件使用）
+    mod.addOptions("build_options", build_options);
 
     // 创建桌面应用模块（仅当不跨编译到 Android 时）
     if (!root_target.result.abi.isAndroid()) {
-        const app_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+        // 导入 zqlite 依赖
+        const zqlite_dep = b.dependency("zqlite", .{
             .target = root_target,
             .optimize = optimize,
-            .imports = &.{
-                .{ .name = "little_timer", .module = mod },
-                .{ .name = "toml", .module = toml_dep.module("toml") },
-            },
         });
+        mod.addImport("zqlite", zqlite_dep.module("zqlite"));
 
         // 桌面: 导入 webui 依赖
         const webui_dep = b.dependency("webui", .{
             .target = root_target,
             .optimize = optimize,
         });
-        app_module.addImport("webui", webui_dep.module("webui"));
+        mod.addImport("webui", webui_dep.module("webui"));
+
+        const app_module = mod;
 
         // 构建桌面可执行文件
         const exe = b.addExecutable(.{
@@ -55,11 +71,26 @@ pub fn build(b: *std.Build) void {
 
         // 添加测试步骤
         const test_step = b.step("test", "Run tests");
+
+        // 测试前清理测试数据库
+        const cleanup_db = b.addSystemCommand(&.{
+            "rm", "-f", "presets.db", "test_tmp/presets.db",
+        });
+        cleanup_db.step.name = "cleanup_test_db";
+
         const mod_tests = b.addTest(.{
             .root_module = mod,
         });
         const run_mod_tests = b.addRunArtifact(mod_tests);
-        test_step.dependOn(&run_mod_tests.step);
+
+        // 测试完成后清理
+        const cleanup_after = b.addSystemCommand(&.{
+            "rm", "-f", "presets.db", "test_tmp/presets.db",
+        });
+        cleanup_after.step.name = "cleanup_after_test";
+
+        test_step.dependOn(&cleanup_db.step);
+        run_mod_tests.step.dependOn(&cleanup_after.step);
     } else {
         // Android: 提供 lib 目标，生成 .so
         const ndk_home = std.process.getEnvVarOwned(b.allocator, "ANDROID_NDK_HOME") catch |err| {
@@ -74,22 +105,9 @@ pub fn build(b: *std.Build) void {
             .target = root_target,
             .optimize = optimize,
         });
+        mod.addImport("webui", webui_dep.module("webui"));
 
-        // ✅ 关键改动 1：手动创建一个只包含 Zig 绑定的模块，不触发依赖包的 C 编译逻辑
-        const webui_module = b.createModule(.{
-            .root_source_file = webui_dep.path("src/webui.zig"), // 直接指向源码中的 Zig 绑定文件
-        });
-
-        const app_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = root_target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "little_timer", .module = mod },
-                .{ .name = "toml", .module = toml_dep.module("toml") },
-                .{ .name = "webui", .module = webui_module }, // 使用我们手动定义的模块
-            },
-        });
+        const app_module = mod;
 
         const lib = b.addLibrary(.{
             .name = "little_timer",

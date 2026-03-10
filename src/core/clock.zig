@@ -231,7 +231,8 @@ pub const ClockManager = struct {
     ) ClockManager {
         // 问题1：检查整数溢出
         if (ClockManager.checkDurationOverflow(clock_config.countdown.duration_seconds) or
-            ClockManager.checkDurationOverflow(clock_config.stopwatch.max_seconds)) {
+            ClockManager.checkDurationOverflow(clock_config.stopwatch.max_seconds))
+        {
             logger.global_logger.err("错误: 时间配置超出最大值（大于 9223372036854775 秒）", .{});
             // 降级处理：使用默认值
             const safe_config: ClockTaskConfig = .{

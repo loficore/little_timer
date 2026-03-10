@@ -1,7 +1,7 @@
 //! 错误恢复和监控模块 - 提供后端错误处理、重试和监控功能
 
 const std = @import("std");
-const logger = @import("logger.zig");
+const logger = @import("../logger.zig");
 
 pub const ErrorRecoveryManager = struct {
     /// 错误计数，用于检测频繁出现的错误

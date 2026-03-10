@@ -1,7 +1,7 @@
 //! 时钟模块单元测试
 const std = @import("std");
-const clock = @import("../clock.zig");
-const interface = @import("../interface.zig");
+const clock = @import("../core/clock.zig");
+const interface = @import("../core/interface.zig");
 
 // ============ 倒计时测试 ============
 

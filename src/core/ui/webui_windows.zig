@@ -1,9 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const interface = @import("interface.zig");
-const logger = @import("logger.zig");
+const interface = @import("../interface.zig");
+const logger = @import("../logger.zig");
 const Thread = std.Thread;
 const webui_module = @import("webui");
+const build_options = @import("build_options");
 
 // 全局 App 实例指针，用于回调函数访问
 var global_app: ?*anyopaque = null;
@@ -91,35 +92,48 @@ pub const WebUIManager = struct {
         self.allocator = allocator;
 
         // 在运行时读取 HTML 文件内容
-        // 尝试多个可能的路径
+        // 可选：内嵌 HTML 以支持单文件发布
         const possible_paths = [_][]const u8{
             "assets/dist/index.html", // 从项目根目录运行
         };
 
         var selected_path: []const u8 = "";
-
-        var html_content_raw: []u8 = undefined;
         var html_found = false;
+        var html_content_zdup: [:0]u8 = undefined;
 
-        for (possible_paths) |path| {
-            html_content_raw = std.fs.cwd().readFileAlloc(self.allocator, path, 1024 * 1024) catch |err| {
-                logger.global_logger.warn("无法从 {s} 读取: {any}", .{ path, err });
-                continue;
-            };
-            logger.global_logger.info("✓ 从 {s} 读取 HTML ({} 字节)", .{ path, html_content_raw.len });
-            selected_path = path;
+        if (build_options.embed_ui) {
+            const embedded_html = build_options.embedded_html;
+            if (embedded_html.len == 0) {
+                logger.global_logger.err("错误: 内嵌 HTML 为空，请先构建前端", .{});
+                return error.HTMLFileNotFound;
+            }
+            html_content_zdup = try self.allocator.dupeZ(u8, embedded_html);
+            selected_path = "embedded:build_options";
             html_found = true;
-            break;
+            logger.global_logger.info("✓ 使用内嵌 HTML ({} 字节)", .{embedded_html.len});
+        } else {
+            var html_content_raw: []u8 = undefined;
+            for (possible_paths) |path| {
+                html_content_raw = std.fs.cwd().readFileAlloc(self.allocator, path, 1024 * 1024) catch |err| {
+                    logger.global_logger.warn("无法从 {s} 读取: {any}", .{ path, err });
+                    continue;
+                };
+                logger.global_logger.info("✓ 从 {s} 读取 HTML ({} 字节)", .{ path, html_content_raw.len });
+                selected_path = path;
+                html_found = true;
+                break;
+            }
+
+            if (!html_found) {
+                logger.global_logger.err("错误: 无法找到 HTML 文件", .{});
+                return error.HTMLFileNotFound;
+            }
+
+            // 将内容转换为 null 终止的字符串，show() 方法需要这个类型
+            html_content_zdup = try self.allocator.dupeZ(u8, html_content_raw);
+            defer self.allocator.free(html_content_raw); // 释放原始内容
         }
 
-        if (!html_found) {
-            logger.global_logger.err("错误: 无法找到 HTML 文件", .{});
-            return error.HTMLFileNotFound;
-        }
-
-        // 将内容转换为 null 终止的字符串，show() 方法需要这个类型
-        const html_content_zdup = try self.allocator.dupeZ(u8, html_content_raw);
-        defer self.allocator.free(html_content_raw); // 释放原始内容
         self.html_content = html_content_zdup; // 保存指针供deinit释放
 
         // 关闭 WebUI 的文件夹监控线程，避免在 Android 上使用 pthread_cancel
@@ -131,22 +145,18 @@ pub const WebUIManager = struct {
             logger.global_logger.warn("设置端口 {d} 失败，可能已被占用: {any}", .{ default_port, err });
         };
 
-        // 在不同平台采用不同的启动方式：Android 使用 startServer，其它平台使用 show
-        if (builtin.target.abi == .android) {
-            const path_z = try self.allocator.dupeZ(u8, selected_path);
-            defer self.allocator.free(path_z);
-            _ = self.window.startServer(path_z) catch |err| {
-                logger.global_logger.err("startServer() 失败: {any}", .{err});
-            };
-        } else {
-            // 使用 show() 方法显示 HTML 内容（桌面平台）
-            // 这会自动启动服务器并提供 /webui.js
-            self.window.show(html_content_zdup) catch |err| {
-                logger.global_logger.warn("show() 失败: {any}", .{err});
-                logger.global_logger.warn("注意: show() 方法在某些环境下可能不可用", .{});
-                logger.global_logger.warn("但服务器应该已经启动，请尝试访问下面的地址", .{});
-            };
-        }
+        // 使用 startServer 模式（不显示窗口，只启动服务器）
+        // startServer 需要目录路径，需要去掉 "index.html"
+        const server_root = if (std.mem.endsWith(u8, selected_path, "index.html"))
+            selected_path[0 .. selected_path.len - "index.html".len]
+        else
+            selected_path;
+
+        const path_z = try self.allocator.dupeZ(u8, server_root);
+        defer self.allocator.free(path_z);
+        _ = self.window.startServer(path_z) catch |err| {
+            logger.global_logger.err("startServer() 失败: {any}", .{err});
+        };
 
         // 获取服务器信息
         const port = self.window.getPort() catch |err| blk: {
@@ -331,7 +341,7 @@ pub const WebUIManager = struct {
     ///
     /// 返回:
     /// - !void: 如果更新失败则返回错误
-    pub fn updateDisplay(self: *WebUIManager, display_data: *const @import("clock.zig").ClockState) !void {
+    pub fn updateDisplay(self: *WebUIManager, display_data: *const @import("../clock.zig").ClockState) !void {
         // 1. 构造当前快照（包含所有显示相关状态）
         const current_snapshot = DisplaySnapshot{
             .seconds = display_data.getTimeInfo(),
@@ -426,7 +436,7 @@ pub const WebUIManager = struct {
     /// 主动推送设置 JSON 到前端（用于初始化或设置变更后）
     pub fn pushSettings(self: *WebUIManager) void {
         if (global_app) |app_ptr| {
-            const app = @import("app.zig").MainApplication;
+            const app = @import("../app.zig").MainApplication;
             const main_app = @as(*app, @ptrCast(@alignCast(app_ptr)));
             const allocator = main_app.settings_manager.allocator;
 
@@ -653,7 +663,7 @@ fn handleModeChange(e: *webui_module.Event) void {
 
     // 从 global_app 获取设置管理器，以构建默认配置
     if (global_app) |app_ptr| {
-        const app = @import("app.zig").MainApplication;
+        const app = @import("../app.zig").MainApplication;
         const main_app = @as(*app, @ptrCast(@alignCast(app_ptr)));
         const settings = &main_app.settings_manager.config;
 
@@ -742,7 +752,7 @@ fn handleChangeSettings(e: *webui_module.Event) void {
 
     // 从 global_app 获取应用的 allocator，确保所有权一致
     if (global_app) |app_ptr| {
-        const app = @import("app.zig").MainApplication;
+        const app = @import("../app.zig").MainApplication;
         const main_app = @as(*app, @ptrCast(@alignCast(app_ptr)));
         const allocator = main_app.settings_manager.allocator;
 

@@ -1,6 +1,6 @@
 const std = @import("std");
-const presets_mod = @import("../settings_presets.zig");
-const interface = @import("../interface.zig");
+const presets_mod = @import("../settings/settings_presets.zig");
+const interface = @import("../core/interface.zig");
 
 fn countdownPreset(name: []const u8) interface.TimerPreset {
     return .{

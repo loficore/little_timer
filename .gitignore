@@ -1,6 +1,7 @@
 .roo/
 .zig-cache/
 zig-out
+test-tmp/
 
 # Editor directories and files
 .vscode/*
@@ -16,6 +17,11 @@ zig-out
 QWEN.md
 
 *.sh
+!scripts/
+!scripts/*.sh
+!scripts/**/*.sh
+!android-build.sh
+
 
 # Core dumps and backup files
 core.*
@@ -39,6 +45,16 @@ node_modules/
 dist
 dist-ssr
 *.local
+*.db
 
 .vscode/
 .github/
+cliff.toml
+
+AGENTS.md
+
+test_tmp/
+.agents/
+.opencode/
+
+temp.txt

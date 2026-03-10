@@ -1,3 +1,10 @@
+
+
+### ✨ Features
+
+
+- 迁移至 SQLite 持久化并移除时间动画 (f5a39c7)
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

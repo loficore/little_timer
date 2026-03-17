@@ -169,6 +169,11 @@ pub const PresetsManager = struct {
         return &self.presets.items[index];
     }
 
+    /// 获取所有预设（只读视图）
+    pub fn getAll(self: *const PresetsManager) []const interface.TimerPreset {
+        return self.presets.items;
+    }
+
     /// 获取预设（按名称）
     ///
     /// 参数:

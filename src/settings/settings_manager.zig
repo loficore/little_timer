@@ -576,4 +576,8 @@ pub const SettingsManager = struct {
     pub fn loadPresetsFromFile(self: *SettingsManager) !void {
         try self.presets.loadFromFile(self.presets_file_path, self.config.basic.timezone);
     }
+
+    pub fn getPresets(self: *const SettingsManager) []const interface.TimerPreset {
+        return self.presets.getAll();
+    }
 };

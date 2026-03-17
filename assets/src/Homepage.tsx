@@ -15,18 +15,11 @@ import { TimeDisplay } from "./components/TimeDisplay";
 import { StatusBadge } from "./components/StatusBadge";
 import { ControlPanel } from "./components/ControlPanel";
 import { ModeSelector } from "./components/ModeSelector";
+import { APIClient, type TimerState } from "./utils/apiClient";
+import { SSEClient } from "./utils/sseClient";
 
 interface HomePageProps {
   onSettingsClick?: () => void;
-}
-
-// 声明全局 webui 类型
-declare global {
-  interface Window {
-    webui?: {
-      call: (functionName: string, ...args: unknown[]) => void;
-    };
-  }
 }
 
 // 倒计时/秒表用：格式化持续时间（秒）
@@ -62,11 +55,13 @@ interface HomeState {
   loopTotal: number | null;
   restRemaining: number;
   isFinished: boolean;
-  timezone: number; // 前端本地 world clock 时区（来自 settings），单位小时
+  timezone: number;
 }
 
 const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
-  // 合并所有状态为一个对象，减少多次 setState
+  const apiClientRef = useRef<APIClient | null>(null);
+  const sseClientRef = useRef<SSEClient | null>(null);
+
   const [state, setState] = useState<HomeState>(() => ({
     time: "25:00:00",
     mode: Mode.Countdown,
@@ -79,8 +74,25 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     timezone: 8,
   }));
   const prevFinishedRef = useRef(false);
+  const isConnectedRef = useRef(false);
 
-  // 应用主题（提前定义以便在 useEffect 中使用）
+  const modeMap: Record<string, Mode> = {
+    countdown: Mode.Countdown,
+    stopwatch: Mode.Stopwatch,
+    world_clock: Mode.WorldClock,
+  };
+
+  const modeToString = (mode: Mode): string => {
+    switch (mode) {
+      case Mode.Countdown:
+        return "countdown";
+      case Mode.Stopwatch:
+        return "stopwatch";
+      case Mode.WorldClock:
+        return "world_clock";
+    }
+  };
+
   const applyTheme = useCallback((theme: string) => {
     const html = document.documentElement;
     if (theme === "light") {
@@ -92,122 +104,117 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     }
   }, []);
 
-  // 将 webuiEvent 回调用 useCallback 包裹，避免每次渲染重新创建
-  const handleWebuiEvent = useCallback((event: any) => {
-    logInfo("收到来自后端的事件: " + event.function);
-    if (event.function === "update_time") {
-      // 只在 time 变化时 setState
-      const seconds = typeof event.data === "number" ? event.data : 0;
-      setState((prev) => {
-        // 世界时钟交给前端自驱动，不使用后端时间
-        if (prev.mode === Mode.WorldClock) return prev;
-        const formatted = formatDuration(seconds);
-        if (prev.time === formatted) return prev;
-        logInfo("⏱️ 时间已更新: " + seconds + "秒 -> " + formatted);
-        return { ...prev, time: formatted };
-      });
-    } else if (event.function === "update_mode") {
-      const newMode = event.data as Mode;
-      logInfo(
-        "🔄 收到模式更新事件，新模式值: " +
-          newMode +
-          " (类型: " +
-          typeof newMode +
-          ")",
-      );
-      setState((prev) => {
-        if (prev.mode === newMode) {
-          logInfo("🔄 模式相同，跳过更新");
-          return prev;
-        }
-        logSuccess("🔄 模式已更新: " + prev.mode + " -> " + newMode);
-        return { ...prev, mode: newMode };
-      });
-    } else if (event.function === "update_state") {
-      const s = event.data as {
-        isRunning: boolean;
-        isFinished: boolean;
-        inRest: boolean;
-        loopRemaining?: number;
-        loopTotal?: number;
-        restRemaining?: number;
-        timezone?: number;
-      };
-      setState((prev) => {
-        // 只有有变化时才 setState，避免无谓重渲染
-        if (
-          prev.isRunning === s.isRunning &&
-          prev.inRest === s.inRest &&
-          prev.loopRemaining === (s.loopRemaining ?? null) &&
-          prev.loopTotal === (s.loopTotal ?? null) &&
-          prev.restRemaining === (s.restRemaining ?? 0) &&
-          prev.isFinished === s.isFinished &&
-          prev.timezone === (s.timezone ?? prev.timezone)
-        ) {
-          return prev;
-        }
-        return {
-          ...prev,
-          isRunning: s.isRunning,
-          inRest: s.inRest,
-          loopRemaining: s.loopRemaining ?? null,
-          loopTotal: s.loopTotal ?? null,
-          restRemaining: s.restRemaining ?? 0,
-          isFinished: s.isFinished,
-          timezone: s.timezone ?? prev.timezone,
-        };
-      });
-      // 完成通知（仅在从未完成到完成时触发一次）
-      if (s.isFinished && !prevFinishedRef.current) {
-        try {
-          const AudioCtx =
-            (window as any).AudioContext || (window as any).webkitAudioContext;
-          if (AudioCtx) {
-            const ctx = new AudioCtx();
-            const o = ctx.createOscillator();
-            const g = ctx.createGain();
-            o.type = "sine";
-            o.frequency.value = 880;
-            g.gain.value = 0.06;
-            o.connect(g);
-            g.connect(ctx.destination);
-            o.start();
-            setTimeout(() => {
-              o.stop();
-              ctx.close();
-            }, 300);
-          }
-        } catch {
-          // 忽略音频相关错误
-        }
-        try {
-          if ("Notification" in window) {
-            if (Notification.permission === "granted") {
-              new Notification(t("home.finished_notification"));
-            } else if (Notification.permission !== "denied") {
-              Notification.requestPermission().then((p) => {
-                if (p === "granted")
-                  new Notification(t("home.finished_notification"));
-              });
-            }
-          }
-        } catch {
-          // 忽略通知相关错误
-        }
+  const updateStateFromTimerState = useCallback((timerState: TimerState) => {
+    const newMode = modeMap[timerState.mode] || Mode.Countdown;
+
+    setState((prev) => {
+      let newTime = prev.time;
+      if (newMode !== Mode.WorldClock) {
+        newTime = formatDuration(timerState.time);
       }
-      prevFinishedRef.current = s.isFinished;
-      logInfo("📊 状态已更新: " + JSON.stringify(s));
+
+      if (
+        prev.time === newTime &&
+        prev.mode === newMode &&
+        prev.isRunning === timerState.is_running &&
+        prev.inRest === timerState.in_rest &&
+        prev.loopRemaining === (timerState.loop_remaining ?? null) &&
+        prev.loopTotal === (timerState.loop_total ?? null) &&
+        prev.restRemaining === (timerState.rest_remaining ?? 0) &&
+        prev.isFinished === timerState.is_finished &&
+        prev.timezone === timerState.timezone
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        time: newTime,
+        mode: newMode,
+        isRunning: timerState.is_running,
+        inRest: timerState.in_rest,
+        loopRemaining: timerState.loop_remaining ?? null,
+        loopTotal: timerState.loop_total ?? null,
+        restRemaining: timerState.rest_remaining ?? 0,
+        isFinished: timerState.is_finished,
+        timezone: timerState.timezone,
+      };
+    });
+
+    if (timerState.is_finished && !prevFinishedRef.current) {
+      try {
+        const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtxClass) {
+          const ctx = new AudioCtxClass();
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type = "sine";
+          o.frequency.value = 880;
+          g.gain.value = 0.06;
+          o.connect(g);
+          g.connect(ctx.destination);
+          o.start();
+          setTimeout(() => {
+            o.stop();
+            void ctx.close();
+          }, 300);
+        }
+      } catch {
+        // 忽略音频相关错误
+      }
+      try {
+        if ("Notification" in window) {
+          if (Notification.permission === "granted") {
+            new Notification(t("home.finished_notification"));
+          } else if (Notification.permission !== "denied") {
+            Notification.requestPermission().then((p) => {
+              if (p === "granted")
+                new Notification(t("home.finished_notification"));
+            }).catch(() => {
+              // ignore notification errors
+            });
+          }
+        }
+      } catch {
+        // 忽略通知相关错误
+      }
     }
+    prevFinishedRef.current = timerState.is_finished;
   }, []);
 
   useEffect(() => {
-    logSuccess("✅ React 应用已加载，准备就绪");
-    if (typeof window.webui !== "undefined") {
-      logSuccess("✅ webui 对象已加载");
-    } else {
-      logError("❌ webui 对象未加载！这可能是一个问题");
-    }
-    // 监听系统主题变化（自动模式）
+    const baseUrl = window.location.origin;
+    apiClientRef.current = new APIClient(baseUrl);
+    sseClientRef.current = new SSEClient(baseUrl);
+
+    const initApp = async () => {
+      logSuccess("✅ React 应用已加载，准备就绪");
+
+      try {
+        const initialState = await apiClientRef.current!.getState();
+        updateStateFromTimerState(initialState);
+        logSuccess("✅ 初始状态已获取");
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        logError(`❌ 获取初始状态失败: ${errorMsg}`);
+      }
+
+      sseClientRef.current!.connect(
+        (timerState) => {
+          isConnectedRef.current = true;
+          updateStateFromTimerState(timerState);
+        },
+        (error: unknown) => {
+          isConnectedRef.current = false;
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          logError(`❌ SSE 连接错误: ${errorMsg}`);
+        }
+      );
+      logInfo("📡 SSE 连接已建立");
+    };
+
+    void initApp();
+
     const mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
     const handleThemeChange = (e: MediaQueryListEvent) => {
       const theme = e.matches ? "light" : "dark";
@@ -215,18 +222,14 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     };
     mediaQuery.addEventListener("change", handleThemeChange);
 
-    // 设置全局事件处理函数
-    (window as any).webuiEvent = handleWebuiEvent;
-    logInfo("初始化完成，等待用户交互...");
-
     return () => {
       mediaQuery.removeEventListener("change", handleThemeChange);
+      if (sseClientRef.current) {
+        sseClientRef.current.close();
+      }
     };
-  }, [applyTheme, handleWebuiEvent]);
+  }, [applyTheme, updateStateFromTimerState]);
 
-  // 移除时间动画逻辑 - 采用极简设计，数字瞬间更新
-
-  // 世界时钟前端自驱 tick：根据 settings 时区每秒刷新
   useEffect(() => {
     if (state.mode !== Mode.WorldClock) return;
 
@@ -241,77 +244,63 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     return () => window.clearInterval(timer);
   }, [state.mode, state.timezone]);
 
-  // 控制按钮事件全部用 useCallback 包裹，避免不必要的重渲染
   const handleStart = useCallback(() => {
     logInfo('🚀 "开始"按钮被点击');
-    try {
-      if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！后端连接失败");
-        return;
-      }
-      logInfo("✓ webui 对象存在，准备调用 start 函数");
-      window.webui.call("start");
-      // 只由后端事件驱动 isRunning 状态
-      logSuccess('✓ webui.call("start") 调用成功');
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logError("❌ 调用 start 时发生错误: " + errorMsg);
-      console.error(e);
+    if (!apiClientRef.current) {
+      logError("❌ API 客户端未初始化");
+      return;
     }
+    void apiClientRef.current.startTimer().then(() => {
+      logSuccess('✓ startTimer() 调用成功');
+    }).catch((e) => {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError(`❌ 调用 startTimer 时发生错误: ${errorMsg}`);
+    });
   }, []);
 
   const handlePause = useCallback(() => {
     logInfo('⏸️ "暂停"按钮被点击');
-    try {
-      if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！后端连接失败");
-        return;
-      }
-      logInfo("✓ webui 对象存在，准备调用 pause 函数");
-      window.webui.call("pause");
-      logSuccess('✓ webui.call("pause") 调用成功');
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logError("❌ 调用 pause 时发生错误: " + errorMsg);
-      console.error(e);
+    if (!apiClientRef.current) {
+      logError("❌ API 客户端未初始化");
+      return;
     }
+    void apiClientRef.current.pauseTimer().then(() => {
+      logSuccess('✓ pauseTimer() 调用成功');
+    }).catch((e) => {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError(`❌ 调用 pauseTimer 时发生错误: ${errorMsg}`);
+    });
   }, []);
 
   const handleReset = useCallback(() => {
     logInfo('🔄 "重置"按钮被点击');
-    try {
-      if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！");
-        return;
-      }
-      logInfo("✓ webui 对象存在，准备调用 reset 函数");
-      window.webui.call("reset");
-      logSuccess('✓ webui.call("reset") 调用成功');
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logError("❌ 调用 reset 时发生错误: " + errorMsg);
-      console.error(e);
+    if (!apiClientRef.current) {
+      logError("❌ API 客户端未初始化");
+      return;
     }
+    void apiClientRef.current.resetTimer().then(() => {
+      logSuccess('✓ resetTimer() 调用成功');
+    }).catch((e) => {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError(`❌ 调用 resetTimer 时发生错误: ${errorMsg}`);
+    });
   }, []);
 
   const handleModeChange = useCallback((newMode: Mode) => {
-    try {
-      if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！");
-        return;
-      }
-      logInfo(`✓ webui 对象存在，准备调用 change_mode 函数，参数: ${newMode}`);
-      window.webui.call("change_mode", newMode);
-      logSuccess('✓ webui.call("change_mode") 调用成功');
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logError("❌ 调用 change_mode 时发生错误: " + errorMsg);
-      console.error(e);
+    if (!apiClientRef.current) {
+      logError("❌ API 客户端未初始化");
+      return;
     }
+    const modeStr = modeToString(newMode);
+    logInfo(`准备切换模式: ${modeStr}`);
+    void apiClientRef.current.changeMode(newMode).then(() => {
+      logSuccess('✓ changeMode() 调用成功');
+    }).catch((e) => {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError(`❌ 调用 changeMode 时发生错误: ${errorMsg}`);
+    });
   }, []);
 
-  // 计算 memo 化的状态，避免不必要的渲染
-  // 直接使用 state 对象而不是重新构造，减少内存分配
   const statusMemo = useMemo(
     () => state,
     [
@@ -323,21 +312,18 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
       state.restRemaining,
       state.mode,
       state.time,
-    ],
+    ]
   );
 
   return (
     <div className="flex flex-col w-screen h-screen bg-primary-dark dark:bg-primary-dark transition-colors duration-300 animate-fadeIn overflow-hidden">
-      {/* 标题栏 */}
       <Header
         title={t("common.app_name")}
         showSettings={true}
         onSettingsClick={onSettingsClick}
       />
 
-      {/* 主内容区域 */}
       <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-12 overflow-y-auto">
-        {/* 状态指示器 */}
         <div
           className="flex gap-2 sm:gap-3 md:gap-4 justify-center mb-6 sm:mb-8 flex-wrap w-full"
           style={{ animationDelay: "0.1s", animationFillMode: "both" }}
@@ -373,13 +359,11 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
           </span>
         </div>
 
-        {/* 时间显示 */}
         <TimeDisplay
           time={statusMemo.time}
           isRunning={statusMemo.isRunning}
         />
 
-        {/* 循环和休息状态提示 */}
         {(statusMemo.inRest ||
           (statusMemo.loopRemaining !== null &&
             statusMemo.loopTotal !== null &&
@@ -407,7 +391,6 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
           </div>
         )}
 
-        {/* 主控制按钮 */}
         <ControlPanel
           isRunning={statusMemo.isRunning}
           onStart={handleStart}
@@ -416,7 +399,6 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
           animationDelay="0.3s"
         />
 
-        {/* 模式切换 */}
         <ModeSelector
           modes={[
             {
@@ -441,7 +423,6 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
         />
       </div>
 
-      {/* 页脚 */}
       <div
         className="px-4 sm:px-6 py-3 sm:py-4 md:py-6 text-center text-text-secondary-dark text-xs border-t border-border-dark bg-primary-dark animate-slideUp shrink-0"
         style={{ animationDelay: "0.5s", animationFillMode: "both" }}

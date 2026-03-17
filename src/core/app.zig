@@ -3,7 +3,7 @@ const app = @import("app.zig");
 const logger = @import("logger.zig");
 const builtin = @import("builtin");
 
-const webui_windows = @import("ui/webui_windows.zig");
+const http_server = @import("http/http_server.zig");
 const clock = @import("clock.zig");
 const settings = @import("../settings/settings_manager.zig");
 const interface = @import("interface.zig");
@@ -21,6 +21,7 @@ var global_app: ?*MainApplication = null;
 pub const MainApplication = struct {
     clock_manager: clock.ClockManager,
     settings_manager: settings.SettingsManager,
+    http_server: http_server.HttpServerManager,
     mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
     /// 错误恢复管理器 - 用于处理和追踪错误
@@ -81,6 +82,9 @@ pub const MainApplication = struct {
         self.clock_manager = clock.ClockManager.init(
             clock_config,
         );
+
+        // 初始化 HTTP 服务器
+        self.http_server = try http_server.HttpServerManager.init(allocator, 8080, self);
     }
     /// 配置日志系统
     ///
@@ -105,7 +109,7 @@ pub const MainApplication = struct {
 
     /// 运行应用程序主循环
     pub fn run(self: *MainApplication) !void {
-        return self.webui.run();
+        return self.http_server.start();
     }
 
     /// 应用程序 tick - 更新逻辑并刷新显示
@@ -189,10 +193,7 @@ pub const MainApplication = struct {
                 new_clock_config,
             );
 
-            // 更新前端的默认时区，确保世界时钟模式立即反映设置变化
-            self.webui.setTimezone(self.settings_manager.config.basic.timezone);
-            // 设置变更后立即推送最新配置到前端
-            self.webui.pushSettings();
+            // HTTP 服务器会通过 SSE 推送更新，前端会自动同步
             logger.global_logger.info("✓ 设置已更新，时钟已重新初始化", .{});
         }
     }
@@ -204,8 +205,8 @@ pub const MainApplication = struct {
     pub fn deinit(self: *MainApplication) void {
         logger.global_logger.info("MainApplication.deinit() 开始清理...", .{});
 
-        // 1. 清理 WebUI 资源
-        self.webui.deinit();
+        // 1. 停止 HTTP 服务器
+        self.http_server.stop();
 
         self.clock_manager.deinit();
 

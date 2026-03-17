@@ -1,5 +1,5 @@
 import type { FunctionalComponent } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useState, useRef } from "preact/hooks";
 import { Header } from "./components/Header";
 import { TabPanel } from "./components/TabPanel";
 import { BasicSettings } from "./components/BasicSettings";
@@ -8,6 +8,7 @@ import { StopwatchSettings } from "./components/StopwatchSettings";
 import { PresetSettings, type TimerPreset } from "./components/PresetSettings";
 import { WorldClockSettings } from "./components/WorldClockSettings";
 import { t, setLanguage } from "./utils/i18n";
+import { APIClient } from "./utils/apiClient";
 
 interface SettingsPageProps {
   onBackClick?: () => void;
@@ -66,13 +67,17 @@ const TABS = [
 export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   onBackClick,
 }) => {
+  const apiClientRef = useRef<APIClient | null>(null);
   const [config, setConfig] = useState<SettingsConfig>(DEFAULT_CONFIG);
   const [presets, setPresets] = useState<TimerPreset[]>([]);
   const [activeTab, setActiveTab] = useState("basic");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
 
-  // 根据默认模式切换标签页，确保模式与配置联动
+  useEffect(() => {
+    apiClientRef.current = new APIClient(window.location.origin);
+  }, []);
+
   useEffect(() => {
     const modeTab =
       config.basic.default_mode === "countdown"
@@ -83,8 +88,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     setActiveTab(modeTab);
   }, [config.basic.default_mode]);
 
-  // 应用主题
-  const applyTheme = (themeMode: string = "dark") => {
+  const applyTheme = (themeMode = "dark") => {
     const html = document.documentElement;
     const theme =
       themeMode === "auto"
@@ -102,75 +106,57 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     }
   };
 
-  const loadSettings = () => {
-    // 从后端加载设置
-    // 后端会通过 window.updateSettingsDisplay() 回调返回设置数据
-    return new Promise<void>((resolve) => {
-      try {
-        // 设置超时：如果 2 秒内未收到回调，使用默认配置
-        const timeoutId = setTimeout(() => {
-          console.warn("⚠️ 加载设置超时，使用默认配置");
-          setSaveMessage(t("errors.offline.message"));
-          resolve();
-        }, 2000);
+  const loadSettings = async () => {
+    if (!apiClientRef.current) {
+      setSaveMessage(t("errors.offline.message"));
+      return;
+    }
 
-        // 设置全局回调，用于接收后端发送的设置数据
-        (window as any).updateSettingsDisplay = (settingsJson: string) => {
-          clearTimeout(timeoutId);
-          try {
-            console.log("收到后端设置 JSON:", settingsJson);
-            const parsedConfig = JSON.parse(settingsJson) as SettingsConfig;
-            setConfig(parsedConfig);
-            // 只在预设数据存在且非空时更新预设，避免后端返回空预设时清空本地数据
-            if (parsedConfig.presets && parsedConfig.presets.length > 0) {
-              setPresets(parsedConfig.presets);
-              console.log("✅ 设置已加载，预设数量:", parsedConfig.presets.length);
-            } else {
-              console.log("✅ 设置已加载，后端返回空预设，保留本地预设:", presets.length);
-            }
-          } catch (parseError) {
-            console.error("❌ 解析设置 JSON 失败:", parseError);
-            setSaveMessage(
-              t("validation.load_error", { error: "JSON 解析失败" }),
-            );
-          }
-          resolve();
-        };
+    try {
+      const settings = await apiClientRef.current.getSettings();
+      
+      const loadedConfig: SettingsConfig = {
+        basic: {
+          timezone: settings.basic.timezone,
+          language: settings.basic.language,
+          default_mode: settings.basic.default_mode,
+          theme_mode: settings.basic.theme_mode,
+        },
+        clock_defaults: {
+          countdown: settings.countdown as typeof DEFAULT_CONFIG.clock_defaults.countdown,
+          stopwatch: settings.stopwatch as typeof DEFAULT_CONFIG.clock_defaults.stopwatch,
+        },
+        presets: [],
+      };
+      
+      setConfig(loadedConfig);
 
-        // 调用后端的 get_settings，后端会通过 window.run() 调用上面的回调
-        window.webui?.call("get_settings");
-      } catch (error) {
-        setSaveMessage(
-          t("validation.load_error", {
-            error: error instanceof Error ? error.message : "未知错误",
-          }),
-        );
+      const loadedPresets = await apiClientRef.current.getPresets();
+      if (Array.isArray(loadedPresets)) {
+        setPresets(loadedPresets as TimerPreset[]);
       }
-    });
+    } catch (error) {
+      console.error("加载设置失败:", error);
+      setSaveMessage(t("errors.offline.message"));
+    }
   };
 
-  // 组件挂载时加载设置
   useEffect(() => {
-    loadSettings();
+    void loadSettings();
   }, []);
 
-  // 主题变化时应用主题
   useEffect(() => {
     applyTheme(config.basic.theme_mode || "dark");
   }, [config.basic.theme_mode]);
 
-  // 语言变化时加载对应语言包
   useEffect(() => {
     setLanguage(config.basic.language).catch((err) =>
       console.error("加载语言失败", err),
     );
   }, [config.basic.language]);
 
-  // 保护预设数据：确保config更新时presets不会被丢失
   useEffect(() => {
-    // 如果config更新但presets为空（非初次加载），尝试从config中恢复presets
     if (presets.length === 0 && config.presets && config.presets.length > 0) {
-      console.log("从config中恢复预设数据:", config.presets.length);
       setPresets([...config.presets]);
     }
   }, [config]);
@@ -179,24 +165,21 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     setIsSaving(true);
     setSaveMessage("");
 
-    try {
-      // 确保保存时包含当前的预设数据
-      const configWithPresets = { ...config, presets: [...presets] };
-      const configJson = JSON.stringify(configWithPresets);
-      console.log("保存配置，预设数量:", presets.length);
-      console.log("预设详情:", JSON.stringify(presets, null, 2));
-      console.log("发送 JSON:", configJson);
-      window.webui?.call("change_settings", configJson);
-
-      setTimeout(() => {
-        setIsSaving(false);
-        setSaveMessage(t("common.save_success"));
-        setTimeout(() => setSaveMessage(""), 3000);
-      }, 500);
-    } catch (error) {
-      setIsSaving(false);
-      const errorMessage = error instanceof Error ? error.message : "未知错误";
-      setSaveMessage(t("validation.save_error", { error: errorMessage }));
+    const configWithPresets = { ...config, presets: [...presets] };
+    
+    if (apiClientRef.current) {
+      void apiClientRef.current.updateSettings(configWithPresets)
+        .then(() => {
+          setSaveMessage(t("common.save_success"));
+          setTimeout(() => setSaveMessage(""), 3000);
+        })
+        .catch((error) => {
+          const errorMessage = error instanceof Error ? error.message : "未知错误";
+          setSaveMessage(t("validation.save_error", { error: errorMessage }));
+        })
+        .finally(() => {
+          setIsSaving(false);
+        });
     }
   };
 
@@ -210,7 +193,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
 
   return (
     <div className="flex flex-col w-screen h-screen bg-primary-dark text-text-primary-dark transition-colors duration-300 animate-fadeIn overflow-hidden">
-      {/* 头部 */}
       <div
         className="flex justify-between items-center px-4 sm:px-6 md:px-8 py-3 sm:py-4 md:py-6 border-b border-border-dark animate-slideUp flex-shrink-0"
         style={{ animationDelay: "0.1s", animationFillMode: "both" }}
@@ -222,7 +204,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         />
       </div>
 
-      {/* 标签页和内容 */}
       <TabPanel
         tabs={TABS.map((tab) => ({ ...tab, label: t(tab.labelKey) }))}
         activeTab={activeTab}
@@ -236,7 +217,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
               setConfig((prev) => {
                 const next = { ...prev, basic: newBasic };
 
-                // 非倒计时模式下隐藏循环配置并重置为关闭
                 if (newBasic.default_mode !== "countdown") {
                   next.clock_defaults = {
                     ...prev.clock_defaults,
@@ -303,8 +283,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
             presets={presets}
             onChange={setPresets}
             onUsePreset={(preset) => {
-              // 使用预设时只更新配置，不保存到后端
-              // 避免意外清空现有预设
               if (
                 preset.mode === "countdown" &&
                 preset.config.duration_seconds
@@ -346,18 +324,15 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
                   },
                 });
               }
-              // 只显示应用成功的消息，不自动保存
               setSaveMessage(
                 t("settings.presets.applied", { name: preset.name }),
               );
-              // 3秒后清除消息
               setTimeout(() => setSaveMessage(""), 3000);
             }}
           />
         )}
       </TabPanel>
 
-      {/* 操作按钮 */}
       <div
         className="flex gap-2 sm:gap-3 md:gap-4 items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 border-t border-border-dark bg-primary-dark flex-wrap animate-slideUp flex-shrink-0"
         style={{ animationDelay: "0.3s", animationFillMode: "both" }}

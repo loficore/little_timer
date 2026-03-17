@@ -8,9 +8,12 @@ afterEach(() => {
 })
 
 // Mock window.webui
-global.window = global.window || ({} as any)
-window.webui = {
-  call: vi.fn(),
+declare global {
+  interface Window {
+    webui?: {
+      call: (functionName: string, ...args: unknown[]) => void;
+    };
+  }
 }
 
 // Mock localStorage

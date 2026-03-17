@@ -4,156 +4,190 @@ const logger = @import("../logger.zig");
 const clock = @import("../clock.zig");
 const settings = @import("../../settings/mod.zig");
 const MainApplication = @import("../app.zig").MainApplication;
+const build_options = @import("build_options");
 
 const ClockState = clock.ClockState;
+const ModeEnumT = clock.ModeEnumT;
 
-const HttpServerManager = struct {
-    server: ?httpz.Server(HttpHandler) = null,
-    handler: HttpHandler,
-    sse_clients: std.ArrayList(std.net.Stream),
-    sse_mutex: std.Thread.Mutex,
+pub const HttpHandler = struct {
+    app: *MainApplication,
     allocator: std.mem.Allocator,
+};
 
-    pub const HttpHandler = struct {
-        app: *MainApplication,
+fn handleRoot(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = h;
+    _ = request;
 
-        fn handleGetState(self: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-            _ = request;
+    if (build_options.embed_ui) {
+        response.header("content-type", "text/html; charset=utf-8");
+        try response.chunk(build_options.embedded_html);
+    } else {
+        response.header("content-type", "text/html; charset=utf-8");
+        try response.chunk("<html><body><h1>Little Timer</h1><p>请先构建前端: cd assets && bun run build</p></body></html>");
+    }
+}
 
-            const display_data = self.app.clock_manager.update();
-            const mode_key = switch (display_data.getMode()) {
-                .COUNTDOWN_MODE => "countdown",
-                .STOPWATCH_MODE => "stopwatch",
-                .WORLD_CLOCK_MODE => "world_clock",
-            };
+fn handleGetState(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
 
-            const timezone: i8 = switch (display_data.*) {
-                .WORLD_CLOCK_MODE => |world_clock| world_clock.timezone,
-                else => self.app.settings_manager.config.basic.timezone,
-            };
-
-            try response.json(.{
-                .time = display_data.getTimeInfo(),
-                .mode = mode_key,
-                .is_running = !display_data.isPaused(),
-                .is_finished = display_data.isFinished(),
-                .in_rest = display_data.inRest(),
-                .loop_remaining = display_data.getLoopRemaining(),
-                .loop_total = display_data.getLoopTotal(),
-                .rest_remaining = display_data.getRestRemainingTime(),
-                .timezone = timezone,
-            }, .{});
-        }
-
-        /// 处理开始计时的请求
-        /// 参数:
-        /// - **self**: HttpHandler实例指针
-        /// - **request**: HTTP请求对象
-        /// - **response**: HTTP响应对象
-        fn handleStart(self: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-            _ = request;
-            self.app.clock_manager.handleEvent(.user_start_timer);
-            try response.json(.{ .status = "started" }, .{});
-        }
-
-        /// 处理暂停计时的请求
-        /// 参数:
-        /// - **self**: HttpHandler实例指针
-        /// - **request**: HTTP请求对象
-        /// - **response**: HTTP响应对象
-        fn handlePause(self: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-            _ = request;
-            self.app.clock_manager.handleEvent(.user_pause_timer);
-            try response.json(.{ .status = "paused" }, .{});
-        }
-
-        fn handleReset(self: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-            _ = request;
-            self.app.clock_manager.handleEvent(.user_reset_timer);
-            try response.json(.{ .status = "reset" }, .{});
-        }
-
-        fn handleModeChange(self: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-            const body = try request.body();
-            const mode_str = try std.utf8.trim(std.mem.sliceToString(body));
-
-            const new_mode = if (std.mem.eql(u8, mode_str, "countdown"))
-                ClockState.Mode.COUNTDOWN_MODE
-            else if (std.mem.eql(u8, mode_str, "stopwatch"))
-                ClockState.Mode.STOPWATCH_MODE
-            else if (std.mem.eql(u8, mode_str, "world_clock"))
-                ClockState.Mode.WORLD_CLOCK_MODE
-            else {
-                try response.json(std.json.Value{ .object = std.StringArrayHashMap(std.json.Value).init(self.app.allocator) }, .{});
-                return;
-            };
-
-            self.app.clock_manager.handleEvent(.user_change_mode(new_mode));
-            try response.json(.{ .status = "mode_changed", .new_mode = mode_str }, .{});
-        }
-
-        fn handleGetSettings(self: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {}
-
-        fn handleUpdateSettings(self: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {}
-
-        fn handleSSE(self: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-            _ = request;
-            const display_data = self.app.clock_manager.update();
-
-            const sse_data = .{
-                .time = display_data.getTimeInfo(),
-                .mode = switch (display_data.getMode()) {
-                    .COUNTDOWN_MODE => "countdown",
-                    .STOPWATCH_MODE => "stopwatch",
-                    .WORLD_CLOCK_MODE => "world_clock",
-                },
-                .is_running = !display_data.isPaused(),
-                .is_finished = display_data.isFinished(),
-                .in_rest = display_data.inRest(),
-                .loop_remaining = display_data.getLoopRemaining(),
-                .loop_total = display_data.getLoopTotal(),
-                .rest_remaining = display_data.getRestRemainingTime(),
-            };
-
-            // 发送 SSE 数据，这个value参数是anytype,且json方法会自动序列化为JSON字符串，所以这里直接传结构体即可
-            try response.json(response, sse_data, .{});
-        }
+    const display_data = h.app.clock_manager.update();
+    const mode_key = switch (display_data.getMode()) {
+        .COUNTDOWN_MODE => "countdown",
+        .STOPWATCH_MODE => "stopwatch",
+        .WORLD_CLOCK_MODE => "world_clock",
     };
 
-    pub fn init(allocator: ?std.mem.Allocator, port: u16, app: *MainApplication) !HttpServerManager {
-        if (allocator == null) {
-            allocator = std.heap.page_allocator;
-        }
+    const timezone: i8 = switch (display_data.*) {
+        .WORLD_CLOCK_MODE => |world_clock| world_clock.timezone,
+        else => h.app.settings_manager.config.basic.timezone,
+    };
 
-        const App = struct {};
-        const server = try httpz.Server(App).init(allocator, .{ .address = .{ .ip = std.net.Address.Ip4{ .octets = [4]u8{ 127, 0, 0, 1 }, .port = port } } });
+    try response.json(.{
+        .time = display_data.getTimeInfo(),
+        .mode = mode_key,
+        .is_running = !display_data.isPaused(),
+        .is_finished = display_data.isFinished(),
+        .in_rest = display_data.inRest(),
+        .loop_remaining = display_data.getLoopRemaining(),
+        .loop_total = display_data.getLoopTotal(),
+        .rest_remaining = display_data.getRestRemainingTime(),
+        .timezone = timezone,
+    }, .{});
+}
 
-        const server_temp = HttpServerManager{
-            .server = server,
-            .handler = HttpHandler{
-                .app = app,
-            },
+fn handleStart(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
+    h.app.clock_manager.handleEvent(.user_start_timer);
+    try response.json(.{ .status = "started" }, .{});
+}
+
+fn handlePause(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
+    h.app.clock_manager.handleEvent(.user_pause_timer);
+    try response.json(.{ .status = "paused" }, .{});
+}
+
+fn handleReset(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
+    h.app.clock_manager.handleEvent(.user_reset_timer);
+    try response.json(.{ .status = "reset" }, .{});
+}
+
+fn handleModeChange(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    const body = request.body() orelse "";
+    const mode_str = std.mem.trim(u8, body, " \n\r\t");
+
+    const new_mode = if (std.mem.eql(u8, mode_str, "countdown"))
+        ModeEnumT.COUNTDOWN_MODE
+    else if (std.mem.eql(u8, mode_str, "stopwatch"))
+        ModeEnumT.STOPWATCH_MODE
+    else if (std.mem.eql(u8, mode_str, "world_clock"))
+        ModeEnumT.WORLD_CLOCK_MODE
+    else {
+        try response.json(std.json.Value{ .object = std.StringArrayHashMap(std.json.Value).init(h.allocator) }, .{});
+        return;
+    };
+
+    h.app.clock_manager.handleEvent(.{ .user_change_mode = new_mode });
+    try response.json(.{ .status = "mode_changed", .new_mode = mode_str }, .{});
+}
+
+fn handleGetSettings(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
+    const config = h.app.settings_manager.getConfig();
+    try response.json(config, .{});
+}
+
+fn handleUpdateSettings(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    const body = request.body() orelse "";
+    const body_copy: [:0]u8 = try h.allocator.allocSentinel(u8, body.len, 0);
+    @memcpy(body_copy[0..body.len], body);
+    try h.app.settings_manager.handleSettingsEvent(.{ .change_settings = body_copy });
+    try response.json(.{ .status = "settings_updated" }, .{});
+}
+
+fn handleSSE(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
+
+    const stream = try response.startEventStreamSync();
+
+    while (true) {
+        const display_data = h.app.clock_manager.update();
+        const mode_key = switch (display_data.getMode()) {
+            .COUNTDOWN_MODE => "countdown",
+            .STOPWATCH_MODE => "stopwatch",
+            .WORLD_CLOCK_MODE => "world_clock",
         };
 
-        // 路由配置
-        var router = try server_temp.server.?.router(.{});
-        router.get("/api/state", server_temp.handler.handleGetState, .{});
-        router.post("/api/start", server_temp.handler.handleStart, .{});
-        router.post("/api/pause", server_temp.handler.handlePause, .{});
-        router.post("/api/reset", server_temp.handler.handleReset, .{});
-        router.post("/api/mode", server_temp.handler.handleModeChange, .{});
-        router.get("/api/settings", server_temp.handler.handleGetSettings, .{});
-        router.post("/api/settings", server_temp.handler.handleUpdateSettings, .{});
-        router.get("/api/events", server_temp.handler.handleSSE, .{});
+        const timezone: i8 = switch (display_data.*) {
+            .WORLD_CLOCK_MODE => |world_clock| world_clock.timezone,
+            else => h.app.settings_manager.config.basic.timezone,
+        };
 
-        return server_temp;
+        const buf = try std.fmt.allocPrint(h.allocator, "{{\"time\":{},\"mode\":\"{s}\",\"is_running\":{},\"is_finished\":{},\"in_rest\":{},\"loop_remaining\":{},\"loop_total\":{},\"rest_remaining\":{},\"timezone\":{}}}", .{
+            display_data.getTimeInfo(),
+            mode_key,
+            !display_data.isPaused(),
+            display_data.isFinished(),
+            display_data.inRest(),
+            display_data.getLoopRemaining(),
+            display_data.getLoopTotal(),
+            display_data.getRestRemainingTime(),
+            timezone,
+        });
+        defer h.allocator.free(buf);
+
+        try stream.writeAll("data: ");
+        try stream.writeAll(buf);
+        try stream.writeAll("\n\n");
+
+        std.Thread.sleep(1_000_000_000);
+    }
+}
+
+fn handlePresets(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
+    const presets = h.app.settings_manager.getPresets();
+    try response.json(presets, .{});
+}
+
+pub const HttpServerManager = struct {
+    server: httpz.Server(*HttpHandler),
+    handler: HttpHandler,
+
+    pub fn init(allocator: std.mem.Allocator, port: u16, app: *MainApplication) !HttpServerManager {
+        var handler = HttpHandler{ .app = app, .allocator = allocator };
+        var server = try httpz.Server(*HttpHandler).init(allocator, .{
+            .address = .localhost(port),
+        }, &handler);
+
+        var router = try server.router(.{});
+        router.get("/", handleRoot, .{});
+        router.get("/api/state", handleGetState, .{});
+        router.post("/api/start", handleStart, .{});
+        router.post("/api/pause", handlePause, .{});
+        router.post("/api/reset", handleReset, .{});
+        router.post("/api/mode", handleModeChange, .{});
+        router.get("/api/settings", handleGetSettings, .{});
+        router.post("/api/settings", handleUpdateSettings, .{});
+        router.get("/api/events", handleSSE, .{});
+        router.get("/api/presets", handlePresets, .{});
+
+        return HttpServerManager{
+            .server = server,
+            .handler = handler,
+        };
     }
 
     pub fn start(self: *HttpServerManager) !void {
         try self.server.listen();
     }
 
-    pub fn stop(self: *HttpServerManager) !void {
-        try self.server.close();
+    pub fn stop(self: *HttpServerManager) void {
+        self.server.stop();
+    }
+
+    pub fn deinit(self: *HttpServerManager) void {
+        self.server.deinit();
     }
 };

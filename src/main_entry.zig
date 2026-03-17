@@ -19,7 +19,7 @@ comptime {
 }
 
 pub fn main() !void {
-    logger.global_logger.info("Little Timer WebUI 启动中...", .{});
+    logger.global_logger.info("Little Timer HTTP Server 启动中...", .{});
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -36,7 +36,7 @@ pub fn main() !void {
     logger.global_logger.info("初始化应用程序...", .{});
     try main_app.init(allocator);
 
-    logger.global_logger.info("启动 WebUI 主循环...", .{});
+    logger.global_logger.info("启动 HTTP 服务器...", .{});
     try main_app.run();
 }
 

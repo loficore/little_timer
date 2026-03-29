@@ -33,7 +33,7 @@ Zig 会自动下载依赖、编译 C 库并运行应用。
 ## 依赖与环境要求
 
 - **Zig**：建议使用0.15.2（用于构建后端与依赖）
-- **Node.js + pnpm**：用于前端开发与构建（前端代码位于 assets/），使用v22.21.1
+- **Node.js + bun**：用于前端开发与构建（前端代码位于 assets/），建议使用最新版 Bun
 - **系统库**：WebUI 运行时依赖（Linux/Windows 请确保系统环境可正常加载 WebUI 相关动态库）
 
 > 若你只运行后端 `zig build run`，前端已构建产物可直接使用；需要修改 UI 时请看下方“前端开发与构建流程”。
@@ -44,25 +44,25 @@ Zig 会自动下载依赖、编译 C 库并运行应用。
 
 ```bash
 cd assets
-pnpm install
+bun install
 ```
 
 本地开发（HMR）：
 
 ```bash
-pnpm dev
+bun run dev
 ```
 
 生产构建（输出到 assets/dist）：
 
 ```bash
-pnpm build
+bun run build
 ```
 
 代码检查：
 
 ```bash
-pnpm lint
+bun run lint
 ```
 
 ## 配置说明

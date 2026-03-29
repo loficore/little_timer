@@ -12,47 +12,33 @@ interface StatusBadgeProps {
 }
 
 /**
- * 获取状态样式类
+ * 获取 DaisyUI badge 变体类名
  */
-const getStatusClasses = (status: StatusType): string => {
-  const classes: Record<StatusType, string> = {
-    running:
-      "bg-accent-dark text-white border border-accent-dark animate-pulse",
-    paused:
-      "bg-secondary-dark text-text-secondary-dark border border-border-dark",
-    finished: "bg-green-600 text-white border border-green-600",
+const getStatusVariant = (status: StatusType): string => {
+  const variants: Record<StatusType, string> = {
+    running: "badge-primary",
+    paused: "badge-neutral",
+    finished: "badge-success",
   };
-  return classes[status];
+  return variants[status];
 };
 
 /**
- * 状态徽章组件 - 显示计时器运行状态
- *
- * @example
- * ```tsx
- * <StatusBadge
- *   status="running"
- *   label="运行中"
- * />
- *
- * <StatusBadge
- *   status="finished"
- *   label="已完成"
- * />
- * ```
+ * 状态徽章组件 - 基于 DaisyUI badge
  */
 export const StatusBadge: FunctionalComponent<StatusBadgeProps> = ({
   status,
   label,
   animationDelay = "0s",
 }) => {
-  const statusClasses = getStatusClasses(status);
+  const variant = getStatusVariant(status);
 
   return (
     <span
-      className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium transition-all duration-200 whitespace-nowrap animate-slideUp ${statusClasses}`}
+      className={`badge ${variant} gap-2 text-xs sm:text-sm animate-slideUp`}
       style={{ animationDelay, animationFillMode: "both" }}
     >
+      {status === "running" && <span className="badge badge-xs badge-primary animate-pulse" />}
       {label}
     </span>
   );

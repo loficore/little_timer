@@ -1,5 +1,6 @@
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
+import { ArrowLeftIconComponent, SettingsIcon, ChartIcon } from "../utils/icons";
 
 interface HeaderProps {
   /** 标题文本 */
@@ -8,60 +9,59 @@ interface HeaderProps {
   showSettings?: boolean;
   /** 设置按钮点击回调 */
   onSettingsClick?: () => void;
+  /** 是否显示统计按钮 */
+  showStats?: boolean;
+  /** 统计按钮点击回调 */
+  onStatsClick?: () => void;
   /** 是否显示返回按钮 */
   showBack?: boolean;
   /** 返回按钮点击回调 */
   onBackClick?: () => void;
 }
 
-/**
- * 应用头部组件 - 统一管理标题栏样式和交互
- *
- * @example
- * ```tsx
- * <Header
- *   title={t("common.app_name")}
- *   showSettings={true}
- *   onSettingsClick={handleSettings}
- * />
- * ```
- */
 export const Header: FunctionalComponent<HeaderProps> = ({
   title = t("common.app_name"),
   showSettings = true,
   onSettingsClick,
+  showStats = false,
+  onStatsClick,
   showBack = false,
   onBackClick,
 }) => {
   return (
-    <div className="flex justify-between items-center px-4 sm:px-6 md:px-8 py-3 sm:py-4 md:py-6 border-b border-border-dark shrink-0">
-      {/* 左侧按钮 */}
-      <div className="w-10 shrink-0 flex items-center justify-center">
+    <div className="navbar bg-base-200 border-b border-base-300 shrink-0">
+      <div className="flex-1">
         {showBack && (
           <button
             onClick={onBackClick}
             title={t("common.back")}
-            className="w-10 h-10 flex items-center justify-center rounded-xl bg-transparent border border-border-dark text-text-secondary-dark font-semibold cursor-pointer transition-all duration-200 hover:bg-secondary-dark hover:border-accent-dark hover:text-text-primary-dark hover:scale-110 active:bg-tertiary-dark active:scale-95"
+            className="btn btn-ghost btn-sm gap-1"
           >
-            ←
+            <ArrowLeftIconComponent />
+            <span>{t("common.back")}</span>
           </button>
         )}
       </div>
-
-      {/* 中间标题 */}
-      <h1 className="text-lg sm:text-xl md:text-2xl font-semibold text-text-primary-dark truncate pr-2">
-        {title}
-      </h1>
-
-      {/* 右侧按钮 */}
-      <div className="w-10 shrink-0 flex items-center justify-center">
+      <div className="flex-none">
+        <h1 className="text-lg font-semibold">{title}</h1>
+      </div>
+      <div className="flex-1 flex justify-end gap-2">
+        {showStats && (
+          <button
+            onClick={onStatsClick}
+            title={t("stats.title") || "统计"}
+            className="btn btn-ghost btn-circle"
+          >
+            <ChartIcon />
+          </button>
+        )}
         {showSettings && (
           <button
             onClick={onSettingsClick}
             title={t("common.settings_title")}
-            className="w-10 h-10 flex items-center justify-center rounded-xl bg-transparent border-0 cursor-pointer transition-all duration-200 text-text-secondary-dark hover:bg-secondary-dark hover:text-text-primary-dark hover:scale-110 active:bg-tertiary-dark"
+            className="btn btn-ghost btn-circle"
           >
-            ⚙
+            <SettingsIcon />
           </button>
         )}
       </div>

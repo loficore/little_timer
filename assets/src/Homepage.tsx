@@ -12,14 +12,19 @@ import { Mode } from "./utils/share";
 import { t } from "./utils/i18n";
 import { Header } from "./components/Header";
 import { TimeDisplay } from "./components/TimeDisplay";
-import { StatusBadge } from "./components/StatusBadge";
 import { ControlPanel } from "./components/ControlPanel";
-import { ModeSelector } from "./components/ModeSelector";
+import { HabitModal } from "./components/HabitModal";
 import { APIClient, type TimerState } from "./utils/apiClient";
 import { SSEClient } from "./utils/sseClient";
+import type { HabitSet, Habit, HabitWithProgress } from "./types/habit.ts";
 
 interface HomePageProps {
-  onSettingsClick?: () => void;
+  onStatsClick?: () => void;
+  onBackClick?: () => void;
+  selectedSetId?: number | null;
+  selectedHabit?: Habit | null;
+  onSetClick?: (setId: number) => void;
+  onHabitClick?: (habit: Habit) => void;
 }
 
 // 倒计时/秒表用：格式化持续时间（秒）
@@ -36,16 +41,6 @@ const formatDuration = (totalSeconds: number): string => {
   return `${hours}:${minutes}:${seconds}`;
 };
 
-// 世界时钟用：格式化 Unix 秒为本地时区时间
-const formatClockTime = (unixSeconds: number): string => {
-  const d = new Date(unixSeconds * 1000);
-  // 使用 UTC 视角读取，避免本地时区再次偏移（否则会双重偏移）
-  const h = d.getUTCHours().toString().padStart(2, "0");
-  const m = d.getUTCMinutes().toString().padStart(2, "0");
-  const s = d.getUTCSeconds().toString().padStart(2, "0");
-  return `${h}:${m}:${s}`;
-};
-
 interface HomeState {
   time: string;
   mode: Mode;
@@ -58,7 +53,8 @@ interface HomeState {
   timezone: number;
 }
 
-const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
+const HomePage = memo((props: HomePageProps) => {
+  const { onStatsClick, onBackClick, selectedSetId, selectedHabit, onSetClick, onHabitClick } = props;
   const apiClientRef = useRef<APIClient | null>(null);
   const sseClientRef = useRef<SSEClient | null>(null);
 
@@ -73,24 +69,23 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     isFinished: false,
     timezone: 8,
   }));
+  const [isConnected, setIsConnected] = useState(true);
+  const [habitSets, setHabitSets] = useState<HabitSet[]>([]);
+  const [habits, setHabits] = useState<HabitWithProgress[]>([]);
+  const [modalState, setModalState] = useState<{ isOpen: boolean; mode: "set" | "habit"; setId?: number }>({
+    isOpen: false,
+    mode: "set",
+  });
+  const [isLoadingHabits, setIsLoadingHabits] = useState(false);
   const prevFinishedRef = useRef(false);
+  const sessionRecordedRef = useRef(false);
   const isConnectedRef = useRef(false);
+  const lastCalibratedTimeRef = useRef<number>(0);
+  const lastCalibratedTimestampRef = useRef<number>(0);
 
   const modeMap: Record<string, Mode> = {
     countdown: Mode.Countdown,
     stopwatch: Mode.Stopwatch,
-    world_clock: Mode.WorldClock,
-  };
-
-  const modeToString = (mode: Mode): string => {
-    switch (mode) {
-      case Mode.Countdown:
-        return "countdown";
-      case Mode.Stopwatch:
-        return "stopwatch";
-      case Mode.WorldClock:
-        return "world_clock";
-    }
   };
 
   const applyTheme = useCallback((theme: string) => {
@@ -107,11 +102,11 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
   const updateStateFromTimerState = useCallback((timerState: TimerState) => {
     const newMode = modeMap[timerState.mode] || Mode.Countdown;
 
+    lastCalibratedTimeRef.current = timerState.time;
+    lastCalibratedTimestampRef.current = Date.now();
+
     setState((prev) => {
-      let newTime = prev.time;
-      if (newMode !== Mode.WorldClock) {
-        newTime = formatDuration(timerState.time);
-      }
+      const newTime = formatDuration(timerState.time);
 
       if (
         prev.time === newTime &&
@@ -178,9 +173,22 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
       } catch {
         // 忽略通知相关错误
       }
+
+      // 自动记录 session（仅在计时页且未记录过）
+      if (selectedHabit && !sessionRecordedRef.current) {
+        sessionRecordedRef.current = true;
+        const durationSeconds = selectedHabit.goal_seconds;
+        const today = new Date().toISOString().split("T")[0];
+        const client = new APIClient(window.location.origin);
+        void client.createSession(selectedHabit.id, durationSeconds, 1, today).then(() => {
+          logSuccess("✓ Session 已自动记录");
+        }).catch((e) => {
+          logError(`❌ 记录 session 失败: ${e}`);
+        });
+      }
     }
     prevFinishedRef.current = timerState.is_finished;
-  }, []);
+  }, [selectedHabit]);
 
   useEffect(() => {
     const baseUrl = window.location.origin;
@@ -202,10 +210,12 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
       sseClientRef.current!.connect(
         (timerState) => {
           isConnectedRef.current = true;
+          setIsConnected(true);
           updateStateFromTimerState(timerState);
         },
         (error: unknown) => {
           isConnectedRef.current = false;
+          setIsConnected(false);
           const errorMsg = error instanceof Error ? error.message : String(error);
           logError(`❌ SSE 连接错误: ${errorMsg}`);
         }
@@ -230,13 +240,66 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     };
   }, [applyTheme, updateStateFromTimerState]);
 
+  // 加载习惯集
   useEffect(() => {
-    if (state.mode !== Mode.WorldClock) return;
+    if (!apiClientRef.current) {
+      const baseUrl = window.location.origin;
+      apiClientRef.current = new APIClient(baseUrl);
+    }
+    
+    const loadHabitSets = async () => {
+      try {
+        const sets = await apiClientRef.current!.getHabitSets();
+        setHabitSets(Array.isArray(sets) ? sets : []);
+      } catch (e) {
+        logError(`❌ 获取习惯集失败: ${e}`);
+      }
+    };
+    
+    void loadHabitSets();
+  }, []);
 
+  // 加载习惯列表（当选择了习惯集时）
+  useEffect(() => {
+    if (!selectedSetId || !apiClientRef.current) {
+      setHabits([]);
+      return;
+    }
+    
+    const loadHabits = async () => {
+      setIsLoadingHabits(true);
+      try {
+        const allHabits = await apiClientRef.current!.getHabits();
+        const filtered = (Array.isArray(allHabits) ? allHabits : [])
+          .filter((h: any) => h.set_id === selectedSetId)
+          .map((h: any) => ({
+            ...h,
+            today_seconds: 0,
+            today_count: 0,
+            progress: 0,
+          }));
+        setHabits(filtered);
+      } catch (e) {
+        logError(`❌ 获取习惯失败: ${e}`);
+      } finally {
+        setIsLoadingHabits(false);
+      }
+    };
+    
+    void loadHabits();
+  }, [selectedSetId]);
+
+  useEffect(() => {
     const tick = () => {
-      const now = Math.floor(Date.now() / 1000);
-      const shifted = now + state.timezone * 3600;
-      setState((prev) => ({ ...prev, time: formatClockTime(shifted) }));
+      const calibrated = lastCalibratedTimeRef.current;
+      const lastTs = lastCalibratedTimestampRef.current;
+      if (calibrated > 0 && lastTs > 0) {
+        const elapsedSeconds = Math.floor((Date.now() - lastTs) / 1000);
+        const newTime = state.mode === Mode.Countdown
+          ? Math.max(0, calibrated - elapsedSeconds)
+          : calibrated + elapsedSeconds;
+        setState((prev) => ({ ...prev, time: formatDuration(newTime) }));
+      }
     };
 
     tick();
@@ -250,13 +313,20 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
       logError("❌ API 客户端未初始化");
       return;
     }
-    void apiClientRef.current.startTimer().then(() => {
+    // 重置 session 记录标记
+    sessionRecordedRef.current = false;
+    // 乐观更新：立即更新本地状态
+    setState(prev => ({ ...prev, isRunning: true, isFinished: false }));
+    const habitId = selectedHabit?.id;
+    void apiClientRef.current.startTimer(habitId).then(() => {
       logSuccess('✓ startTimer() 调用成功');
     }).catch((e) => {
       const errorMsg = e instanceof Error ? e.message : String(e);
       logError(`❌ 调用 startTimer 时发生错误: ${errorMsg}`);
+      // 回滚状态
+      setState(prev => ({ ...prev, isRunning: false }));
     });
-  }, []);
+  }, [selectedHabit]);
 
   const handlePause = useCallback(() => {
     logInfo('⏸️ "暂停"按钮被点击');
@@ -264,11 +334,15 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
       logError("❌ API 客户端未初始化");
       return;
     }
+    // 乐观更新：立即更新本地状态
+    setState(prev => ({ ...prev, isRunning: false }));
     void apiClientRef.current.pauseTimer().then(() => {
       logSuccess('✓ pauseTimer() 调用成功');
     }).catch((e) => {
       const errorMsg = e instanceof Error ? e.message : String(e);
       logError(`❌ 调用 pauseTimer 时发生错误: ${errorMsg}`);
+      // 回滚状态
+      setState(prev => ({ ...prev, isRunning: true }));
     });
   }, []);
 
@@ -278,26 +352,21 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
       logError("❌ API 客户端未初始化");
       return;
     }
+    // 乐观更新：立即重置本地状态
+    setState(prev => ({
+      ...prev,
+      isRunning: false,
+      isFinished: false,
+      inRest: false,
+      restRemaining: 0,
+      loopRemaining: null,
+      time: "25:00:00",
+    }));
     void apiClientRef.current.resetTimer().then(() => {
       logSuccess('✓ resetTimer() 调用成功');
     }).catch((e) => {
       const errorMsg = e instanceof Error ? e.message : String(e);
       logError(`❌ 调用 resetTimer 时发生错误: ${errorMsg}`);
-    });
-  }, []);
-
-  const handleModeChange = useCallback((newMode: Mode) => {
-    if (!apiClientRef.current) {
-      logError("❌ API 客户端未初始化");
-      return;
-    }
-    const modeStr = modeToString(newMode);
-    logInfo(`准备切换模式: ${modeStr}`);
-    void apiClientRef.current.changeMode(newMode).then(() => {
-      logSuccess('✓ changeMode() 调用成功');
-    }).catch((e) => {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logError(`❌ 调用 changeMode 时发生错误: ${errorMsg}`);
     });
   }, []);
 
@@ -315,117 +384,198 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     ]
   );
 
+  // 根据不同页面状态渲染内容
+  const renderContent = () => {
+    // 计时页面（选中了习惯）
+    if (selectedHabit) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center px-4 py-8">
+          <div className="text-2xl font-bold mb-2" style={{ color: selectedHabit.color }}>
+            {selectedHabit.name}
+          </div>
+          <div className="text-sm text-base-content/60 mb-8">
+            目标: {Math.floor(selectedHabit.goal_seconds / 60)} 分钟
+          </div>
+          
+          <TimeDisplay time={statusMemo.time} isRunning={statusMemo.isRunning} />
+          
+          <ControlPanel
+            isRunning={statusMemo.isRunning}
+            onStart={handleStart}
+            onPause={handlePause}
+            onReset={handleReset}
+          />
+          
+          <div className="mt-6">
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() => {
+                if (apiClientRef.current) {
+                  void apiClientRef.current.startRest();
+                }
+              }}
+            >
+              休息 5 分钟
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
+    // 习惯列表页面（选中了习惯集）
+    if (selectedSetId) {
+      return (
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {isLoadingHabits ? (
+            <div className="flex justify-center py-8">
+              <span className="loading loading-spinner"></span>
+            </div>
+          ) : habits.length === 0 ? (
+            <div className="text-center py-8 text-base-content/50">
+              暂无习惯，点击下方添加
+            </div>
+          ) : (
+            habits.map((habit) => (
+              <div
+                key={habit.id}
+                className="card bg-base-200 cursor-pointer hover:scale-[1.02] transition-transform"
+                onClick={() => onHabitClick?.(habit)}
+              >
+                <div className="card-body p-4 flex-row items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-3 h-3 rounded-full"
+                      style={{ backgroundColor: habit.color }}
+                    />
+                    <div>
+                      <div className="font-medium">{habit.name}</div>
+                      <div className="text-xs text-base-content/60">
+                        目标 {Math.floor(habit.goal_seconds / 60)} 分钟
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-base-content/40">▶</div>
+                </div>
+              </div>
+            ))
+          )}
+          
+          <button
+            className="btn btn-outline btn-block mt-4"
+            onClick={() => {
+              if (selectedSetId) {
+                setModalState({ isOpen: true, mode: "habit", setId: selectedSetId });
+              }
+            }}
+          >
+            + 添加习惯
+          </button>
+        </div>
+      );
+    }
+    
+    // 习惯集列表页面（首页）
+    return (
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {habitSets.length === 0 ? (
+          <div className="text-center py-8 text-base-content/50">
+            暂无习惯集，点击下方创建
+          </div>
+        ) : (
+          habitSets.map((set) => (
+            <div
+              key={set.id}
+              className="card bg-base-200 cursor-pointer hover:scale-[1.02] transition-transform"
+              onClick={() => onSetClick?.(set.id)}
+            >
+              <div className="card-body p-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-4 h-4 rounded-full"
+                    style={{ backgroundColor: set.color }}
+                  />
+                  <div className="font-semibold">{set.name}</div>
+                </div>
+                {set.description && (
+                  <div className="text-sm text-base-content/60 mt-1">
+                    {set.description}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+        
+        <button
+          className="btn btn-primary btn-block mt-4"
+          onClick={() => setModalState({ isOpen: true, mode: "set" })}
+        >
+          + 创建习惯集
+        </button>
+      </div>
+    );
+  };
+
+  const getTitle = () => {
+    if (selectedHabit) return selectedHabit.name;
+    if (selectedSetId) {
+      const set = habitSets.find(s => s.id === selectedSetId);
+      return set?.name || "习惯列表";
+    }
+    return t("common.app_name");
+  };
+
   return (
-    <div className="flex flex-col w-screen h-screen bg-primary-dark dark:bg-primary-dark transition-colors duration-300 animate-fadeIn overflow-hidden">
+    <div className="flex flex-col w-screen h-screen bg-primary-dark dark:bg-primary-dark transition-colors duration-300 animate-fadeIn overflow-hidden pb-16 lg:pb-0">
       <Header
-        title={t("common.app_name")}
-        showSettings={true}
-        onSettingsClick={onSettingsClick}
+        title={getTitle()}
+        showSettings={false}
+        showBack={!!selectedSetId || !!selectedHabit}
+        onBackClick={onBackClick}
+        showStats={!selectedSetId && !selectedHabit}
+        onStatsClick={onStatsClick}
       />
 
-      <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-12 overflow-y-auto">
-        <div
-          className="flex gap-2 sm:gap-3 md:gap-4 justify-center mb-6 sm:mb-8 flex-wrap w-full"
-          style={{ animationDelay: "0.1s", animationFillMode: "both" }}
-        >
-          <StatusBadge
-            status={
-              statusMemo.isRunning
-                ? "running"
-                : prevFinishedRef.current
-                  ? "finished"
-                  : "paused"
-            }
-            label={
-              statusMemo.isRunning
-                ? t("home.status_running")
-                : prevFinishedRef.current
-                  ? t("home.status_finished")
-                  : t("home.status_paused")
-            }
-            animationDelay="0.1s"
-          />
-          <span
-            className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium bg-accent-dark text-white border border-accent-dark whitespace-nowrap animate-slideUp"
-            style={{ animationDelay: "0.12s", animationFillMode: "both" }}
-          >
-            {(() => {
-              if (statusMemo.mode === Mode.Countdown)
-                return t("home.mode_countdown");
-              if (statusMemo.mode === Mode.Stopwatch)
-                return t("home.mode_stopwatch");
-              return t("home.mode_world_clock");
-            })()}
-          </span>
+      {/* 连接状态指示器 */}
+      {!isConnected && (
+        <div className="bg-error text-white text-center py-1 text-sm font-medium animate-pulse">
+          ⚠️ 连接中断 - 正在重连...
         </div>
+      )}
 
-        <TimeDisplay
-          time={statusMemo.time}
-          isRunning={statusMemo.isRunning}
-        />
+      {renderContent()}
 
-        {(statusMemo.inRest ||
-          (statusMemo.loopRemaining !== null &&
-            statusMemo.loopTotal !== null &&
-            statusMemo.loopTotal > 0)) && (
-          <div
-            className="text-center mb-3 sm:mb-4 text-xs sm:text-sm text-text-secondary-dark animate-slideUp w-full px-2"
-            style={{ animationDelay: "0.25s", animationFillMode: "both" }}
-          >
-            {statusMemo.inRest && (
-              <div className="text-accent-dark font-semibold">
-                {t("home.rest_status", { seconds: statusMemo.restRemaining })}
-              </div>
-            )}
-            {statusMemo.loopRemaining !== null &&
-              statusMemo.loopTotal !== null &&
-              statusMemo.loopTotal > 0 &&
-              !statusMemo.inRest && (
-                <div className="text-accent-dark font-semibold">
-                  {t("home.loop_status", {
-                    remaining: statusMemo.loopRemaining,
-                    total: statusMemo.loopTotal,
-                  })}
-                </div>
-              )}
-          </div>
-        )}
-
-        <ControlPanel
-          isRunning={statusMemo.isRunning}
-          onStart={handleStart}
-          onPause={handlePause}
-          onReset={handleReset}
-          animationDelay="0.3s"
-        />
-
-        <ModeSelector
-          modes={[
-            {
-              key: Mode.Countdown,
-              label: t("home.mode_countdown"),
-              icon: "⏱",
-            },
-            {
-              key: Mode.Stopwatch,
-              label: t("home.mode_stopwatch"),
-              icon: "⏲",
-            },
-            {
-              key: Mode.WorldClock,
-              label: t("home.mode_world_clock"),
-              icon: "🌐",
-            },
-          ]}
-          activeMode={statusMemo.mode}
-          onModeChange={handleModeChange}
-          animationDelay="0.4s"
-        />
-      </div>
+      <HabitModal
+        isOpen={modalState.isOpen}
+        mode={modalState.mode}
+        setId={modalState.setId}
+        onClose={() => setModalState({ isOpen: false, mode: "set" })}
+        onSuccess={() => {
+          setModalState({ isOpen: false, mode: "set" });
+          // 刷新数据
+          if (modalState.mode === "set") {
+            const loadSets = async () => {
+              const client = new APIClient(window.location.origin);
+              const sets = await client.getHabitSets();
+              setHabitSets(Array.isArray(sets) ? sets : []);
+            };
+            void loadSets();
+          } else {
+            const loadHabits = async () => {
+              const client = new APIClient(window.location.origin);
+              const all = await client.getHabits();
+              const filtered = (Array.isArray(all) ? all : [])
+                .filter((h: any) => h.set_id === selectedSetId)
+                .map((h: any) => ({ ...h, today_seconds: 0, today_count: 0, progress: 0 }));
+              setHabits(filtered);
+            };
+            void loadHabits();
+          }
+        }}
+      />
 
       <div
-        className="px-4 sm:px-6 py-3 sm:py-4 md:py-6 text-center text-text-secondary-dark text-xs border-t border-border-dark bg-primary-dark animate-slideUp shrink-0"
-        style={{ animationDelay: "0.5s", animationFillMode: "both" }}
+        className="px-4 py-3 text-center text-text-secondary-dark text-xs border-t border-border-dark bg-primary-dark shrink-0 hidden lg:block"
       >
         <p>{t("common.version")}</p>
       </div>

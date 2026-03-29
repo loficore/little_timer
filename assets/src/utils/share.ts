@@ -2,7 +2,6 @@
 export const Mode = {
   Countdown: 'countdown',
   Stopwatch: 'stopwatch',
-  WorldClock: 'world_clock',
 } as const;
 
 export type Mode = (typeof Mode)[keyof typeof Mode];

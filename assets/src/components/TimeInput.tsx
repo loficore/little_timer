@@ -54,13 +54,13 @@ export const TimeInput = ({
   };
 
   return (
-    <div>
+    <div className="form-control w-full">
       {label && (
-        <label className="block text-xs sm:text-sm font-medium text-text-primary-dark mb-2">
-          {label}
+        <label className="label">
+          <span className="label-text">{label}</span>
         </label>
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-center gap-2">
         {showHours && (
           <div className="flex flex-col items-center">
             <input
@@ -69,12 +69,12 @@ export const TimeInput = ({
               max={maxHours}
               value={hours}
               onChange={(e) => handleHoursChange(parseInt(e.currentTarget.value) || 0)}
-              className="w-16 px-2 py-2 text-center border rounded-lg bg-secondary-dark border-border-dark text-text-primary-dark focus:border-accent-dark outline-none text-sm"
+              className="input input-bordered w-16 text-center"
             />
-            <span className="text-xs text-text-secondary-dark mt-1">{t("common.hours")}</span>
+            <span className="label-text-alt mt-1">{t("common.hours")}</span>
           </div>
         )}
-        <span className="text-lg text-text-secondary-dark">:</span>
+        <span className="text-lg font-bold">:</span>
         {showMinutes && (
           <div className="flex flex-col items-center">
             <input
@@ -83,12 +83,12 @@ export const TimeInput = ({
               max={59}
               value={minutes}
               onChange={(e) => handleMinutesChange(parseInt(e.currentTarget.value) || 0)}
-              className="w-16 px-2 py-2 text-center border rounded-lg bg-secondary-dark border-border-dark text-text-primary-dark focus:border-accent-dark outline-none text-sm"
+              className="input input-bordered w-16 text-center"
             />
-            <span className="text-xs text-text-secondary-dark mt-1">{t("common.minutes")}</span>
+            <span className="label-text-alt mt-1">{t("common.minutes")}</span>
           </div>
         )}
-        <span className="text-lg text-text-secondary-dark">:</span>
+        <span className="text-lg font-bold">:</span>
         {showSeconds && (
           <div className="flex flex-col items-center">
             <input
@@ -97,16 +97,16 @@ export const TimeInput = ({
               max={59}
               value={seconds}
               onChange={(e) => handleSecondsChange(parseInt(e.currentTarget.value) || 0)}
-              className="w-16 px-2 py-2 text-center border rounded-lg bg-secondary-dark border-border-dark text-text-primary-dark focus:border-accent-dark outline-none text-sm"
+              className="input input-bordered w-16 text-center"
             />
-            <span className="text-xs text-text-secondary-dark mt-1">{t("common.seconds")}</span>
+            <span className="label-text-alt mt-1">{t("common.seconds")}</span>
           </div>
         )}
       </div>
       {hint && (
-        <span className="block mt-2 text-xs text-text-secondary-dark italic">
-          {hint}
-        </span>
+        <label className="label">
+          <span className="label-text-alt">{hint}</span>
+        </label>
       )}
     </div>
   );

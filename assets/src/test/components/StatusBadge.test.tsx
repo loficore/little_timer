@@ -9,10 +9,7 @@ describe("StatusBadge 组件", () => {
     );
 
     expect(container.textContent).toContain("运行中");
-    // 检查是否有对应的样式类
-    expect(container.querySelector("span")?.className).toContain(
-      "bg-accent-dark",
-    );
+    expect(container.querySelector("span")?.className).toContain("badge-primary");
   });
 
   it("应该正确渲染暂停状态", () => {
@@ -21,9 +18,7 @@ describe("StatusBadge 组件", () => {
     );
 
     expect(container.textContent).toContain("已暂停");
-    expect(container.querySelector("span")?.className).toContain(
-      "bg-secondary-dark",
-    );
+    expect(container.querySelector("span")?.className).toContain("badge-neutral");
   });
 
   it("应该正确渲染完成状态", () => {
@@ -32,9 +27,7 @@ describe("StatusBadge 组件", () => {
     );
 
     expect(container.textContent).toContain("已完成");
-    expect(container.querySelector("span")?.className).toContain(
-      "bg-green-600",
-    );
+    expect(container.querySelector("span")?.className).toContain("badge-success");
   });
 
   it("应该支持动画延迟", () => {
@@ -51,8 +44,6 @@ describe("StatusBadge 组件", () => {
       <StatusBadge status="running" label="运行中" />,
     );
 
-    expect(container.querySelector("span")?.className).toContain(
-      "animate-pulse",
-    );
+    expect(container.querySelector("span")?.className).toContain("animate-slideUp");
   });
 });

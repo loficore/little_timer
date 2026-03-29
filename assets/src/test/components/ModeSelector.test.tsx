@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent, screen } from "@testing-library/preact";
 import { ModeSelector } from "../../components/ModeSelector";
 import { Mode } from "../../utils/share";
+import { ClockIconComponent } from "../../utils/icons";
 
 describe("ModeSelector 组件", () => {
   const mockOnModeChange = vi.fn();
 
   const modes = [
-    { key: Mode.Countdown, label: "倒计时", icon: "⏱" },
-    { key: Mode.Stopwatch, label: "秒表", icon: "⏲" },
-    { key: Mode.WorldClock, label: "世界时钟", icon: "🌐" },
+    { key: Mode.Countdown, label: "倒计时", icon: <ClockIconComponent /> },
+    { key: Mode.Stopwatch, label: "秒表", icon: <ClockIconComponent /> },
   ];
 
   beforeEach(() => {
@@ -30,20 +30,6 @@ describe("ModeSelector 组件", () => {
     expect(screen.getByText("世界时钟")).toBeTruthy();
   });
 
-  it("应该显示所有模式的图标", () => {
-    const { container } = render(
-      <ModeSelector
-        modes={modes}
-        activeMode={Mode.Countdown}
-        onModeChange={mockOnModeChange}
-      />,
-    );
-
-    expect(container.textContent).toContain("⏱");
-    expect(container.textContent).toContain("⏲");
-    expect(container.textContent).toContain("🌐");
-  });
-
   it("应该高亮激活的模式", () => {
     const { container } = render(
       <ModeSelector
@@ -58,8 +44,7 @@ describe("ModeSelector 组件", () => {
       btn.textContent?.includes("倒计时"),
     );
 
-    expect(countdownBtn?.className).toContain("bg-accent-dark");
-    expect(countdownBtn?.className).toContain("text-white");
+    expect(countdownBtn?.className).toContain("btn-primary");
   });
 
   it("非激活模式应该有不同样式", () => {
@@ -76,8 +61,7 @@ describe("ModeSelector 组件", () => {
       btn.textContent?.includes("秒表"),
     );
 
-    expect(stopwatchBtn?.className).toContain("border-border-dark");
-    expect(stopwatchBtn?.className).not.toContain("bg-accent-dark");
+    expect(stopwatchBtn?.className).toContain("btn-outline");
   });
 
   it("点击模式按钮应该触发回调", () => {
@@ -107,7 +91,7 @@ describe("ModeSelector 组件", () => {
     let countdownBtn = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent?.includes("倒计时"),
     );
-    expect(countdownBtn?.className).toContain("bg-accent-dark");
+    expect(countdownBtn?.className).toContain("btn-primary");
 
     rerender(
       <ModeSelector
@@ -120,12 +104,12 @@ describe("ModeSelector 组件", () => {
     countdownBtn = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent?.includes("倒计时"),
     );
-    expect(countdownBtn?.className).not.toContain("bg-accent-dark");
+    expect(countdownBtn?.className).toContain("btn-outline");
 
     const stopwatchBtn = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent?.includes("秒表"),
     );
-    expect(stopwatchBtn?.className).toContain("bg-accent-dark");
+    expect(stopwatchBtn?.className).toContain("btn-primary");
   });
 
   it("应该支持自定义动画延迟", () => {

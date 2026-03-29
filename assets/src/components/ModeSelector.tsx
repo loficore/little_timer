@@ -1,4 +1,4 @@
-import type { FunctionalComponent } from "preact";
+import type { FunctionalComponent, VNode } from "preact";
 import { Mode } from "../utils/share";
 
 interface ModeItem {
@@ -7,7 +7,7 @@ interface ModeItem {
   /** 显示标签 */
   label: string;
   /** 模式图标 */
-  icon: string;
+  icon: VNode;
 }
 
 interface ModeSelectorProps {
@@ -21,22 +21,6 @@ interface ModeSelectorProps {
   animationDelay?: string;
 }
 
-/**
- * 模式选择器组件 - 管理倒计时/秒表/世界时钟模式切换
- *
- * @example
- * ```tsx
- * <ModeSelector
- *   modes={[
- *     { key: Mode.Countdown, label: "倒计时", icon: "⏱" },
- *     { key: Mode.Stopwatch, label: "秒表", icon: "⏲" },
- *     { key: Mode.WorldClock, label: "世界时钟", icon: "🌐" },
- *   ]}
- *   activeMode={Mode.Countdown}
- *   onModeChange={handleModeChange}
- * />
- * ```
- */
 export const ModeSelector: FunctionalComponent<ModeSelectorProps> = ({
   modes,
   activeMode,
@@ -45,10 +29,10 @@ export const ModeSelector: FunctionalComponent<ModeSelectorProps> = ({
 }) => {
   return (
     <div
-      className="mt-6 sm:mt-8 md:mt-12 pt-4 sm:pt-6 md:pt-8 border-t border-border-dark text-center animate-slideUp w-full"
+      className="mt-6 sm:mt-8 md:mt-12 pt-4 sm:pt-6 md:pt-8 border-t border-base-300 text-center animate-slideUp w-full"
       style={{ animationDelay, animationFillMode: "both" }}
     >
-      <h3 className="text-xs font-semibold text-text-secondary-dark uppercase tracking-wider mb-3 sm:mb-4 md:mb-6 px-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 sm:mb-4 md:mb-6 px-2">
         切换模式
       </h3>
       <div className="grid grid-cols-3 gap-2 sm:gap-3 md:gap-4 px-2">
@@ -58,11 +42,11 @@ export const ModeSelector: FunctionalComponent<ModeSelectorProps> = ({
             onClick={() => onModeChange(key)}
             className={`p-2 sm:p-3 md:p-4 rounded-xl flex flex-col items-center gap-1 sm:gap-2 text-xs sm:text-sm font-medium transition-all duration-200 hover:scale-105 active:scale-95 min-h-15 sm:min-h-20 ${
               activeMode === key
-                ? "bg-accent-dark border-accent-dark text-white"
-                : "bg-transparent border border-border-dark text-text-secondary-dark hover:bg-secondary-dark hover:border-accent-dark hover:text-text-primary-dark"
+                ? "btn btn-primary"
+                : "btn btn-outline"
             }`}
           >
-            <span className="text-xl sm:text-2xl">{icon}</span>
+            <span className="w-6 h-6">{icon}</span>
             <span className="text-center line-clamp-2">{label}</span>
           </button>
         ))}

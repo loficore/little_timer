@@ -1,17 +1,19 @@
-import type { FunctionalComponent, ComponentChildren } from "preact";
+import type { FunctionalComponent, ComponentChildren, VNode } from "preact";
 
-type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
-type ButtonSize = "sm" | "md" | "lg";
+type ButtonVariant = "primary" | "secondary" | "danger" | "ghost" | "success" | "warning" | "info";
+type ButtonSize = "xs" | "sm" | "md" | "lg";
 
 interface ButtonProps {
   /** 按钮样式变体 */
   variant?: ButtonVariant;
   /** 按钮尺寸 */
   size?: ButtonSize;
-  /** 按钮图标（emoji 或文本） */
-  icon?: string;
+  /** 按钮图标（组件） */
+  icon?: VNode;
   /** 是否禁用 */
   disabled?: boolean;
+  /** 是否加载中 */
+  loading?: boolean;
   /** 按钮内容 */
   children: ComponentChildren;
   /** 点击回调 */
@@ -20,83 +22,79 @@ interface ButtonProps {
   className?: string;
   /** 标题提示 */
   title?: string;
+  /** 按钮类型 */
+  type?: "button" | "submit" | "reset";
+  /** 是否outline样式 */
+  outline?: boolean;
+  /** 是否block样式 */
+  block?: boolean;
 }
 
 /**
- * 获取变体样式类
+ * 获取 DaisyUI 变体类名
  */
-const getVariantClasses = (variant: ButtonVariant): string => {
+const getVariantClasses = (variant: ButtonVariant, outline: boolean): string => {
   const variants: Record<ButtonVariant, string> = {
-    primary:
-      "bg-accent-dark text-white border border-accent-dark hover:bg-accent-dark/90 hover:border-accent-dark/90",
-    secondary:
-      "bg-secondary-dark text-text-secondary-dark border border-border-dark hover:bg-tertiary-dark hover:text-text-primary-dark hover:border-accent-dark",
-    danger:
-      "bg-red-600 text-white border border-red-600 hover:bg-red-700 hover:border-red-700",
-    ghost:
-      "bg-transparent text-text-secondary-dark border border-transparent hover:bg-secondary-dark hover:text-text-primary-dark",
+    primary: outline ? "btn-primary btn-outline" : "btn-primary",
+    secondary: outline ? "btn-secondary btn-outline" : "btn-secondary",
+    danger: outline ? "btn-error btn-outline" : "btn-error",
+    ghost: "btn-ghost",
+    success: outline ? "btn-success btn-outline" : "btn-success",
+    warning: outline ? "btn-warning btn-outline" : "btn-warning",
+    info: outline ? "btn-info btn-outline" : "btn-info",
   };
   return variants[variant];
 };
 
 /**
- * 获取尺寸样式类
+ * 获取 DaisyUI 尺寸类名
  */
 const getSizeClasses = (size: ButtonSize): string => {
   const sizes: Record<ButtonSize, string> = {
-    sm: "px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm",
-    md: "px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base",
-    lg: "px-4 sm:px-6 py-3 sm:py-4 text-base sm:text-lg",
+    xs: "btn-xs",
+    sm: "btn-sm",
+    md: "",
+    lg: "btn-lg",
   };
   return sizes[size];
 };
 
 /**
- * 统一按钮组件 - 提供一致的按钮样式和交互
- *
- * @example
- * ```tsx
- * <Button variant="primary" size="md" icon="▶" onClick={handleStart}>
- *   开始
- * </Button>
- *
- * <Button variant="danger" size="sm">
- *   删除
- * </Button>
- *
- * <Button variant="ghost">返回</Button>
- * ```
+ * 统一按钮组件 - 基于 DaisyUI btn
  */
 export const Button: FunctionalComponent<ButtonProps> = ({
   variant = "primary",
   size = "md",
   icon,
   disabled = false,
+  loading = false,
   children,
   onClick,
   className = "",
   title,
+  type = "button",
+  outline = false,
+  block = false,
 }) => {
-  const baseClasses =
-    "flex items-center justify-center gap-1 sm:gap-2 rounded-xl font-medium transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100";
-
-  const variantClasses = getVariantClasses(variant);
+  const variantClasses = getVariantClasses(variant, outline);
   const sizeClasses = getSizeClasses(size);
 
   const handleClick = () => {
-    if (!disabled && onClick) {
+    if (!disabled && !loading && onClick) {
       onClick();
     }
   };
 
   return (
     <button
+      type={type}
       onClick={handleClick}
-      disabled={disabled}
+      disabled={disabled || loading}
       title={title}
-      className={`${baseClasses} ${variantClasses} ${sizeClasses} ${className}`}
+      className={`btn ${variantClasses} ${sizeClasses} ${block ? "btn-block" : ""} ${className}`}
     >
-      {icon && <span className="text-lg sm:text-xl">{icon}</span>}
+      {loading && <span className="loading loading-spinner loading-sm" />}
+      {!loading && icon && <span className="w-4 h-4">{icon}</span>}
       <span>{children}</span>
     </button>
   );

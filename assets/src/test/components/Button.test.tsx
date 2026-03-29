@@ -28,45 +28,37 @@ describe("Button 组件", () => {
       <Button variant="primary">主要按钮</Button>,
     );
 
-    expect(container.querySelector("button")?.className).toContain(
-      "bg-accent-dark",
-    );
+    expect(container.querySelector("button")?.className).toContain("btn-primary");
 
     rerender(<Button variant="secondary">次要按钮</Button>);
 
-    expect(container.querySelector("button")?.className).toContain(
-      "bg-secondary-dark",
-    );
+    expect(container.querySelector("button")?.className).toContain("btn-secondary");
 
     rerender(<Button variant="danger">危险按钮</Button>);
 
-    expect(container.querySelector("button")?.className).toContain(
-      "bg-red-600",
-    );
+    expect(container.querySelector("button")?.className).toContain("btn-error");
 
     rerender(<Button variant="ghost">幽灵按钮</Button>);
 
-    expect(container.querySelector("button")?.className).toContain(
-      "bg-transparent",
-    );
+    expect(container.querySelector("button")?.className).toContain("btn-ghost");
   });
 
   it("应该支持不同的尺寸", () => {
     const { rerender, container } = render(<Button size="sm">小按钮</Button>);
 
-    expect(container.querySelector("button")?.className).toContain("text-xs");
+    expect(container.querySelector("button")?.className).toContain("btn-sm");
 
     rerender(<Button size="md">中等按钮</Button>);
 
-    expect(container.querySelector("button")?.className).toContain("text-sm");
+    expect(container.querySelector("button")?.className).toContain("btn");
 
     rerender(<Button size="lg">大按钮</Button>);
 
-    expect(container.querySelector("button")?.className).toContain("text-base");
+    expect(container.querySelector("button")?.className).toContain("btn-lg");
   });
 
   it("应该支持显示图标", () => {
-    render(<Button icon="▶">开始</Button>);
+    render(<Button icon={<span>▶</span>}>开始</Button>);
 
     const button = screen.getByText("开始").parentElement;
     expect(button?.textContent).toContain("▶");
@@ -83,7 +75,6 @@ describe("Button 组件", () => {
     expect(button.disabled).toBe(true);
     fireEvent.click(button);
 
-    // 禁用时不应该触发回调
     expect(mockOnClick).not.toHaveBeenCalled();
   });
 
@@ -92,9 +83,7 @@ describe("Button 组件", () => {
       <Button className="custom-class">按钮</Button>,
     );
 
-    expect(container.querySelector("button")?.className).toContain(
-      "custom-class",
-    );
+    expect(container.querySelector("button")?.className).toContain("custom-class");
   });
 
   it("应该支持标题提示", () => {
@@ -106,13 +95,13 @@ describe("Button 组件", () => {
 
   it("应该支持多个变体和尺寸组合", () => {
     const { container } = render(
-      <Button variant="danger" size="lg" icon="🗑">
+      <Button variant="danger" size="lg" icon={<span>🗑</span>}>
         删除
       </Button>,
     );
 
     const button = container.querySelector("button");
-    expect(button?.className).toContain("bg-red-600");
-    expect(button?.className).toContain("text-base");
+    expect(button?.className).toContain("btn-error");
+    expect(button?.className).toContain("btn-lg");
   });
 });

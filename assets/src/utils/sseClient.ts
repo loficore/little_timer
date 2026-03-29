@@ -37,17 +37,31 @@ export class SSEClient {
     private createConnection(): void {
         this.eventSource = new EventSource(`${this.baseUrl}/api/events`);
 
+        this.eventSource.onopen = () => {
+            console.log('SSE connection opened');
+            this.reconnectAttempts = 0;
+        };
+
         this.eventSource.onmessage = (event: MessageEvent) => {
+            const dataStr = String(event.data);
+            if (dataStr.startsWith(':')) {
+                console.log('SSE heartbeat received');
+                return;
+            }
+            console.log('SSE received:', dataStr);
             try {
-                const jsonString = String(event.data);
-                const data = JSON.parse(jsonString) as Partial<TimerState>;
-                if (this.onEvent && data) {
+                const data = JSON.parse(dataStr) as Partial<TimerState>;
+                if (this.onEvent && data && Object.keys(data).length > 0) {
                     this.onEvent(data as TimerState);
                 }
             } catch (e) {
                 console.error('Failed to parse SSE data:', e);
             }
         };
+
+        this.eventSource.addEventListener('ping', () => {
+            console.log('SSE ping received');
+        });
 
         this.eventSource.onerror = (error: Event) => {
             console.error('SSE connection error:', error);

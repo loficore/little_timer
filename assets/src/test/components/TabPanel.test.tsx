@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent } from "@testing-library/preact";
 import { TabPanel } from "../../components/TabPanel";
+import { SettingsIcon, ClockIconComponent } from "../../utils/icons";
 
 describe("TabPanel 组件", () => {
   const mockOnTabChange = vi.fn();
   const tabs = [
-    { id: "basic", label: "基本设置", icon: "⚙️" },
-    { id: "countdown", label: "倒计时", icon: "⏱️" },
-    { id: "stopwatch", label: "正计时", icon: "⏲️" },
+    { id: "basic", label: "基本设置", icon: <SettingsIcon /> },
+    { id: "countdown", label: "倒计时", icon: <ClockIconComponent /> },
+    { id: "stopwatch", label: "正计时", icon: <ClockIconComponent /> },
   ];
 
   beforeEach(() => {
@@ -21,7 +22,6 @@ describe("TabPanel 组件", () => {
       </TabPanel>,
     );
 
-    // 检查所有标签页是否渲染
     expect(container.textContent).toContain("基本设置");
     expect(container.textContent).toContain("倒计时");
     expect(container.textContent).toContain("正计时");
@@ -34,13 +34,12 @@ describe("TabPanel 组件", () => {
       </TabPanel>,
     );
 
-    const buttons = container.querySelectorAll("button");
+    const buttons = container.querySelectorAll("a");
     const countdownButton = Array.from(buttons).find((btn) =>
       btn.textContent?.includes("倒计时"),
     );
 
-    // 激活的标签页应该有特定的样式类
-    expect(countdownButton?.className).toContain("text-accent-dark");
+    expect(countdownButton?.className).toContain("tab-active");
   });
 
   it("应该在点击标签页时调用 onTabChange", () => {
@@ -50,7 +49,7 @@ describe("TabPanel 组件", () => {
       </TabPanel>,
     );
 
-    const buttons = container.querySelectorAll("button");
+    const buttons = container.querySelectorAll("a");
     const stopwatchButton = Array.from(buttons).find((btn) =>
       btn.textContent?.includes("正计时"),
     );

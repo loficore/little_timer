@@ -1,6 +1,6 @@
 export interface TimerState {
     time: number;
-    mode: 'countdown' | 'stopwatch' | 'world_clock';
+    mode: 'countdown' | 'stopwatch';
     is_running: boolean;
     is_finished: boolean;
     in_rest: boolean;
@@ -50,13 +50,32 @@ export class APIClient {
 
     /**
      * 开始计时器
-     * @returns {Promise<void>} 返回一个 Promise，表示操作完成
+     * @param {number} [habitId] 习惯 ID（可选）
+     * @returns {Promise<{habit_id: number | null}>} 返回一个 Promise，表示操作完成
      */
-    async startTimer(): Promise<void> {
-        const response = await fetch(`${this.baseUrl}/api/start`, { method: 'POST' });
+    async startTimer(habitId?: number): Promise<{ habit_id: number | null }> {
+        const body = habitId ? JSON.stringify({ habit_id: habitId }) : '';
+        const response = await fetch(`${this.baseUrl}/api/start`, {
+            method: 'POST',
+            headers: body ? { 'Content-Type': 'application/json' } : {},
+            body: body || undefined
+        });
         if (!response.ok) {
             throw new Error(`Error starting timer: ${response.statusText}`);
         }
+        return await response.json();
+    }
+
+    /**
+     * 开始休息
+     * @returns {Promise<{rest_seconds: number}>} 休息时长
+     */
+    async startRest(): Promise<{ rest_seconds: number }> {
+        const response = await fetch(`${this.baseUrl}/api/timer/rest`, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Error starting rest: ${response.statusText}`);
+        }
+        return await response.json();
     }
 
     /**
@@ -82,9 +101,9 @@ export class APIClient {
 
     /**
      * 切换计时器模式
-     * @param {'countdown' | 'stopwatch' | 'world_clock'} mode 目标模式
+     * @param {'countdown' | 'stopwatch'} mode 目标模式
      */
-    async changeMode(mode: 'countdown' | 'stopwatch' | 'world_clock'): Promise<void> {
+    async changeMode(mode: 'countdown' | 'stopwatch'): Promise<void> {
         const response = await fetch(`${this.baseUrl}/api/mode`, {
             method: 'POST',
             body: mode
@@ -130,6 +149,142 @@ export class APIClient {
         const response = await fetch(`${this.baseUrl}/api/presets`);
         if (!response.ok) {
             throw new Error(`Error fetching presets: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    // === 习惯集 API ===
+
+    /**
+     * 获取习惯集列表
+     * @returns {Promise<any[]>} 返回一个 Promise，解析为习惯集列表对象
+     */
+    async getHabitSets(): Promise<any[]> {
+        const response = await fetch(`${this.baseUrl}/api/habit-sets`);
+        if (!response.ok) {
+            throw new Error(`Error fetching habit sets: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 创建习惯集
+     * @param {string} name 
+     * @param {string} description 
+     * @param {string} color 
+     * @returns {Promise<any>} 返回一个 Promise，解析为创建的习惯集对象
+     */
+    async createHabitSet(name: string, description: string, color: string): Promise<any> {
+        const response = await fetch(`${this.baseUrl}/api/habit-sets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description, color })
+        });
+        if (!response.ok) {
+            throw new Error(`Error creating habit set: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    // === 习惯 API ===
+
+    /**
+     * 获取习惯列表
+     * @returns {Promise<any[]>} 返回一个 Promise，解析为习惯列表对象
+     */
+    async getHabits(): Promise<any[]> {
+        const response = await fetch(`${this.baseUrl}/api/habits`);
+        if (!response.ok) {
+            throw new Error(`Error fetching habits: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 创建习惯
+     * @param {number} setId 习惯集 ID
+     * @param {string} name 习惯名称
+     * @param {number} goalSeconds 目标时间（秒）
+     * @param {number} goalCount 目标次数
+     * @param {string} color 颜色
+     * @returns {Promise<any>} 返回一个 Promise，解析为创建的习惯对象
+     */
+    async createHabit(setId: number, name: string, goalSeconds: number, goalCount: number, color: string): Promise<any> {
+        const response = await fetch(`${this.baseUrl}/api/habits`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                set_id: setId,
+                name,
+                goal_seconds: goalSeconds,
+                goal_count: goalCount,
+                color
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`Error creating habit: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 删除习惯
+     * @param {number} id 
+     * @returns {Promise<any>} 返回一个 Promise，解析为删除的习惯对象
+     */
+    async deleteHabit(id: number): Promise<any> {
+        const response = await fetch(`${this.baseUrl}/api/habits/${id}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) {
+            throw new Error(`Error deleting habit: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    // === 记录 API ===
+
+    /**
+     * 创建记录
+     * @param {number} habitId 习惯 ID
+     * @param {number} durationSeconds 持续时间（秒）
+     * @param {number} count 次数
+     * @param {string} date 日期
+     * @returns {Promise<any>} 返回一个 Promise，解析为创建的记录对象
+     */
+    async createSession(habitId: number, durationSeconds: number, count: number, date: string): Promise<any> {
+        const response = await fetch(`${this.baseUrl}/api/sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                habit_id: habitId,
+                duration_seconds: durationSeconds,
+                count,
+                date
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`Error creating session: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 获取记录列表
+     * @param {string} date 日期
+     * @param {string} startDate 开始日期
+     * @param {string} endDate 结束日期
+     * @returns {Promise<any[]>} 返回一个 Promise，解析为记录列表对象
+     */
+    async getSessions(date?: string, startDate?: string, endDate?: string): Promise<any[]> {
+        const params = new URLSearchParams();
+        if (date) params.set('date', date);
+        if (startDate) params.set('start_date', startDate);
+        if (endDate) params.set('end_date', endDate);
+
+        const response = await fetch(`${this.baseUrl}/api/sessions?${params.toString()}`);
+        if (!response.ok) {
+            throw new Error(`Error fetching sessions: ${response.statusText}`);
         }
         return await response.json();
     }

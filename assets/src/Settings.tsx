@@ -1,4 +1,4 @@
-import type { FunctionalComponent } from "preact";
+import type { FunctionalComponent, VNode } from "preact";
 import { useEffect, useState, useRef } from "preact/hooks";
 import { Header } from "./components/Header";
 import { TabPanel } from "./components/TabPanel";
@@ -9,6 +9,7 @@ import { PresetSettings, type TimerPreset } from "./components/PresetSettings";
 import { WorldClockSettings } from "./components/WorldClockSettings";
 import { t, setLanguage } from "./utils/i18n";
 import { APIClient } from "./utils/apiClient";
+import { ClockIconComponent, GlobeIcon, StarIconComponent } from "./utils/icons";
 
 interface SettingsPageProps {
   onBackClick?: () => void;
@@ -56,12 +57,12 @@ const DEFAULT_CONFIG: SettingsConfig = {
   presets: [],
 };
 
-const TABS = [
-  { id: "basic", labelKey: "settings.tabs.basic", icon: "⚙️" },
-  { id: "countdown", labelKey: "settings.tabs.countdown", icon: "⏱️" },
-  { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: "⏲️" },
-  { id: "world_clock", labelKey: "settings.tabs.world_clock", icon: "🌐" },
-  { id: "presets", labelKey: "settings.tabs.presets", icon: "⭐" },
+const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
+  { id: "basic", labelKey: "settings.tabs.basic" },
+  { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
+  { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
+  { id: "world_clock", labelKey: "settings.tabs.world_clock", icon: <GlobeIcon /> },
+  { id: "presets", labelKey: "settings.tabs.presets", icon: <StarIconComponent /> },
 ];
 
 export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
@@ -192,17 +193,13 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   };
 
   return (
-    <div className="flex flex-col w-screen h-screen bg-primary-dark text-text-primary-dark transition-colors duration-300 animate-fadeIn overflow-hidden">
-      <div
-        className="flex justify-between items-center px-4 sm:px-6 md:px-8 py-3 sm:py-4 md:py-6 border-b border-border-dark animate-slideUp flex-shrink-0"
-        style={{ animationDelay: "0.1s", animationFillMode: "both" }}
-      >
-        <Header
-          title={`⚙ ${t("common.settings_title")}`}
-          showBack={true}
-          onBackClick={onBackClick}
-        />
-      </div>
+    <div className="flex flex-col w-screen h-screen bg-base-100 text-base-content transition-colors duration-300 animate-fadeIn overflow-hidden">
+      <Header
+        title={t("common.settings_title")}
+        showBack={true}
+        onBackClick={onBackClick}
+        showSettings={false}
+      />
 
       <TabPanel
         tabs={TABS.map((tab) => ({ ...tab, label: t(tab.labelKey) }))}

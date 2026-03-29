@@ -50,6 +50,8 @@ pub const LogConfig = struct {
     log_dir: []const u8 = "",
     /// 日志文件名（不含路径和扩展名）
     log_filename: []const u8 = "little_timer",
+    /// 是否使用日期格式文件名（如 2026-03-22.log）
+    use_date_filename: bool = false,
     /// 单个日志文件最大大小（字节），超过后轮转
     max_file_size: u64 = 10 * 1024 * 1024,
     /// 最多保留的日志文件数量（包括当前日志和压缩后的日志）
@@ -117,14 +119,26 @@ pub const Logger = struct {
         try std.fs.makeDirAbsolute(log_dir);
 
         // 构建日志文件完整路径
-        const full_path = try std.fmt.allocPrint(
-            self.allocator.?,
-            "{s}/{s}.log",
-            .{ log_dir, self.config.log_filename },
-        );
-        errdefer self.allocator.?.free(full_path);
-
+        var full_path: []u8 = undefined;
+        if (self.config.use_date_filename) {
+            const now = std.time.timestamp();
+            const es = std.time.epoch.EpochSeconds{ .secs = @as(u64, @intCast(now)) };
+            const yd = es.getEpochDay().calculateYearDay();
+            const md = yd.calculateMonthDay();
+            full_path = try std.fmt.allocPrint(
+                self.allocator.?,
+                "{s}/{d:0>4}-{:0>2}-{:0>2}.log",
+                .{ log_dir, yd.year, md.month.numeric(), md.day_index + 1 },
+            );
+        } else {
+            full_path = try std.fmt.allocPrint(
+                self.allocator.?,
+                "{s}/{s}.log",
+                .{ log_dir, self.config.log_filename },
+            );
+        }
         self.log_file_path = full_path;
+        errdefer self.allocator.?.free(full_path);
 
         // 打开或创建日志文件
         self.log_file = try std.fs.createFileAbsolute(full_path, .{});
@@ -145,7 +159,7 @@ pub const Logger = struct {
         }
 
         // 跳到文件末尾
-        try self.log_file.?.seekToEnd();
+        try self.log_file.?.seekFromEnd(0);
 
         self.info("日志文件已打开: {s}", .{full_path});
 
@@ -297,15 +311,8 @@ pub const Logger = struct {
         const dst_file = try dir.createFile(dst_name, .{});
         defer dst_file.close();
 
-        // 使用 gzip 压缩
-        var gzip_buffer = try std.ArrayList(u8).initCapacity(self.allocator.?, src_size);
-        defer gzip_buffer.deinit();
-
-        var compressor = std.compress.gzip.compressor(gzip_buffer.writer());
-        try compressor.writeAll(src_content);
-        try compressor.flush();
-
-        try dst_file.writeAll(gzip_buffer.items);
+        // 直接复制内容（压缩功能暂未实现）
+        try dst_file.writeAll(src_content);
     }
 
     /// 关闭日志文件

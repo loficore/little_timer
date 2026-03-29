@@ -6,7 +6,7 @@ const interface = @import("../core/interface.zig");
 const logger = @import("../core/logger.zig");
 
 /// 数据库模式版本常量
-pub const CURRENT_SCHEMA_VERSION = 1;
+pub const CURRENT_SCHEMA_VERSION = 2;
 
 /// SQLite 错误类型
 pub const MigrationError = error{
@@ -45,6 +45,8 @@ pub const MigrationManager = struct {
             logger.global_logger.info("🔄 创建新数据库模式 (版本 {})", .{CURRENT_SCHEMA_VERSION});
             try self.createTables();
             try self.setSchemaVersion(CURRENT_SCHEMA_VERSION);
+        } else if (current_version == CURRENT_SCHEMA_VERSION) {
+            logger.global_logger.info("✓ 数据库模式已最新，版本: {}", .{current_version});
         } else if (current_version < CURRENT_SCHEMA_VERSION) {
             // 需要迁移
             logger.global_logger.info("🔄 数据库版本: {} -> {}", .{ current_version, CURRENT_SCHEMA_VERSION });
@@ -99,12 +101,14 @@ pub const MigrationManager = struct {
 
     /// 执行数据库模式迁移
     fn migrateSchema(self: *MigrationManager, from_version: i32, to_version: i32) !void {
-        // 这里可以添加具体的迁移逻辑
-        // 目前只有版本1，所以直接从0到1
         if (from_version == 0 and to_version == 1) {
             try self.createTables();
             try self.setSchemaVersion(to_version);
-            logger.global_logger.info("✓ 数据库迁移完成", .{});
+            logger.global_logger.info("✓ 数据库迁移完成 (0 -> 1)", .{});
+        } else if (from_version == 1 and to_version == 2) {
+            try self.createTables();
+            try self.setSchemaVersion(to_version);
+            logger.global_logger.info("✓ 数据库迁移完成 (1 -> 2)", .{});
         } else {
             logger.global_logger.err("❌ 不支持的迁移路径: {} -> {}", .{ from_version, to_version });
             return MigrationError.MigrationFailed;
@@ -124,16 +128,41 @@ pub const MigrationManager = struct {
             \\);
         ;
 
-        // 优化的预设表：添加更多约束
-        const create_presets_sql =
-            \\CREATE TABLE IF NOT EXISTS presets (
+        // 习惯集表
+        const create_habit_sets_sql =
+            \\CREATE TABLE IF NOT EXISTS habit_sets (
             \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
             \\    name TEXT NOT NULL CHECK(length(name) > 0 AND length(name) <= 100),
-            \\    mode TEXT NOT NULL CHECK(mode IN ('countdown', 'stopwatch', 'world_clock')),
-            \\    config_json TEXT NOT NULL CHECK(length(config_json) <= 8192),
+            \\    description TEXT DEFAULT '',
+            \\    color TEXT NOT NULL DEFAULT '#6366f1',
+            \\    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            \\);
+        ;
+
+        // 习惯表
+        const create_habits_sql =
+            \\CREATE TABLE IF NOT EXISTS habits (
+            \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
+            \\    set_id INTEGER NOT NULL,
+            \\    name TEXT NOT NULL CHECK(length(name) > 0 AND length(name) <= 100),
+            \\    goal_seconds INTEGER NOT NULL DEFAULT 0 CHECK(goal_seconds >= 0),
+            \\    goal_count INTEGER NOT NULL DEFAULT 0 CHECK(goal_count >= 0),
+            \\    color TEXT NOT NULL DEFAULT '#6366f1',
             \\    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            \\    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            \\    UNIQUE(name)
+            \\    FOREIGN KEY (set_id) REFERENCES habit_sets(id) ON DELETE CASCADE
+            \\);
+        ;
+
+        // 专注记录表
+        const create_sessions_sql =
+            \\CREATE TABLE IF NOT EXISTS sessions (
+            \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
+            \\    habit_id INTEGER NOT NULL,
+            \\    duration_seconds INTEGER NOT NULL DEFAULT 0 CHECK(duration_seconds >= 0),
+            \\    count INTEGER NOT NULL DEFAULT 0 CHECK(count >= 0),
+            \\    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            \\    date TEXT NOT NULL,
+            \\    FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE
             \\);
         ;
 
@@ -161,8 +190,18 @@ pub const MigrationManager = struct {
             return MigrationError.TableCreationFailed;
         };
 
-        self.db.?.exec(create_presets_sql, .{}) catch |err| {
-            logger.global_logger.err("❌ 创建预设表失败: {any}", .{err});
+        self.db.?.exec(create_habit_sets_sql, .{}) catch |err| {
+            logger.global_logger.err("❌ 创建习惯集表失败: {any}", .{err});
+            return MigrationError.TableCreationFailed;
+        };
+
+        self.db.?.exec(create_habits_sql, .{}) catch |err| {
+            logger.global_logger.err("❌ 创建习惯表失败: {any}", .{err});
+            return MigrationError.TableCreationFailed;
+        };
+
+        self.db.?.exec(create_sessions_sql, .{}) catch |err| {
+            logger.global_logger.err("❌ 创建记录表失败: {any}", .{err});
             return MigrationError.TableCreationFailed;
         };
 
@@ -183,9 +222,10 @@ pub const MigrationManager = struct {
     /// 创建优化的索引
     fn createOptimizedIndexes(self: *MigrationManager) !void {
         const indexes = [_]struct { name: []const u8, sql: []const u8 }{
-            .{ .name = "idx_presets_name", .sql = "CREATE INDEX IF NOT EXISTS idx_presets_name ON presets(name);" },
-            .{ .name = "idx_presets_mode", .sql = "CREATE INDEX IF NOT EXISTS idx_presets_mode ON presets(mode);" },
-            .{ .name = "idx_presets_updated", .sql = "CREATE INDEX IF NOT EXISTS idx_presets_updated ON presets(updated_at);" },
+            .{ .name = "idx_habits_set_id", .sql = "CREATE INDEX IF NOT EXISTS idx_habits_set_id ON habits(set_id);" },
+            .{ .name = "idx_habits_name", .sql = "CREATE INDEX IF NOT EXISTS idx_habits_name ON habits(name);" },
+            .{ .name = "idx_sessions_habit_id", .sql = "CREATE INDEX IF NOT EXISTS idx_sessions_habit_id ON sessions(habit_id);" },
+            .{ .name = "idx_sessions_date", .sql = "CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(date);" },
             .{ .name = "idx_settings_timezone", .sql = "CREATE INDEX IF NOT EXISTS idx_settings_timezone ON settings(timezone);" },
             .{ .name = "idx_settings_language", .sql = "CREATE INDEX IF NOT EXISTS idx_settings_language ON settings(language);" },
             .{ .name = "idx_health_check_status", .sql = "CREATE INDEX IF NOT EXISTS idx_health_check_status ON health_check(status);" },

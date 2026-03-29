@@ -4,7 +4,6 @@ const std = @import("std");
 pub const ModeEnumT = enum {
     COUNTDOWN_MODE,
     STOPWATCH_MODE,
-    WORLD_CLOCK_MODE,
 };
 
 pub const EventType = union(enum) {
@@ -29,11 +28,6 @@ pub const ClockTaskConfig = struct {
     /// 正计时配置
     stopwatch: struct {
         max_seconds: u64 = 24 * 60 * 60, // 正计时上限（秒），默认一天
-    } = .{},
-
-    /// 世界时钟配置
-    world_clock: struct {
-        timezone: i8 = 8, // 默认东八区
     } = .{},
 };
 
@@ -72,6 +66,10 @@ pub const SettingsConfig = struct {
         level: []const u8 = "INFO", // 日志等级
         enable_timestamp: bool = true, // 是否启用时间戳
         tick_interval_ms: i64 = 1000, // Tick 间隔（毫秒），默认 1000ms (1秒)
+        enable_file_logging: bool = false, // 是否启用文件日志
+        log_dir: []const u8 = "", // 日志目录（空则用默认）
+        max_file_size: u64 = 10 * 1024 * 1024, // 单个日志文件最大大小（字节）
+        max_file_count: u8 = 5, // 最多保留的日志文件数量
     } = .{},
 };
 
@@ -79,7 +77,6 @@ pub const SettingsConfig = struct {
 pub const DefaultMode = enum {
     countdown,
     stopwatch,
-    world_clock,
 };
 
 pub const SettingsEvent = union(enum) {

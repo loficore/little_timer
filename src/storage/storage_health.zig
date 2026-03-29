@@ -90,16 +90,16 @@ pub const HealthCheckManager = struct {
             return HealthCheckError.HealthCheckFailed;
         }
 
-        // 获取记录数量
-        var preset_rows = try self.db.?.rows("SELECT COUNT(*) FROM presets;", .{});
-        defer preset_rows.deinit();
+        // 获取 sessions 记录数量
+        var session_rows = try self.db.?.rows("SELECT COUNT(*) FROM sessions;", .{});
+        defer session_rows.deinit();
 
-        const preset_count = if (preset_rows.next()) |row| row.get(i64, 0) else 0;
+        const session_count = if (session_rows.next()) |row| row.get(i64, 0) else 0;
 
         // 更新健康检查记录
         self.db.?.exec(
             "INSERT OR REPLACE INTO health_check (id, last_check, status, record_count) VALUES (1, CURRENT_TIMESTAMP, 'healthy', ?);",
-            .{preset_count},
+            .{session_count},
         ) catch |err| {
             logger.global_logger.err("❌ 更新健康检查失败: {any}", .{err});
             return HealthCheckError.HealthCheckFailed;
@@ -161,7 +161,7 @@ pub const HealthCheckManager = struct {
 
         // 获取更详细的健康信息
         const query = "SELECT " ++
-            "(SELECT COUNT(*) FROM presets) as preset_count, " ++
+            "(SELECT COUNT(*) FROM sessions) as session_count, " ++
             "(SELECT COUNT(*) FROM settings) as settings_count, " ++
             "(SELECT COUNT(*) FROM health_check) as health_records, " ++
             "(SELECT last_check FROM health_check WHERE id = 1) as last_check";
@@ -169,7 +169,7 @@ pub const HealthCheckManager = struct {
         defer perf_rows.deinit();
 
         if (perf_rows.next()) |row| {
-            const preset_count = row.get(i64, 0);
+            const session_count = row.get(i64, 0);
             const settings_count = row.get(i64, 1);
             const health_records = row.get(i64, 2);
             const last_check_raw = row.get([]const u8, 3);
@@ -180,10 +180,10 @@ pub const HealthCheckManager = struct {
             const last_check_copy = try self.allocator.dupe(u8, last_check_raw);
             errdefer self.allocator.free(last_check_copy);
 
-            const total_records = preset_count + settings_count;
+            const total_records = session_count + settings_count;
             const _health_records = health_records; // 用于调试和验证
 
-            logger.global_logger.debug("📊 数据库性能指标: 预设={}, 设置={}, 总计={}, 健康记录数={}", .{ preset_count, settings_count, total_records, _health_records });
+            logger.global_logger.debug("📊 数据库性能指标: Sessions={}, 设置={}, 总计={}, 健康记录数={}", .{ session_count, settings_count, total_records, _health_records });
 
             return .{
                 .status = status_copy,

@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) void {
     });
     mod.addImport("httpz", httpz_dep.module("httpz"));
 
-    // 添加 build_options 到模块（供 webui_windows 等文件使用）
+    // 添加 build_options 到模块（供 HTTP Server 使用）
     mod.addOptions("build_options", build_options);
 
     // 创建桌面应用模块（仅当不跨编译到 Android 时）
@@ -42,13 +42,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         });
         mod.addImport("zqlite", zqlite_dep.module("zqlite"));
-
-        // 桌面: 导入 webui 依赖
-        const webui_dep = b.dependency("webui", .{
-            .target = root_target,
-            .optimize = optimize,
-        });
-        mod.addImport("webui", webui_dep.module("webui"));
 
         const app_module = mod;
 
@@ -101,12 +94,6 @@ pub fn build(b: *std.Build) void {
         const sysroot_path = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home});
         b.sysroot = sysroot_path; // 设置全局 Sysroot
 
-        const webui_dep = b.dependency("webui", .{
-            .target = root_target,
-            .optimize = optimize,
-        });
-        mod.addImport("webui", webui_dep.module("webui"));
-
         const app_module = mod;
 
         const lib = b.addLibrary(.{
@@ -115,11 +102,6 @@ pub fn build(b: *std.Build) void {
             .linkage = .dynamic, // 生成 liblittle_timer.so
         });
 
-        // 注意：zig_webui-2.5.0-beta.4 只包含 Zig 绑定，不包含 C 源码
-        // WebUI C 依赖应通过 Zig 绑定的 @cImport 机制自动处理
-
-        // ✅ 关键改动 3：补齐所有 Include 路径
-        lib.addIncludePath(webui_dep.path("include"));
         lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sysroot_path}) });
         lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/aarch64-linux-android", .{sysroot_path}) });
 

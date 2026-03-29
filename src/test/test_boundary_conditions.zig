@@ -203,7 +203,6 @@ test "问题5: 预设列表满返回正确错误类型" {
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
     defer manager.presets.clear();
-    defer if (manager.sqlite_db) |db| db.clearAllPresets() catch {};
 
     // 缩小上限以验证满载错误分支
     manager.presets.max_count = 10;

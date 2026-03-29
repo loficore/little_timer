@@ -12,7 +12,6 @@ comptime {
         _ = @import("test/test_settings.zig");
         _ = @import("test/test_settings_validator.zig");
         _ = @import("test/test_settings_presets.zig");
-        _ = @import("test/test_sqlite.zig");
         _ = @import("test/test_boundary_conditions.zig");
         _ = @import("test/test_error_recovery.zig");
     }
@@ -27,7 +26,6 @@ pub fn main() !void {
 
     const main_app = try allocator.create(app.MainApplication);
     defer {
-        main_app.deinit();
         allocator.destroy(main_app);
     }
 

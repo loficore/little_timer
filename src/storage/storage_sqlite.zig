@@ -10,6 +10,7 @@ const migration = @import("storage_migration.zig");
 const health = @import("storage_health.zig");
 const backup = @import("storage_backup.zig");
 const crud = @import("storage_crud.zig");
+const habit_crud = @import("habit_crud.zig");
 
 /// SQLite 错误类型
 pub const SqliteError = error{
@@ -18,7 +19,6 @@ pub const SqliteError = error{
     InsertFailed, // 插入失败
     DeleteFailed, // 删除失败
     QueryFailed, // 查询失败
-    InvalidPresetData, // 无效的预设数据
     DatabaseCorrupted, // 数据库损坏
     SettingsNotFound, // 设置未找到
     SettingsSaveFailed, // 设置保存失败
@@ -45,6 +45,7 @@ pub const SqliteManager = struct {
     health_manager: health.HealthCheckManager,
     backup_manager: backup.BackupManager,
     crud_manager: crud.CrudManager,
+    habit_manager: habit_crud.HabitCrudManager,
 
     /// 初始化 SQLite 管理器
     ///
@@ -64,6 +65,7 @@ pub const SqliteManager = struct {
             .health_manager = undefined,
             .backup_manager = undefined,
             .crud_manager = undefined,
+            .habit_manager = undefined,
         };
 
         // 初始化子模块（暂时设置为 null，open 时会设置）
@@ -71,6 +73,7 @@ pub const SqliteManager = struct {
         manager.health_manager = health.HealthCheckManager.init(allocator, null);
         manager.backup_manager = backup.BackupManager.init(allocator, null, db_path, backup_dir);
         manager.crud_manager = crud.CrudManager.init(allocator, null);
+        manager.habit_manager = habit_crud.HabitCrudManager.init(allocator, null);
 
         return manager;
     }
@@ -103,6 +106,7 @@ pub const SqliteManager = struct {
         self.health_manager.db = self.db;
         self.backup_manager.db = self.db;
         self.crud_manager.db = self.db;
+        self.habit_manager.db = self.db;
 
         // 检查并执行数据库迁移
         try self.migration_manager.checkAndMigrate();
@@ -129,6 +133,7 @@ pub const SqliteManager = struct {
             self.health_manager.db = null;
             self.backup_manager.db = null;
             self.crud_manager.db = null;
+            self.habit_manager.db = null;
 
             logger.global_logger.info("✓ SQLite 数据库已关闭", .{});
         }
@@ -143,34 +148,6 @@ pub const SqliteManager = struct {
     }
 
     // === CRUD 操作代理方法 ===
-
-    /// 插入预设
-    pub fn insertPreset(self: *SqliteManager, preset: interface.TimerPreset, config_json: []const u8) !void {
-        try self.crud_manager.insertPreset(preset, config_json);
-        try self.health_manager.updateRecord(); // 更新健康检查
-    }
-
-    /// 删除预设（按名称）
-    pub fn deletePresetByName(self: *SqliteManager, name: []const u8) !void {
-        try self.crud_manager.deletePresetByName(name);
-        try self.health_manager.updateRecord(); // 更新健康检查
-    }
-
-    /// 查询所有预设
-    pub fn queryAllPresets(self: *SqliteManager, allocator: std.mem.Allocator) !std.ArrayList(crud.PresetRow) {
-        return self.crud_manager.queryAllPresets(allocator);
-    }
-
-    /// 检查预设是否存在（按名称）
-    pub fn presetExists(self: *SqliteManager, name: []const u8) !bool {
-        return self.crud_manager.presetExists(name);
-    }
-
-    /// 清空所有预设
-    pub fn clearAllPresets(self: *SqliteManager) !void {
-        try self.crud_manager.clearAllPresets();
-        try self.health_manager.updateRecord(); // 更新健康检查
-    }
 
     /// 保存设置到 SQLite
     pub fn saveSettings(self: *SqliteManager, config: interface.SettingsConfig) !void {
@@ -226,19 +203,6 @@ pub const SqliteManager = struct {
         self.backup_manager.freeBackupInfo(info);
     }
 
-    // === 统计信息方法 ===
-
-    /// 获取预设统计信息
-    pub fn getPresetStats(self: *SqliteManager) !PresetStats {
-        const result = try self.crud_manager.getPresetStats();
-        return .{
-            .total_presets = result.total_presets,
-            .countdown_presets = result.countdown_presets,
-            .stopwatch_presets = result.stopwatch_presets,
-            .world_clock_presets = result.world_clock_presets,
-        };
-    }
-
     // === 内部方法 ===
 
     /// 重新打开数据库的回调函数
@@ -254,6 +218,7 @@ pub const SqliteManager = struct {
         manager.health_manager.db = manager.db;
         manager.backup_manager.db = manager.db;
         manager.crud_manager.db = manager.db;
+        manager.habit_manager.db = manager.db;
 
         // 重新初始化
         try manager.migration_manager.checkAndMigrate();
@@ -262,7 +227,6 @@ pub const SqliteManager = struct {
 };
 
 // 类型别名，用于向后兼容
-pub const PresetRow = crud.PresetRow;
 pub const SettingsRow = crud.SettingsRow;
 pub const HealthCheckInfo = health.HealthCheckInfo;
 
@@ -272,12 +236,4 @@ pub const BackupInfo = struct {
     total_size_bytes: u64,
     oldest_backup: ?[]const u8,
     newest_backup: ?[]const u8,
-};
-
-// 预设统计信息类型的别名
-pub const PresetStats = struct {
-    total_presets: u32,
-    countdown_presets: u32,
-    stopwatch_presets: u32,
-    world_clock_presets: u32,
 };

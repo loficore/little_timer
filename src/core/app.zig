@@ -28,6 +28,8 @@ pub const MainApplication = struct {
     error_recovery: error_recovery.ErrorRecoveryManager,
     /// 事件去抖限流器 - 防止快速连续点击
     event_throttle: EventThrottle = .{},
+    /// 当前正在计时的习惯 ID
+    current_habit_id: ?i64 = null,
 
     /// 初始化应用程序（在指针上原地初始化）
     ///
@@ -49,6 +51,7 @@ pub const MainApplication = struct {
 
         // 初始化和加载设置（纯 SQLite 版本，不再需要 settings.toml）
         self.settings_manager = try settings.SettingsManager.init(allocator, "");
+        errdefer self.settings_manager.deinit();
         self.settings_manager.load() catch |err| {
             logger.global_logger.warn("⚠️ 加载设置失败: {any}", .{err});
 
@@ -74,7 +77,7 @@ pub const MainApplication = struct {
         };
 
         // 根据设置配置日志系统
-        self.configureLogger();
+        try self.configureLogger();
 
         // 根据设置构建时钟配置
         const clock_config = self.settings_manager.buildClockConfig();
@@ -90,7 +93,7 @@ pub const MainApplication = struct {
     ///
     /// 参数:
     /// - **self**: MainApplication实例指针
-    fn configureLogger(self: *MainApplication) void {
+    fn configureLogger(self: *MainApplication) !void {
         // 从设置中读取日志配置
         const log_config = &self.settings_manager.config.logging;
 
@@ -100,6 +103,20 @@ pub const MainApplication = struct {
         // 配置全局logger
         logger.global_logger.current_level = log_level;
         logger.global_logger.enable_timestamp = log_config.enable_timestamp;
+
+        // 启用文件日志
+        if (log_config.enable_file_logging) {
+            const file_config = logger.LogConfig{
+                .log_dir = if (log_config.log_dir.len > 0) log_config.log_dir else "",
+                .use_date_filename = true,
+                .max_file_size = log_config.max_file_size,
+                .max_file_count = log_config.max_file_count,
+                .level = log_level,
+                .enable_timestamp = log_config.enable_timestamp,
+            };
+            try logger.initGlobalLoggerFile(self.allocator, file_config);
+            logger.global_logger.info("日志文件已启用，使用日期文件名: {}", .{file_config.use_date_filename});
+        }
 
         logger.global_logger.info("日志系统已初始化 (等级: {s}, 时间戳: {})", .{
             log_level.toString(),
@@ -205,15 +222,19 @@ pub const MainApplication = struct {
     pub fn deinit(self: *MainApplication) void {
         logger.global_logger.info("MainApplication.deinit() 开始清理...", .{});
 
-        // 1. 停止 HTTP 服务器
+        // 1. 停止并释放 HTTP 服务器
         self.http_server.stop();
+        self.http_server.deinit();
+
+        // 2. 释放设置管理器
+        self.settings_manager.deinit();
 
         self.clock_manager.deinit();
 
-        // 2. 清理错误恢复管理器
+        // 3. 清理错误恢复管理器
         self.error_recovery.deinit();
 
-        // 3. 清空全局指针
+        // 4. 清空全局指针
         global_app = null;
 
         logger.global_logger.info("MainApplication.deinit() 完成", .{});

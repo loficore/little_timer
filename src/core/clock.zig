@@ -118,30 +118,15 @@ const StopwatchState = struct {
     }
 };
 
-const WorldClockState = struct {
-    timezone: i8 = 8,
-
-    pub fn time(self: *const WorldClockState) i64 {
-        // 获取当前时间戳（纳秒）并转换为秒
-        const now_ns = std.time.nanoTimestamp();
-        const now_s = @as(i64, @intCast(@divFloor(now_ns, 1_000_000_000)));
-        // 计算时区偏移（秒）
-        const offset_seconds = @as(i64, @intCast(self.timezone)) * 3600;
-        return now_s + offset_seconds;
-    }
-};
-
 pub const ClockState = union(ModeEnumT) {
     COUNTDOWN_MODE: CountdownState,
     STOPWATCH_MODE: StopwatchState,
-    WORLD_CLOCK_MODE: WorldClockState,
 
     /// 获取时间信息（秒数）
     pub fn getTimeInfo(self: *const ClockState) i64 {
         return switch (self.*) {
             .COUNTDOWN_MODE => |*countdown| @divTrunc(countdown.remaining_ms, 1000),
             .STOPWATCH_MODE => |*stopwatch| @divTrunc(stopwatch.esplased_ms, 1000),
-            .WORLD_CLOCK_MODE => |*worldclock| worldclock.time(),
         };
     }
 
@@ -155,7 +140,6 @@ pub const ClockState = union(ModeEnumT) {
         return switch (self.*) {
             .COUNTDOWN_MODE => |*countdown| countdown.is_paused,
             .STOPWATCH_MODE => |*stopwatch| stopwatch.is_paused,
-            .WORLD_CLOCK_MODE => false, // 世界时钟不会暂停
         };
     }
 
@@ -164,7 +148,6 @@ pub const ClockState = union(ModeEnumT) {
         return switch (self.*) {
             .COUNTDOWN_MODE => |*countdown| countdown.is_finished,
             .STOPWATCH_MODE => |*stopwatch| stopwatch.is_finished,
-            .WORLD_CLOCK_MODE => false, // 世界时钟不会结束
         };
     }
 
@@ -172,8 +155,7 @@ pub const ClockState = union(ModeEnumT) {
     pub fn inRest(self: *const ClockState) bool {
         return switch (self.*) {
             .COUNTDOWN_MODE => |*countdown| countdown.in_rest,
-            .STOPWATCH_MODE => false, // 正计时不支持休息
-            .WORLD_CLOCK_MODE => false,
+            .STOPWATCH_MODE => false,
         };
     }
 
@@ -181,8 +163,7 @@ pub const ClockState = union(ModeEnumT) {
     pub fn getRestRemainingTime(self: *const ClockState) i64 {
         return switch (self.*) {
             .COUNTDOWN_MODE => |*countdown| @divTrunc(countdown.rest_remaining_ms, 1000),
-            .STOPWATCH_MODE => 0, // 正计时不支持休息
-            .WORLD_CLOCK_MODE => 0,
+            .STOPWATCH_MODE => 0,
         };
     }
 
@@ -191,7 +172,6 @@ pub const ClockState = union(ModeEnumT) {
         return switch (self.*) {
             .COUNTDOWN_MODE => |*countdown| countdown.loop_remaining,
             .STOPWATCH_MODE => 0,
-            .WORLD_CLOCK_MODE => 0,
         };
     }
 
@@ -200,7 +180,6 @@ pub const ClockState = union(ModeEnumT) {
         return switch (self.*) {
             .COUNTDOWN_MODE => |*countdown| countdown.loop_count,
             .STOPWATCH_MODE => 0,
-            .WORLD_CLOCK_MODE => 0,
         };
     }
 };
@@ -245,7 +224,6 @@ pub const ClockManager = struct {
                 .stopwatch = .{
                     .max_seconds = 24 * 60 * 60,
                 },
-                .world_clock = clock_config.world_clock,
             };
             return ClockManager.initSafe(safe_config);
         }
@@ -271,11 +249,6 @@ pub const ClockManager = struct {
                     .esplased_ms = 0,
                     .max_ms = @as(i64, @intCast(clock_config.stopwatch.max_seconds * 1000)),
                     .is_paused = true,
-                },
-            },
-            .WORLD_CLOCK_MODE => ClockState{
-                .WORLD_CLOCK_MODE = WorldClockState{
-                    .timezone = clock_config.world_clock.timezone,
                 },
             },
         };
@@ -308,7 +281,6 @@ pub const ClockManager = struct {
                             @as(f64, @floatFromInt(remaining_ms)) / 1000.0,
                             self.state.STOPWATCH_MODE.is_paused,
                         }),
-                        .WORLD_CLOCK_MODE => logger.global_logger.debug("[Tick] 世界时钟模式", .{}),
                     }
                 }
                 self.OnTick(event);
@@ -331,9 +303,6 @@ pub const ClockManager = struct {
                             logger.global_logger.debug("Clock: 秒表已在运行，忽略重复启动事件", .{});
                         }
                     },
-                    .WORLD_CLOCK_MODE => {
-                        // 世界时钟不支持开始/暂停
-                    },
                 }
             },
             .user_pause_timer => {
@@ -354,9 +323,6 @@ pub const ClockManager = struct {
                             logger.global_logger.debug("Clock: 秒表已暂停，忽略重复暂停事件", .{});
                         }
                     },
-                    .WORLD_CLOCK_MODE => {
-                        // 世界时钟不支持暂停
-                    },
                 }
             },
             .user_reset_timer => {
@@ -376,9 +342,6 @@ pub const ClockManager = struct {
                         self.state.STOPWATCH_MODE.esplased_ms = 0;
                         self.state.STOPWATCH_MODE.is_paused = true;
                         self.state.STOPWATCH_MODE.is_finished = false;
-                    },
-                    .WORLD_CLOCK_MODE => {
-                        // 世界时钟不支持重置
                     },
                 }
             },
@@ -409,7 +372,6 @@ pub const ClockManager = struct {
                                 .loop_count = 0,
                             },
                             .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
-                            .world_clock = .{ .timezone = 8 },
                         };
                     },
                     .STOPWATCH_MODE => {
@@ -426,23 +388,6 @@ pub const ClockManager = struct {
                             .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_interval_seconds = 0, .loop_count = 0 },
                             .stopwatch = .{
                                 .max_seconds = default_max_seconds,
-                            },
-                            .world_clock = .{ .timezone = 8 },
-                        };
-                    },
-                    .WORLD_CLOCK_MODE => {
-                        // 切换到世界时钟模式：使用默认时区（东八区）
-                        const default_timezone: i8 = 8;
-                        self.state = ClockState{
-                            .WORLD_CLOCK_MODE = WorldClockState{
-                                .timezone = default_timezone,
-                            },
-                        };
-                        self.initial_config = .{
-                            .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_interval_seconds = 0, .loop_count = 0 },
-                            .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
-                            .world_clock = .{
-                                .timezone = default_timezone,
                             },
                         };
                     },
@@ -472,11 +417,6 @@ pub const ClockManager = struct {
                             .is_paused = true,
                         },
                     },
-                    .WORLD_CLOCK_MODE => ClockState{
-                        .WORLD_CLOCK_MODE = WorldClockState{
-                            .timezone = new_config.world_clock.timezone,
-                        },
-                    },
                 };
                 self.initial_config = event.user_change_config;
             },
@@ -494,11 +434,7 @@ pub const ClockManager = struct {
                 self.state.COUNTDOWN_MODE.tick(tick.tick);
             },
             .STOPWATCH_MODE => {
-                // TODO: 实现正计时逻辑
                 self.state.STOPWATCH_MODE.tick(tick.tick);
-            },
-            .WORLD_CLOCK_MODE => {
-                // 世界时钟不需要 tick
             },
         }
     }

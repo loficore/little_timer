@@ -106,7 +106,6 @@ pub fn toJsonAlloc(
         const mode_str = switch (preset.mode) {
             .COUNTDOWN_MODE => "countdown",
             .STOPWATCH_MODE => "stopwatch",
-            .WORLD_CLOCK_MODE => "world_clock",
         };
         try w.print("\"{s}\",\"config\":", .{mode_str});
 
@@ -122,9 +121,6 @@ pub fn toJsonAlloc(
             },
             .STOPWATCH_MODE => {
                 try w.print("{{\"max_seconds\":{}}}", .{preset.config.stopwatch.max_seconds});
-            },
-            .WORLD_CLOCK_MODE => {
-                try w.print("{{\"timezone\":{}}}", .{preset.config.world_clock.timezone});
             },
         }
         try w.writeAll("}"); // 关闭 preset 对象
@@ -228,11 +224,6 @@ pub fn serializePresetsOnly(allocator: std.mem.Allocator, presets: anytype) ![]u
                 try w.print("{}", .{preset.config.stopwatch.max_seconds});
                 try w.writeAll("}}");
             },
-            .WORLD_CLOCK_MODE => {
-                try w.writeAll("\"world_clock\",\"config\":{\"timezone\":");
-                try w.print("{}", .{preset.config.world_clock.timezone});
-                try w.writeAll("}}");
-            },
         }
     }
     try w.writeAll("]}");
@@ -254,7 +245,7 @@ pub fn deserializePresetsOnly(
     allocator: std.mem.Allocator,
     json_str: []const u8,
     presets: anytype,
-    default_timezone: i8,
+    _: i8,
 ) !void {
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
@@ -313,7 +304,6 @@ pub fn deserializePresetsOnly(
                             .loop_interval_seconds = loop_interval,
                         },
                         .stopwatch = .{ .max_seconds = 24 * 3600 },
-                        .world_clock = .{ .timezone = default_timezone },
                     };
                     mode_enum = .COUNTDOWN_MODE;
                 } else if (std.mem.eql(u8, mode_val.string, "stopwatch")) {
@@ -324,20 +314,8 @@ pub fn deserializePresetsOnly(
                     config_union = .{
                         .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 },
                         .stopwatch = .{ .max_seconds = max },
-                        .world_clock = .{ .timezone = default_timezone },
                     };
                     mode_enum = .STOPWATCH_MODE;
-                } else if (std.mem.eql(u8, mode_val.string, "world_clock")) {
-                    const tz = if (cfg_val.object.get("timezone")) |v|
-                        validator.safeI8FromJson(v.integer, -12, 14) orelse default_timezone
-                    else
-                        default_timezone;
-                    config_union = .{
-                        .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 },
-                        .stopwatch = .{ .max_seconds = 24 * 3600 },
-                        .world_clock = .{ .timezone = tz },
-                    };
-                    mode_enum = .WORLD_CLOCK_MODE;
                 } else {
                     continue;
                 }
@@ -392,11 +370,6 @@ pub fn serializePresetConfigOnly(
             try w.print(
                 \\{{"mode":"stopwatch","max_seconds":{}}}
             , .{config.stopwatch.max_seconds});
-        },
-        .WORLD_CLOCK_MODE => {
-            try w.print(
-                \\{{"mode":"world_clock","timezone":{}}}
-            , .{config.world_clock.timezone});
         },
     }
 
@@ -460,7 +433,6 @@ pub fn parsePresetConfigJson(allocator: std.mem.Allocator, json_str: []const u8)
                 .loop_interval_seconds = @intCast(loop_interval),
             },
             .stopwatch = .{ .max_seconds = 24 * 3600 },
-            .world_clock = .{ .timezone = 8 },
         };
     } else if (std.mem.eql(u8, mode_val.string, "stopwatch")) {
         const max_sec = (root.object.get("max_seconds") orelse return error.InvalidJson).integer;
@@ -474,21 +446,6 @@ pub fn parsePresetConfigJson(allocator: std.mem.Allocator, json_str: []const u8)
             .default_mode = .STOPWATCH_MODE,
             .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 },
             .stopwatch = .{ .max_seconds = @intCast(max_sec) },
-            .world_clock = .{ .timezone = 8 },
-        };
-    } else if (std.mem.eql(u8, mode_val.string, "world_clock")) {
-        const tz = (root.object.get("timezone") orelse return error.InvalidJson).integer;
-
-        if (tz < -12 or tz > 14) {
-            logger.global_logger.warn("⚠️ 预设 JSON 中时区超出范围: {d}", .{tz});
-            return error.InvalidTimezone;
-        }
-
-        return .{
-            .default_mode = .WORLD_CLOCK_MODE,
-            .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 },
-            .stopwatch = .{ .max_seconds = 24 * 3600 },
-            .world_clock = .{ .timezone = @intCast(tz) },
         };
     } else {
         logger.global_logger.err("❌ 预设配置 JSON 中未知的模式: {s}", .{mode_val.string});

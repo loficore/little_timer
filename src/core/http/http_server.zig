@@ -1,8 +1,10 @@
 const std = @import("std");
+const json = std.json;
 const httpz = @import("httpz");
 const logger = @import("../logger.zig");
 const clock = @import("../clock.zig");
 const settings = @import("../../settings/mod.zig");
+const habit_crud = @import("../../storage/habit_crud.zig");
 const MainApplication = @import("../app.zig").MainApplication;
 const build_options = @import("build_options");
 
@@ -12,6 +14,7 @@ const ModeEnumT = clock.ModeEnumT;
 pub const HttpHandler = struct {
     app: *MainApplication,
     allocator: std.mem.Allocator,
+    sse_pending: bool,
 };
 
 fn handleRoot(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
@@ -34,13 +37,9 @@ fn handleGetState(h: *HttpHandler, request: *httpz.Request, response: *httpz.Res
     const mode_key = switch (display_data.getMode()) {
         .COUNTDOWN_MODE => "countdown",
         .STOPWATCH_MODE => "stopwatch",
-        .WORLD_CLOCK_MODE => "world_clock",
     };
 
-    const timezone: i8 = switch (display_data.*) {
-        .WORLD_CLOCK_MODE => |world_clock| world_clock.timezone,
-        else => h.app.settings_manager.config.basic.timezone,
-    };
+    const timezone: i8 = h.app.settings_manager.config.basic.timezone;
 
     try response.json(.{
         .time = display_data.getTimeInfo(),
@@ -55,21 +54,67 @@ fn handleGetState(h: *HttpHandler, request: *httpz.Request, response: *httpz.Res
     }, .{});
 }
 
+inline fn triggerSSEPush(h: *HttpHandler) void {
+    h.sse_pending = true;
+}
+
 fn handleStart(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    _ = request;
+    const body = request.body() orelse "";
+
+    var habit_id: ?i64 = null;
+    if (body.len > 0) {
+        const parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch null;
+        if (parsed) |p| {
+            defer p.deinit();
+            if (p.value.object.get("habit_id")) |hid| {
+                if (hid == .integer) {
+                    habit_id = hid.integer;
+                }
+            }
+        }
+    }
+
+    h.app.current_habit_id = habit_id;
     h.app.clock_manager.handleEvent(.user_start_timer);
-    try response.json(.{ .status = "started" }, .{});
+    triggerSSEPush(h);
+    try response.json(.{ .status = "started", .habit_id = habit_id }, .{});
+}
+
+fn handleStartRest(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
+
+    // 获取休息时长（默认5分钟）
+    const rest_seconds: i64 = 5 * 60;
+
+    // 切换到倒计时模式并设置休息时间
+    h.app.clock_manager.handleEvent(.{ .user_change_config = .{
+        .default_mode = .COUNTDOWN_MODE,
+        .countdown = .{
+            .duration_seconds = @intCast(rest_seconds),
+            .loop = false,
+            .loop_count = 0,
+            .loop_interval_seconds = 0,
+        },
+        .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
+    } });
+
+    // 开始倒计时
+    h.app.clock_manager.handleEvent(.user_start_timer);
+    triggerSSEPush(h);
+    try response.json(.{ .status = "rest_started", .rest_seconds = rest_seconds }, .{});
 }
 
 fn handlePause(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
     _ = request;
     h.app.clock_manager.handleEvent(.user_pause_timer);
+    triggerSSEPush(h);
     try response.json(.{ .status = "paused" }, .{});
 }
 
 fn handleReset(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
     _ = request;
     h.app.clock_manager.handleEvent(.user_reset_timer);
+    triggerSSEPush(h);
     try response.json(.{ .status = "reset" }, .{});
 }
 
@@ -81,14 +126,13 @@ fn handleModeChange(h: *HttpHandler, request: *httpz.Request, response: *httpz.R
         ModeEnumT.COUNTDOWN_MODE
     else if (std.mem.eql(u8, mode_str, "stopwatch"))
         ModeEnumT.STOPWATCH_MODE
-    else if (std.mem.eql(u8, mode_str, "world_clock"))
-        ModeEnumT.WORLD_CLOCK_MODE
     else {
         try response.json(std.json.Value{ .object = std.StringArrayHashMap(std.json.Value).init(h.allocator) }, .{});
         return;
     };
 
     h.app.clock_manager.handleEvent(.{ .user_change_mode = new_mode });
+    triggerSSEPush(h);
     try response.json(.{ .status = "mode_changed", .new_mode = mode_str }, .{});
 }
 
@@ -106,42 +150,81 @@ fn handleUpdateSettings(h: *HttpHandler, request: *httpz.Request, response: *htt
     try response.json(.{ .status = "settings_updated" }, .{});
 }
 
+fn buildStateJson(allocator: std.mem.Allocator, display_data: *const ClockState, timezone: i8) ![]u8 {
+    const mode_key = switch (display_data.getMode()) {
+        .COUNTDOWN_MODE => "countdown",
+        .STOPWATCH_MODE => "stopwatch",
+    };
+
+    return try std.fmt.allocPrint(allocator, "{{\"time\":{},\"mode\":\"{s}\",\"is_running\":{},\"is_finished\":{},\"in_rest\":{},\"loop_remaining\":{},\"loop_total\":{},\"rest_remaining\":{},\"timezone\":{}}}", .{
+        display_data.getTimeInfo(),
+        mode_key,
+        !display_data.isPaused(),
+        display_data.isFinished(),
+        display_data.inRest(),
+        display_data.getLoopRemaining(),
+        display_data.getLoopTotal(),
+        display_data.getRestRemainingTime(),
+        timezone,
+    });
+}
+
 fn handleSSE(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
     _ = request;
 
+    logger.global_logger.info("SSE 客户端连接建立", .{});
+
     const stream = try response.startEventStreamSync();
 
+    var last_tick_ts = std.time.timestamp();
+    var last_state_json: ?[]const u8 = null;
+    var last_heartbeat_ts = std.time.timestamp();
+    var pending_push = false;
+
     while (true) {
+        var sleep_ns: u64 = 1_000_000_000;
+        if (pending_push) {
+            sleep_ns = 0;
+            pending_push = false;
+        }
+
+        const now = std.time.timestamp();
+        const delta_s = now - last_tick_ts;
+        last_tick_ts = now;
+
+        if (delta_s > 0) {
+            h.app.clock_manager.handleEvent(.{ .tick = delta_s * 1000 });
+        }
+
         const display_data = h.app.clock_manager.update();
-        const mode_key = switch (display_data.getMode()) {
-            .COUNTDOWN_MODE => "countdown",
-            .STOPWATCH_MODE => "stopwatch",
-            .WORLD_CLOCK_MODE => "world_clock",
-        };
+        const timezone: i8 = h.app.settings_manager.config.basic.timezone;
 
-        const timezone: i8 = switch (display_data.*) {
-            .WORLD_CLOCK_MODE => |world_clock| world_clock.timezone,
-            else => h.app.settings_manager.config.basic.timezone,
-        };
-
-        const buf = try std.fmt.allocPrint(h.allocator, "{{\"time\":{},\"mode\":\"{s}\",\"is_running\":{},\"is_finished\":{},\"in_rest\":{},\"loop_remaining\":{},\"loop_total\":{},\"rest_remaining\":{},\"timezone\":{}}}", .{
-            display_data.getTimeInfo(),
-            mode_key,
-            !display_data.isPaused(),
-            display_data.isFinished(),
-            display_data.inRest(),
-            display_data.getLoopRemaining(),
-            display_data.getLoopTotal(),
-            display_data.getRestRemainingTime(),
-            timezone,
-        });
+        const buf = try buildStateJson(h.allocator, display_data, timezone);
         defer h.allocator.free(buf);
 
-        try stream.writeAll("data: ");
-        try stream.writeAll(buf);
-        try stream.writeAll("\n\n");
+        const has_change = if (last_state_json) |last| !std.mem.eql(u8, last, buf) else true;
 
-        std.Thread.sleep(1_000_000_000);
+        if (has_change) {
+            if (last_state_json) |last| h.allocator.free(last);
+            last_state_json = try h.allocator.dupe(u8, buf);
+            last_heartbeat_ts = now;
+
+            try stream.writeAll("data: ");
+            try stream.writeAll(buf);
+            try stream.writeAll("\n\n");
+        } else {
+            if (now - last_heartbeat_ts >= 10) {
+                last_heartbeat_ts = now;
+                try stream.writeAll(": heartbeat\n\n");
+            }
+        }
+
+        std.Thread.sleep(sleep_ns);
+
+        if (h.sse_pending) {
+            h.sse_pending = false;
+            pending_push = true;
+        }
     }
 }
 
@@ -151,12 +234,105 @@ fn handlePresets(h: *HttpHandler, request: *httpz.Request, response: *httpz.Resp
     try response.json(presets, .{});
 }
 
+// === 习惯集 API ===
+
+fn handleGetHabitSets(h: *HttpHandler, _: *httpz.Request, response: *httpz.Response) !void {
+    const habit_sets = h.app.settings_manager.sqlite_db.?.*.habit_manager.getAllHabitSets() catch |err| {
+        logger.global_logger.err("获取习惯集失败: {any}", .{err});
+        try response.json(.{ .err = "Failed to get habit sets" }, .{});
+        return;
+    };
+    try response.json(habit_sets, .{});
+}
+
+fn handleCreateHabitSet(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    const body = request.body() orelse "";
+
+    var parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch |err| {
+        logger.global_logger.err("解析习惯集创建请求失败: {any}", .{err});
+        try response.json(.{ .err = "Invalid JSON" }, .{});
+        return;
+    };
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    const name_val = root.get("name") orelse {
+        try response.json(.{ .err = "Missing name" }, .{});
+        return;
+    };
+
+    if (name_val != .string or name_val.string.len == 0) {
+        try response.json(.{ .err = "Invalid name" }, .{});
+        return;
+    }
+
+    var description_str: []const u8 = "";
+    var color_str: []const u8 = "#6366f1";
+
+    if (root.get("description")) |val| {
+        if (val == .string) description_str = val.string;
+    }
+    if (root.get("color")) |val| {
+        if (val == .string) color_str = val.string;
+    }
+
+    const id = h.app.settings_manager.sqlite_db.?.*.habit_manager.createHabitSet(
+        name_val.string,
+        description_str,
+        color_str,
+    ) catch |err| {
+        logger.global_logger.err("创建习惯集失败: {any}", .{err});
+        try response.json(.{ .err = "Failed to create habit set" }, .{});
+        return;
+    };
+
+    try response.json(.{ .id = id, .name = name_val.string, .description = description_str, .color = color_str }, .{});
+}
+
+// === 习惯 API ===
+
+fn handleGetHabits(h: *HttpHandler, _: *httpz.Request, response: *httpz.Response) !void {
+    const habits = h.app.settings_manager.sqlite_db.?.*.habit_manager.getAllHabits() catch {
+        try response.json(.{ .err = "Failed to get habits" }, .{});
+        return;
+    };
+    try response.json(habits, .{});
+}
+
+fn handleCreateHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = h;
+    _ = request;
+    try response.json(.{ .err = "Not implemented" }, .{});
+}
+
+fn handleDeleteHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = h;
+    _ = request;
+    try response.json(.{ .err = "Not implemented" }, .{});
+}
+
+// === 记录 API ===
+
+fn handleCreateSession(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = h;
+    _ = request;
+    try response.json(.{ .err = "Not implemented" }, .{});
+}
+
+fn handleGetSessions(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = h;
+    _ = request;
+    try response.json(.{ .err = "Not implemented" }, .{});
+}
+
 pub const HttpServerManager = struct {
     server: httpz.Server(*HttpHandler),
     handler: HttpHandler,
 
     pub fn init(allocator: std.mem.Allocator, port: u16, app: *MainApplication) !HttpServerManager {
-        var handler = HttpHandler{ .app = app, .allocator = allocator };
+        logger.global_logger.info("初始化 HTTP 服务器，端口: {}", .{port});
+
+        var handler = HttpHandler{ .app = app, .allocator = allocator, .sse_pending = false };
         var server = try httpz.Server(*HttpHandler).init(allocator, .{
             .address = .localhost(port),
         }, &handler);
@@ -173,6 +349,24 @@ pub const HttpServerManager = struct {
         router.get("/api/events", handleSSE, .{});
         router.get("/api/presets", handlePresets, .{});
 
+        // 习惯集 API
+        router.get("/api/habit-sets", handleGetHabitSets, .{});
+        router.post("/api/habit-sets", handleCreateHabitSet, .{});
+
+        // 习惯 API
+        router.get("/api/habits", handleGetHabits, .{});
+        router.post("/api/habits", handleCreateHabit, .{});
+        router.delete("/api/habits/:id", handleDeleteHabit, .{});
+
+        // 记录 API
+        router.post("/api/sessions", handleCreateSession, .{});
+        router.get("/api/sessions", handleGetSessions, .{});
+
+        // 计时器 API
+        router.post("/api/timer/rest", handleStartRest, .{});
+
+        logger.global_logger.info("HTTP 服务器路由注册完成", .{});
+
         return HttpServerManager{
             .server = server,
             .handler = handler,
@@ -180,14 +374,17 @@ pub const HttpServerManager = struct {
     }
 
     pub fn start(self: *HttpServerManager) !void {
+        logger.global_logger.info("HTTP 服务器开始监听...", .{});
         try self.server.listen();
     }
 
     pub fn stop(self: *HttpServerManager) void {
+        logger.global_logger.info("HTTP 服务器停止中...", .{});
         self.server.stop();
     }
 
     pub fn deinit(self: *HttpServerManager) void {
+        logger.global_logger.info("HTTP 服务器释放资源...", .{});
         self.server.deinit();
     }
 };

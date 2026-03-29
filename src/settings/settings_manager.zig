@@ -33,6 +33,7 @@ pub const SettingsManager = struct {
     owned_language: ?[]u8 = null,
     owned_theme_mode: ?[]u8 = null,
     owned_log_level: ?[]u8 = null,
+    owned_log_dir: ?[]u8 = null,
 
     /// 设置模块初始化
     ///
@@ -43,7 +44,6 @@ pub const SettingsManager = struct {
     /// 返回:
     /// - !SettingsManager: 如果初始化失败则返回错误
     pub fn init(allocator: std.mem.Allocator, db_path: []const u8) !SettingsManager {
-        // 计算 SQLite 路径
         const db_path_str = if (db_path.len > 0) db_path else default_db_path;
         const db_path_len = db_path_str.len;
         const db_path_z_slice = try allocator.alloc(u8, db_path_len + 1);
@@ -51,23 +51,16 @@ pub const SettingsManager = struct {
         db_path_z_slice[db_path_len] = 0;
         const db_path_full: [:0]const u8 = @ptrCast(db_path_z_slice[0..db_path_len :0]);
 
-        var presets_mgr = PresetsManager.init(allocator);
-        // 在堆上分配 SQLite 管理器，避免悬垂指针
         var sqlite_db_ptr = try allocator.create(settings_sqlite.SqliteManager);
         sqlite_db_ptr.* = try settings_sqlite.SqliteManager.init(allocator, db_path_full, "");
         try sqlite_db_ptr.open();
-        // 预设从 SQLite 加载
-        presets_mgr.loadFromSqlite(sqlite_db_ptr) catch |err| {
-            logger.global_logger.warn("⚠️ 加载 SQLite 预设失败: {any}，将使用空预设列表", .{err});
-        };
-        presets_mgr.db = sqlite_db_ptr;
 
         const settings_manager = SettingsManager{
             .allocator = allocator,
             .db_path = db_path_z_slice,
             .sqlite_db = sqlite_db_ptr,
             .config = SettingsConfig{},
-            .presets = presets_mgr,
+            .presets = PresetsManager.init(allocator),
         };
         return settings_manager;
     }
@@ -104,11 +97,68 @@ pub const SettingsManager = struct {
 
     /// 从 SQLite 加载设置
     fn loadSettingsFromSqlite(self: *SettingsManager) !void {
-        self.config = self.sqlite_db.?.*.loadSettings(self.allocator) catch |err| {
+        // 释放旧的动态字符串，避免内存泄漏
+        if (self.owned_language) |old| self.allocator.free(old);
+        if (self.owned_theme_mode) |old| self.allocator.free(old);
+        if (self.owned_log_level) |old| self.allocator.free(old);
+        if (self.owned_log_dir) |old| self.allocator.free(old);
+        self.owned_language = null;
+        self.owned_theme_mode = null;
+        self.owned_log_level = null;
+        self.owned_log_dir = null;
+
+        const new_config = self.sqlite_db.?.*.loadSettings(self.allocator) catch |err| {
             logger.global_logger.err("从 SQLite 加载设置失败: {any}", .{err});
             try self.initializeDefaultSettings();
             return;
         };
+
+        // 保存原始指针，稍后释放
+        const old_language = new_config.basic.language;
+        const old_theme_mode = new_config.basic.theme_mode;
+        const old_log_level = new_config.logging.level;
+        const old_log_dir = new_config.logging.log_dir;
+
+        // 获取新配置中的字符串所有权
+        self.owned_language = try self.allocator.dupe(u8, new_config.basic.language);
+        self.owned_theme_mode = try self.allocator.dupe(u8, new_config.basic.theme_mode);
+        self.owned_log_level = try self.allocator.dupe(u8, new_config.logging.level);
+
+        if (new_config.logging.log_dir.len > 0) {
+            self.owned_log_dir = try self.allocator.dupe(u8, new_config.logging.log_dir);
+        }
+
+        // 释放 loadSettings 分配的原始字符串
+        self.allocator.free(old_language);
+        self.allocator.free(old_theme_mode);
+        self.allocator.free(old_log_level);
+        if (old_log_dir.len > 0) {
+            self.allocator.free(old_log_dir);
+        }
+
+        // 更新配置中的指针
+        self.config = SettingsConfig{
+            .basic = .{
+                .timezone = new_config.basic.timezone,
+                .language = self.owned_language.?,
+                .default_mode = new_config.basic.default_mode,
+                .theme_mode = self.owned_theme_mode.?,
+            },
+            .clock_defaults = new_config.clock_defaults,
+            .logging = .{
+                .level = self.owned_log_level.?,
+                .enable_timestamp = new_config.logging.enable_timestamp,
+                .tick_interval_ms = new_config.logging.tick_interval_ms,
+                .enable_file_logging = new_config.logging.enable_file_logging,
+                .log_dir = if (self.owned_log_dir) |d|
+                    if (d.len > 0) d else ""
+                else
+                    "",
+                .max_file_size = new_config.logging.max_file_size,
+                .max_file_count = new_config.logging.max_file_count,
+            },
+        };
+
         logger.global_logger.info("✓ 设置已从 SQLite 加载", .{});
     }
 
@@ -149,9 +199,6 @@ pub const SettingsManager = struct {
                 },
                 .stopwatch = .{
                     .max_seconds = 86400,
-                },
-                .world_clock = .{
-                    .timezone = 8,
                 },
             },
             .logging = .{
@@ -224,14 +271,12 @@ pub const SettingsManager = struct {
         const mode = switch (config.basic.default_mode) {
             .countdown => interface.ModeEnumT.COUNTDOWN_MODE,
             .stopwatch => interface.ModeEnumT.STOPWATCH_MODE,
-            .world_clock => interface.ModeEnumT.WORLD_CLOCK_MODE,
         };
 
         return interface.ClockTaskConfig{
             .default_mode = mode,
             .countdown = config.clock_defaults.countdown,
             .stopwatch = config.clock_defaults.stopwatch,
-            .world_clock = .{ .timezone = config.basic.timezone },
         };
     }
 
@@ -319,8 +364,6 @@ pub const SettingsManager = struct {
                     self.config.basic.default_mode = .countdown;
                 } else if (std.mem.eql(u8, mode_val.string, "stopwatch")) {
                     self.config.basic.default_mode = .stopwatch;
-                } else if (std.mem.eql(u8, mode_val.string, "world_clock")) {
-                    self.config.basic.default_mode = .world_clock;
                 }
             }
 
@@ -365,14 +408,6 @@ pub const SettingsManager = struct {
                     }
                 }
             }
-
-            if (defaults_val.object.get("world_clock")) |world_clock_val| {
-                if (world_clock_val.object.get("timezone")) |tz_val| {
-                    if (tz_val.integer >= -12 and tz_val.integer <= 14) {
-                        self.config.clock_defaults.world_clock.timezone = @intCast(tz_val.integer);
-                    }
-                }
-            }
         }
 
         // 更新日志设置
@@ -394,6 +429,34 @@ pub const SettingsManager = struct {
             if (logging_val.object.get("tick_interval_ms")) |interval_val| {
                 if (interval_val.integer > 0) {
                     self.config.logging.tick_interval_ms = @intCast(interval_val.integer);
+                }
+            }
+
+            if (logging_val.object.get("enable_file_logging")) |val| {
+                self.config.logging.enable_file_logging = switch (val) {
+                    .bool => |b| b,
+                    .integer => |i| i != 0,
+                    else => false,
+                };
+            }
+
+            if (logging_val.object.get("log_dir")) |val| {
+                if (val == .string) {
+                    if (self.owned_log_dir) |old| self.allocator.free(old);
+                    self.owned_log_dir = try self.allocator.dupe(u8, val.string);
+                    self.config.logging.log_dir = self.owned_log_dir.?;
+                }
+            }
+
+            if (logging_val.object.get("max_file_size")) |val| {
+                if (val.integer > 0) {
+                    self.config.logging.max_file_size = @intCast(val.integer);
+                }
+            }
+
+            if (logging_val.object.get("max_file_count")) |val| {
+                if (val.integer > 0 and val.integer < 20) {
+                    self.config.logging.max_file_count = @intCast(val.integer);
                 }
             }
         }
@@ -433,8 +496,6 @@ pub const SettingsManager = struct {
                             std.mem.eql(u8, mode_val.string, "COUNTDOWN_MODE");
                         const is_stopwatch = std.mem.eql(u8, mode_val.string, "stopwatch") or
                             std.mem.eql(u8, mode_val.string, "STOPWATCH_MODE");
-                        const is_world_clock = std.mem.eql(u8, mode_val.string, "world_clock") or
-                            std.mem.eql(u8, mode_val.string, "WORLD_CLOCK_MODE");
 
                         if (is_countdown) {
                             const dur = if (cfg_val.object.get("duration_seconds")) |v|
@@ -454,22 +515,15 @@ pub const SettingsManager = struct {
                                 validator.safeU64FromJson(v.integer, 0, 3600) orelse 0
                             else
                                 0;
-                            config_union = .{ .countdown = .{ .duration_seconds = dur, .loop = loop, .loop_count = loop_count, .loop_interval_seconds = loop_interval }, .stopwatch = .{ .max_seconds = 24 * 3600 }, .world_clock = .{ .timezone = 8 } };
+                            config_union = .{ .countdown = .{ .duration_seconds = dur, .loop = loop, .loop_count = loop_count, .loop_interval_seconds = loop_interval }, .stopwatch = .{ .max_seconds = 24 * 3600 } };
                             mode_enum = .COUNTDOWN_MODE;
                         } else if (is_stopwatch) {
                             const max = if (cfg_val.object.get("max_seconds")) |v|
                                 validator.safeU64FromJson(v.integer, 1, 86400 * 365) orelse 24 * 3600
                             else
                                 24 * 3600;
-                            config_union = .{ .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 }, .stopwatch = .{ .max_seconds = max }, .world_clock = .{ .timezone = 8 } };
+                            config_union = .{ .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 }, .stopwatch = .{ .max_seconds = max } };
                             mode_enum = .STOPWATCH_MODE;
-                        } else if (is_world_clock) {
-                            const tz = if (cfg_val.object.get("timezone")) |v|
-                                validator.safeI8FromJson(v.integer, -12, 14) orelse self.config.basic.timezone
-                            else
-                                self.config.basic.timezone;
-                            config_union = .{ .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 }, .stopwatch = .{ .max_seconds = 24 * 3600 }, .world_clock = .{ .timezone = tz } };
-                            mode_enum = .WORLD_CLOCK_MODE;
                         } else {
                             continue;
                         }
@@ -553,28 +607,18 @@ pub const SettingsManager = struct {
         self.presets.deinit();
 
         // 释放路径字符串
-        self.allocator.free(self.presets_file_path);
         if (self.db_path) |path| self.allocator.free(path);
 
         // 释放动态分配的字符串字段
         if (self.owned_language) |s| self.allocator.free(s);
         if (self.owned_theme_mode) |s| self.allocator.free(s);
         if (self.owned_log_level) |s| self.allocator.free(s);
+        if (self.owned_log_dir) |s| self.allocator.free(s);
 
         // 释放堆上分配的 sqlite_db
         if (self.sqlite_db != null) {
             self.allocator.destroy(self.sqlite_db.?);
         }
-    }
-
-    /// 将预设保存到单独的 JSON 文件（与 settings.toml 同目录）
-    pub fn savePresetsToFile(self: *SettingsManager) !void {
-        try self.presets.saveToFile(self.presets_file_path);
-    }
-
-    /// 从预设文件加载预设（与 settings.toml 同目录）
-    pub fn loadPresetsFromFile(self: *SettingsManager) !void {
-        try self.presets.loadFromFile(self.presets_file_path, self.config.basic.timezone);
     }
 
     pub fn getPresets(self: *const SettingsManager) []const interface.TimerPreset {

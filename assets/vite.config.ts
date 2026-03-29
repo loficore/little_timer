@@ -17,4 +17,12 @@ export default defineConfig({
     },
   },
   assetsInclude: ['**/*.toml'], // 允许 TOML 文件作为资产导入
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
+  },
 })

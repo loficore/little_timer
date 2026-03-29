@@ -14,6 +14,9 @@
     "test:coverage": "vitest --coverage"
   },
   "dependencies": {
+    "@heroicons/react": "^2.2.0",
+    "apexcharts": "^5.10.4",
+    "daisyui": "^5.5.19",
     "preact": "^10.28.2",
     "preact-router": "^4.1.2"
   },

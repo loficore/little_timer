@@ -21,7 +21,6 @@ test "问题1: 倒计时整数溢出检查" {
             .loop_interval_seconds = 0,
         },
         .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
-        .world_clock = .{ .timezone = 8 },
     };
 
     const manager = clock.ClockManager.init(config);
@@ -41,7 +40,6 @@ test "问题1: 正计时整数溢出检查" {
         .stopwatch = .{
             .max_seconds = large_max_seconds,
         },
-        .world_clock = .{ .timezone = 8 },
     };
 
     const manager = clock.ClockManager.init(config);
@@ -61,7 +59,6 @@ test "问题1: 安全的 duration 值不被修改" {
             .loop_interval_seconds = 0,
         },
         .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
-        .world_clock = .{ .timezone = 8 },
     };
 
     const manager = clock.ClockManager.init(config);
@@ -143,7 +140,6 @@ test "问题3: 倒计时在暂停时不会消耗" {
         },
         .stopwatch = .{ .max_seconds = 3600 },
         .default_mode = .COUNTDOWN_MODE,
-        .world_clock = .{ .timezone = 8 },
     };
 
     var manager = clock.ClockManager.init(config);

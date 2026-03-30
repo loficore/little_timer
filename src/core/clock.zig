@@ -182,6 +182,14 @@ pub const ClockState = union(ModeEnumT) {
             .STOPWATCH_MODE => 0,
         };
     }
+
+    /// 获取已用时间（秒数），仅正计时支持
+    pub fn getElapsedSeconds(self: *const ClockState) i64 {
+        return switch (self.*) {
+            .COUNTDOWN_MODE => |*countdown| @divTrunc(@as(i64, @intCast(countdown.duration_ms)) - @as(i64, @intCast(countdown.remaining_ms)), 1000),
+            .STOPWATCH_MODE => |*stopwatch| @divTrunc(@as(i64, @intCast(stopwatch.esplased_ms)), 1000),
+        };
+    }
 };
 
 pub const ClockManager = struct {

@@ -10,6 +10,8 @@
     "build:check": "tsc -b --noEmit",
     "preview": "vite preview",
     "test": "vitest",
+    "test:vrt": "playwright test",
+    "test:vrt:update": "playwright test --update-snapshots",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage"
   },
@@ -26,6 +28,7 @@
     "@tailwindcss/postcss": "^4.1.18",
     "@tailwindcss/vite": "^4.1.18",
     "@testing-library/preact": "^3.2.4",
+    "@playwright/test": "^1.55.0",
     "@types/node": "^24.10.1",
     "@vitest/ui": "^2.1.8",
     "autoprefixer": "^10.4.23",

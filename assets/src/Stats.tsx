@@ -56,7 +56,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const client = new APIClient("");
+      const client = new APIClient(window.location.origin);
       const habitsData = await client.getHabits();
       setHabits(Array.isArray(habitsData) ? habitsData : []);
       
@@ -93,7 +93,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
 
   const renderCharts = () => {
     const filteredSessions = selectedHabitId 
-      ? sessions.filter(s => s.habit_id === selectedHabitId)
+      ? sessions.filter(s => s && s.habit_id === selectedHabitId)
       : sessions;
 
     // Pie chart - time distribution (only when no habit filter)
@@ -105,7 +105,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
       
       if (!selectedHabitId && sessions.length > 0) {
         const habitTimeMap = new Map<number, number>();
-        sessions.forEach((s) => {
+        sessions.filter(s => s).forEach((s) => {
           const current = habitTimeMap.get(s.habit_id) || 0;
           habitTimeMap.set(s.habit_id, current + (s.duration_seconds || 0));
         });
@@ -165,7 +165,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
       }
       
       const dailyMap = new Map<string, number>();
-      filteredSessions.forEach((s) => {
+      filteredSessions.filter(s => s).forEach((s) => {
         const current = dailyMap.get(s.date) || 0;
         dailyMap.set(s.date, current + (s.duration_seconds || 0));
       });
@@ -218,13 +218,13 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
   };
 
   const filteredSessions = selectedHabitId 
-    ? sessions.filter(s => s.habit_id === selectedHabitId)
+    ? sessions.filter(s => s && s.habit_id === selectedHabitId)
     : sessions;
-  const totalSeconds = filteredSessions.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
+  const totalSeconds = filteredSessions.reduce((sum, s) => sum + (s?.duration_seconds || 0), 0);
   const totalSessions = filteredSessions.length;
 
   return (
-    <div className="flex flex-col w-screen h-screen bg-base-100 dark:bg-base-100 transition-colors duration-300 overflow-hidden pb-16 lg:pb-0">
+    <div className="flex flex-col flex-1 bg-base-100 dark:bg-base-100 transition-colors duration-300 overflow-hidden pb-16 lg:pb-0">
       <Header
         title={t("stats.title") || "统计"}
         showSettings={false}

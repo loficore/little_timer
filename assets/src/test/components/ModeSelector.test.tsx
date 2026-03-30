@@ -2,21 +2,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent, screen } from "@testing-library/preact";
 import { ModeSelector } from "../../components/ModeSelector";
 import { Mode } from "../../utils/share";
-import { ClockIconComponent } from "../../utils/icons";
 
 describe("ModeSelector 组件", () => {
   const mockOnModeChange = vi.fn();
-
-  const modes = [
-    { key: Mode.Countdown, label: "倒计时", icon: <ClockIconComponent /> },
-    { key: Mode.Stopwatch, label: "秒表", icon: <ClockIconComponent /> },
-  ];
 
   beforeEach(() => {
     mockOnModeChange.mockClear();
   });
 
   it("应该渲染所有模式按钮", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
+    
     render(
       <ModeSelector
         modes={modes}
@@ -27,10 +26,13 @@ describe("ModeSelector 组件", () => {
 
     expect(screen.getByText("倒计时")).toBeTruthy();
     expect(screen.getByText("秒表")).toBeTruthy();
-    expect(screen.getByText("世界时钟")).toBeTruthy();
   });
 
   it("应该高亮激活的模式", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     const { container } = render(
       <ModeSelector
         modes={modes}
@@ -48,6 +50,10 @@ describe("ModeSelector 组件", () => {
   });
 
   it("非激活模式应该有不同样式", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     const { container } = render(
       <ModeSelector
         modes={modes}
@@ -65,6 +71,10 @@ describe("ModeSelector 组件", () => {
   });
 
   it("点击模式按钮应该触发回调", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     render(
       <ModeSelector
         modes={modes}
@@ -80,6 +90,10 @@ describe("ModeSelector 组件", () => {
   });
 
   it("切换模式时应该更新高亮", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     const { rerender, container } = render(
       <ModeSelector
         modes={modes}
@@ -113,6 +127,10 @@ describe("ModeSelector 组件", () => {
   });
 
   it("应该支持自定义动画延迟", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     const { container } = render(
       <ModeSelector
         modes={modes}

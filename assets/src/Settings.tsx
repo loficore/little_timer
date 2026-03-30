@@ -5,11 +5,9 @@ import { TabPanel } from "./components/TabPanel";
 import { BasicSettings } from "./components/BasicSettings";
 import { CountdownSettings } from "./components/CountdownSettings";
 import { StopwatchSettings } from "./components/StopwatchSettings";
-import { PresetSettings, type TimerPreset } from "./components/PresetSettings";
-import { WorldClockSettings } from "./components/WorldClockSettings";
 import { t, setLanguage } from "./utils/i18n";
 import { APIClient } from "./utils/apiClient";
-import { ClockIconComponent, GlobeIcon, StarIconComponent } from "./utils/icons";
+import { ClockIconComponent } from "./utils/icons";
 
 interface SettingsPageProps {
   onBackClick?: () => void;
@@ -33,7 +31,6 @@ interface SettingsConfig {
       max_seconds: number;
     };
   };
-  presets?: TimerPreset[];
 }
 
 const DEFAULT_CONFIG: SettingsConfig = {
@@ -54,15 +51,12 @@ const DEFAULT_CONFIG: SettingsConfig = {
       max_seconds: 86400,
     },
   },
-  presets: [],
 };
 
 const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "basic", labelKey: "settings.tabs.basic" },
   { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
   { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
-  { id: "world_clock", labelKey: "settings.tabs.world_clock", icon: <GlobeIcon /> },
-  { id: "presets", labelKey: "settings.tabs.presets", icon: <StarIconComponent /> },
 ];
 
 export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
@@ -70,7 +64,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
 }) => {
   const apiClientRef = useRef<APIClient | null>(null);
   const [config, setConfig] = useState<SettingsConfig>(DEFAULT_CONFIG);
-  const [presets, setPresets] = useState<TimerPreset[]>([]);
   const [activeTab, setActiveTab] = useState("basic");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -80,12 +73,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   }, []);
 
   useEffect(() => {
-    const modeTab =
-      config.basic.default_mode === "countdown"
-        ? "countdown"
-        : config.basic.default_mode === "stopwatch"
-          ? "stopwatch"
-          : "world_clock";
+    const modeTab = config.basic.default_mode === "countdown" ? "countdown" : "stopwatch";
     setActiveTab(modeTab);
   }, [config.basic.default_mode]);
 
@@ -115,27 +103,29 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
 
     try {
       const settings = await apiClientRef.current.getSettings();
+      const s = settings as any;
       
       const loadedConfig: SettingsConfig = {
         basic: {
-          timezone: settings.basic.timezone,
-          language: settings.basic.language,
-          default_mode: settings.basic.default_mode,
-          theme_mode: settings.basic.theme_mode,
+          timezone: s?.basic?.timezone ?? 8,
+          language: s?.basic?.language ?? "ZH",
+          default_mode: s?.basic?.default_mode ?? "countdown",
+          theme_mode: s?.basic?.theme_mode ?? "dark",
         },
         clock_defaults: {
-          countdown: settings.countdown as typeof DEFAULT_CONFIG.clock_defaults.countdown,
-          stopwatch: settings.stopwatch as typeof DEFAULT_CONFIG.clock_defaults.stopwatch,
+          countdown: s?.countdown ? {
+            duration_seconds: s.countdown?.duration_seconds ?? 1500,
+            loop: s.countdown?.loop ?? false,
+            loop_count: s.countdown?.loop_count ?? 0,
+            loop_interval_seconds: s.countdown?.loop_interval_seconds ?? 0,
+          } : DEFAULT_CONFIG.clock_defaults.countdown,
+          stopwatch: s?.stopwatch ? {
+            max_seconds: s.stopwatch?.max_seconds ?? 86400,
+          } : DEFAULT_CONFIG.clock_defaults.stopwatch,
         },
-        presets: [],
       };
       
       setConfig(loadedConfig);
-
-      const loadedPresets = await apiClientRef.current.getPresets();
-      if (Array.isArray(loadedPresets)) {
-        setPresets(loadedPresets as TimerPreset[]);
-      }
     } catch (error) {
       console.error("加载设置失败:", error);
       setSaveMessage(t("errors.offline.message"));
@@ -156,20 +146,12 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     );
   }, [config.basic.language]);
 
-  useEffect(() => {
-    if (presets.length === 0 && config.presets && config.presets.length > 0) {
-      setPresets([...config.presets]);
-    }
-  }, [config]);
-
   const handleSave = () => {
     setIsSaving(true);
     setSaveMessage("");
 
-    const configWithPresets = { ...config, presets: [...presets] };
-    
     if (apiClientRef.current) {
-      void apiClientRef.current.updateSettings(configWithPresets)
+      void apiClientRef.current.updateSettings(config)
         .then(() => {
           setSaveMessage(t("common.save_success"));
           setTimeout(() => setSaveMessage(""), 3000);
@@ -187,13 +169,12 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   const handleReset = () => {
     if (confirm(t("common.reset_confirm"))) {
       setConfig(DEFAULT_CONFIG);
-      setPresets([]);
       setSaveMessage(t("common.save_hint"));
     }
   };
 
-  return (
-    <div className="flex flex-col w-screen h-screen bg-base-100 text-base-content transition-colors duration-300 animate-fadeIn overflow-hidden">
+    return (
+        <div className="flex flex-col flex-1 bg-base-100 text-base-content transition-colors duration-300 animate-fadeIn overflow-hidden">
       <Header
         title={t("common.settings_title")}
         showBack={true}
@@ -260,73 +241,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
                 },
               })
             }
-          />
-        )}
-
-        {activeTab === "world_clock" && (
-          <WorldClockSettings
-            timezone={config.basic.timezone}
-            onTimezoneChange={(tz) =>
-              setConfig({
-                ...config,
-                basic: { ...config.basic, timezone: tz },
-              })
-            }
-          />
-        )}
-
-        {activeTab === "presets" && (
-          <PresetSettings
-            presets={presets}
-            onChange={setPresets}
-            onUsePreset={(preset) => {
-              if (
-                preset.mode === "countdown" &&
-                preset.config.duration_seconds
-              ) {
-                setConfig({
-                  ...config,
-                  basic: { ...config.basic, default_mode: "countdown" },
-                  clock_defaults: {
-                    ...config.clock_defaults,
-                    countdown: {
-                      duration_seconds: preset.config.duration_seconds,
-                      loop: !!preset.config.loop,
-                      loop_count: preset.config.loop_count ?? 0,
-                      loop_interval_seconds: preset.config.loop_interval_seconds ?? 0,
-                    },
-                  },
-                });
-              } else if (
-                preset.mode === "stopwatch" &&
-                preset.config.max_seconds
-              ) {
-                setConfig({
-                  ...config,
-                  basic: { ...config.basic, default_mode: "stopwatch" },
-                  clock_defaults: {
-                    ...config.clock_defaults,
-                    stopwatch: {
-                      max_seconds: preset.config.max_seconds,
-                    },
-                  },
-                });
-              } else if (preset.mode === "world_clock") {
-                setConfig({
-                  ...config,
-                  basic: {
-                    ...config.basic,
-                    default_mode: "world_clock",
-                    timezone: preset.config.timezone ?? config.basic.timezone,
-                  },
-                });
-              }
-              setSaveMessage(
-                t("settings.presets.applied", { name: preset.name }),
-              );
-              setTimeout(() => setSaveMessage(""), 3000);
-            }}
-          />
+            />
         )}
       </TabPanel>
 

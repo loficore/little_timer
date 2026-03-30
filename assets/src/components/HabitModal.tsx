@@ -1,31 +1,34 @@
-import { useState } from "preact/hooks";
+import { useState, useEffect } from "preact/hooks";
 import type { FunctionalComponent } from "preact";
 import { APIClient } from "../utils/apiClient";
+import type { HabitSet, Habit } from "../types/habit";
 
 interface HabitModalProps {
   isOpen: boolean;
   mode: "set" | "habit";
+  editData?: HabitSet | Habit | null;
   setId?: number;
   onClose: () => void;
   onSuccess: () => void;
 }
 
 const COLORS = [
-  "#6366f1", // indigo
-  "#8b5cf6", // violet
-  "#ec4899", // pink
-  "#ef4444", // red
-  "#f97316", // orange
-  "#eab308", // yellow
-  "#22c55e", // green
-  "#14b8a6", // teal
-  "#0ea5e9", // sky
-  "#3b82f6", // blue
+  "#6366f1",
+  "#8b5cf6",
+  "#ec4899",
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#14b8a6",
+  "#0ea5e9",
+  "#3b82f6",
 ];
 
 export const HabitModal: FunctionalComponent<HabitModalProps> = ({
   isOpen,
   mode,
+  editData,
   setId,
   onClose,
   onSuccess,
@@ -33,8 +36,34 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor] = useState(COLORS[0]);
+  const [goalHours, setGoalHours] = useState(0);
   const [goalMinutes, setGoalMinutes] = useState(25);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const isEdit = !!editData;
+  const isHabitEdit = isEdit && mode === "habit";
+  const isSetEdit = isEdit && mode === "set";
+
+  useEffect(() => {
+    if (editData) {
+      setName(editData.name);
+      setColor(editData.color || COLORS[0]);
+      if ("description" in editData) {
+        setDescription(editData.description || "");
+      }
+      if ("goal_seconds" in editData) {
+        const total = editData.goal_seconds || 1500;
+        setGoalHours(Math.floor(total / 3600));
+        setGoalMinutes(Math.floor((total % 3600) / 60));
+      }
+    } else {
+      setName("");
+      setDescription("");
+      setColor(COLORS[0]);
+      setGoalHours(0);
+      setGoalMinutes(25);
+    }
+  }, [editData, isOpen]);
 
   if (!isOpen) return null;
 
@@ -42,35 +71,57 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
     e.preventDefault();
     if (!name.trim()) return;
 
+    const totalSeconds = (goalHours * 60 + goalMinutes) * 60;
+    if (mode === "habit" && totalSeconds === 0) return;
+
     setIsSubmitting(true);
     try {
       const client = new APIClient(window.location.origin);
       
       if (mode === "set") {
-        await client.createHabitSet(name, description, color);
+        if (isSetEdit) {
+          await client.updateHabitSet(editData.id, name, description, color);
+        } else {
+          await client.createHabitSet(name, description, color);
+        }
       } else {
-        await client.createHabit(setId!, name, goalMinutes * 60, 1, color);
+        if (isHabitEdit) {
+          await client.updateHabit(editData.id, name, totalSeconds, color);
+        } else {
+          await client.createHabit(setId!, name, totalSeconds, color);
+        }
       }
       
       onSuccess();
       setName("");
       setDescription("");
       setColor(COLORS[0]);
+      setGoalHours(0);
       setGoalMinutes(25);
     } catch (err) {
-      console.error("Failed to create:", err);
+      console.error("Failed to save:", err);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const getTitle = () => {
+    if (mode === "set") {
+      return isSetEdit ? "编辑习惯集" : "创建习惯集";
+    }
+    return isHabitEdit ? "编辑习惯" : "添加习惯";
+  };
+
+  const getSubmitText = () => {
+    if (isSubmitting) return "保存中...";
+    return isEdit ? "保存" : "创建";
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative bg-base-100 rounded-lg p-6 w-full max-w-sm mx-4 shadow-xl">
-        <h3 className="text-lg font-bold mb-4">
-          {mode === "set" ? "创建习惯集" : "添加习惯"}
-        </h3>
+        <h3 className="text-lg font-bold mb-4">{getTitle()}</h3>
         
         <form onSubmit={(e) => { void handleSubmit(e); }}>
           <div className="form-control mb-4">
@@ -104,16 +155,33 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
           {mode === "habit" && (
             <div className="form-control mb-4">
               <label className="label">
-                <span className="label-text">目标时间（分钟）</span>
+                <span className="label-text">目标时长</span>
               </label>
-              <input
-                type="number"
-                className="input input-bordered"
-                min={1}
-                max={180}
-                value={goalMinutes}
-                onInput={(e) => setGoalMinutes(parseInt((e.target as HTMLInputElement).value) || 25)}
-              />
+              <div className="flex gap-2 items-center">
+                <input
+                  type="number"
+                  className="input input-bordered w-20"
+                  min={0}
+                  max={9999}
+                  value={goalHours}
+                  onInput={(e) => setGoalHours(parseInt((e.target as HTMLInputElement).value) || 0)}
+                />
+                <span className="text-sm">小时</span>
+                <input
+                  type="number"
+                  className="input input-bordered w-20"
+                  min={0}
+                  max={59}
+                  value={goalMinutes}
+                  onInput={(e) => setGoalMinutes(parseInt((e.target as HTMLInputElement).value) || 0)}
+                />
+                <span className="text-sm">分钟</span>
+              </div>
+              <label className="label">
+                <span className="label-text-alt text-error">
+                  {(goalHours * 60 + goalMinutes) === 0 ? "请设置目标时长" : `目标: ${goalHours}h ${goalMinutes}m = ${(goalHours * 60 + goalMinutes)} 分钟`}
+                </span>
+              </label>
             </div>
           )}
 
@@ -145,9 +213,9 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
             <button
               type="submit"
               className="btn btn-primary flex-1"
-              disabled={isSubmitting || !name.trim()}
+              disabled={isSubmitting || !name.trim() || (mode === "habit" && (goalHours * 60 + goalMinutes) === 0)}
             >
-              {isSubmitting ? "创建中..." : "创建"}
+              {getSubmitText()}
             </button>
           </div>
         </form>

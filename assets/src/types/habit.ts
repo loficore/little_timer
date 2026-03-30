@@ -13,7 +13,6 @@ export interface Habit {
   set_id: number;
   name: string;
   goal_seconds: number;
-  goal_count: number;
   color: string;
   created_at?: string;
 }

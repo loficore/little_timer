@@ -17,7 +17,7 @@ describe("TimeDisplay 组件", () => {
     );
 
     expect(container.querySelector("div")?.className).toContain(
-      "text-accent-dark",
+      "text-primary",
     );
   });
 
@@ -27,8 +27,8 @@ describe("TimeDisplay 组件", () => {
     );
 
     const timeDiv = container.querySelector("div");
-    expect(timeDiv?.className).toContain("text-text-primary-dark");
-    expect(timeDiv?.className).not.toContain("text-accent-dark");
+    expect(timeDiv?.className).toContain("text-base-content");
+    expect(timeDiv?.className).not.toContain("text-primary");
   });
 
   it("应该使用等宽字体", () => {

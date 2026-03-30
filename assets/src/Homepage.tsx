@@ -174,13 +174,14 @@ const HomePage = memo((props: HomePageProps) => {
         // 忽略通知相关错误
       }
 
-      // 自动记录 session（仅在计时页且未记录过）
-      if (selectedHabit && !sessionRecordedRef.current) {
+      // 自动记录 session（使用 SSE 推送的 habit_id 和 elapsed）
+      const habitId = timerState.habit_id;
+      const elapsed = timerState.elapsed ?? 0;
+      if (habitId && elapsed > 0 && !sessionRecordedRef.current) {
         sessionRecordedRef.current = true;
-        const durationSeconds = selectedHabit.goal_seconds;
         const today = new Date().toISOString().split("T")[0];
         const client = new APIClient(window.location.origin);
-        void client.createSession(selectedHabit.id, durationSeconds, 1, today).then(() => {
+        void client.createSession(habitId, elapsed, 1, today).then(() => {
           logSuccess("✓ Session 已自动记录");
         }).catch((e) => {
           logError(`❌ 记录 session 失败: ${e}`);

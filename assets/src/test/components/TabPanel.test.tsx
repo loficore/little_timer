@@ -1,14 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent } from "@testing-library/preact";
 import { TabPanel } from "../../components/TabPanel";
-import { SettingsIcon, ClockIconComponent } from "../../utils/icons";
 
 describe("TabPanel 组件", () => {
   const mockOnTabChange = vi.fn();
   const tabs = [
-    { id: "basic", label: "基本设置", icon: <SettingsIcon /> },
-    { id: "countdown", label: "倒计时", icon: <ClockIconComponent /> },
-    { id: "stopwatch", label: "正计时", icon: <ClockIconComponent /> },
+    { id: "basic", label: "基本设置", icon: null },
+    { id: "countdown", label: "倒计时", icon: null },
+    { id: "stopwatch", label: "正计时", icon: null },
   ];
 
   beforeEach(() => {

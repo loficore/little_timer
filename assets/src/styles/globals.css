@@ -148,6 +148,30 @@
     @apply min-h-[44px] px-3 sm:px-4 py-2 sm:py-3;
     font-size: 16px;
   }
+
+  /* 底部导航兜底样式：当 DaisyUI 组件类未生效时，仍保持移动端可用布局 */
+  .btm-nav {
+    @apply flex items-center justify-around border-t;
+    min-height: 4rem;
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+  }
+
+  .btm-nav > a {
+    @apply flex flex-1 flex-col items-center justify-center gap-1;
+    min-height: 4rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+  }
+
+  .btm-nav > a.active {
+    color: var(--accent-color);
+  }
+
+  .btm-nav-label {
+    @apply text-xs font-medium;
+    line-height: 1;
+  }
 }
 
 /* 响应式媒体查询优化 */

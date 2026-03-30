@@ -1,5 +1,6 @@
 export interface TimerState {
     time: number;
+    elapsed?: number;
     mode: 'countdown' | 'stopwatch';
     is_running: boolean;
     is_finished: boolean;
@@ -8,6 +9,7 @@ export interface TimerState {
     loop_total: number;
     rest_remaining: number;
     timezone: number;
+    habit_id?: number;
 }
 
 export interface Settings {
@@ -186,6 +188,41 @@ export class APIClient {
         return await response.json();
     }
 
+    /**
+     * 更新习惯集
+     * @param {number} id 习惯集 ID
+     * @param {string} name 名称
+     * @param {string} description 描述
+     * @param {string} color 颜色
+     * @returns {Promise<any>}
+     */
+    async updateHabitSet(id: number, name: string, description: string, color: string): Promise<any> {
+        const response = await fetch(`${this.baseUrl}/api/habit-sets/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description, color })
+        });
+        if (!response.ok) {
+            throw new Error(`Error updating habit set: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 删除习惯集
+     * @param {number} id 习惯集 ID
+     * @returns {Promise<any>}
+     */
+    async deleteHabitSet(id: number): Promise<any> {
+        const response = await fetch(`${this.baseUrl}/api/habit-sets/${id}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) {
+            throw new Error(`Error deleting habit set: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
     // === 习惯 API ===
 
     /**
@@ -205,11 +242,10 @@ export class APIClient {
      * @param {number} setId 习惯集 ID
      * @param {string} name 习惯名称
      * @param {number} goalSeconds 目标时间（秒）
-     * @param {number} goalCount 目标次数
      * @param {string} color 颜色
-     * @returns {Promise<any>} 返回一个 Promise，解析为创建的习惯对象
+     * @returns {Promise<any>}
      */
-    async createHabit(setId: number, name: string, goalSeconds: number, goalCount: number, color: string): Promise<any> {
+    async createHabit(setId: number, name: string, goalSeconds: number, color: string): Promise<any> {
         const response = await fetch(`${this.baseUrl}/api/habits`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -217,7 +253,6 @@ export class APIClient {
                 set_id: setId,
                 name,
                 goal_seconds: goalSeconds,
-                goal_count: goalCount,
                 color
             })
         });
@@ -238,6 +273,30 @@ export class APIClient {
         });
         if (!response.ok) {
             throw new Error(`Error deleting habit: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 更新习惯
+     * @param {number} id 习惯 ID
+     * @param {string} name 名称
+     * @param {number} goalSeconds 目标时长（秒）
+     * @param {string} color 颜色
+     * @returns {Promise<any>}
+     */
+    async updateHabit(id: number, name: string, goalSeconds: number, color: string): Promise<any> {
+        const response = await fetch(`${this.baseUrl}/api/habits/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                goal_seconds: goalSeconds,
+                color
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`Error updating habit: ${response.statusText}`);
         }
         return await response.json();
     }
@@ -285,6 +344,22 @@ export class APIClient {
         const response = await fetch(`${this.baseUrl}/api/sessions?${params.toString()}`);
         if (!response.ok) {
             throw new Error(`Error fetching sessions: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 获取习惯连胜
+     * @param {number} habitId 习惯 ID
+     * @param {number} goalSeconds 目标时长
+     * @returns {Promise<{ habit_id: number; streak: number }>} 返回一个 Promise，解析为包含习惯 ID 和连胜数的对象
+     */
+    async getHabitStreak(habitId: number, goalSeconds?: number): Promise<{ habit_id: number; streak: number }> {
+        const params = new URLSearchParams();
+        if (goalSeconds) params.set('goal_seconds', goalSeconds.toString());
+        const response = await fetch(`${this.baseUrl}/api/habits/${habitId}/streak?${params.toString()}`);
+        if (!response.ok) {
+            throw new Error(`Error fetching streak: ${response.statusText}`);
         }
         return await response.json();
     }

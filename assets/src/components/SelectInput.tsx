@@ -31,7 +31,7 @@ export const SelectInput = ({
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.currentTarget.value)}
-        className={`select select-bordered w-full ${disabled ? "disabled" : ""}`}
+        className={`my-select w-full ${disabled ? "disabled" : ""}`}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

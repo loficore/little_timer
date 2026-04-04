@@ -2,6 +2,7 @@ import { useState, useEffect } from "preact/hooks";
 import type { FunctionalComponent } from "preact";
 import { APIClient } from "../utils/apiClient";
 import type { HabitSet, Habit } from "../types/habit";
+import { WallpaperSelector } from "./WallpaperSelector";
 
 interface HabitModalProps {
   isOpen: boolean;
@@ -36,6 +37,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor] = useState(COLORS[0]);
+  const [wallpaper, setWallpaper] = useState("");
   const [goalHours, setGoalHours] = useState(0);
   const [goalMinutes, setGoalMinutes] = useState(25);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,6 +50,8 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
     if (editData) {
       setName(editData.name);
       setColor(editData.color || COLORS[0]);
+      const wallpaperValue = (editData as { wallpaper?: string }).wallpaper;
+      setWallpaper(wallpaperValue || "");
       if ("description" in editData) {
         setDescription(editData.description || "");
       }
@@ -60,6 +64,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
       setName("");
       setDescription("");
       setColor(COLORS[0]);
+      setWallpaper("");
       setGoalHours(0);
       setGoalMinutes(25);
     }
@@ -80,13 +85,13 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
       
       if (mode === "set") {
         if (isSetEdit) {
-          await client.updateHabitSet(editData.id, name, description, color);
+          await client.updateHabitSet(editData.id, name, description, color, wallpaper);
         } else {
           await client.createHabitSet(name, description, color);
         }
       } else {
         if (isHabitEdit) {
-          await client.updateHabit(editData.id, name, totalSeconds, color);
+          await client.updateHabit(editData.id, name, totalSeconds, color, wallpaper);
         } else {
           await client.createHabit(setId!, name, totalSeconds, color);
         }
@@ -96,6 +101,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
       setName("");
       setDescription("");
       setColor(COLORS[0]);
+      setWallpaper("");
       setGoalHours(0);
       setGoalMinutes(25);
     } catch (err) {
@@ -130,7 +136,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
             </label>
             <input
               type="text"
-              className="input input-bordered"
+              className="my-input"
               placeholder={mode === "set" ? "如：学习习惯" : "如：背单词"}
               value={name}
               onInput={(e) => setName((e.target as HTMLInputElement).value)}
@@ -144,7 +150,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
                 <span className="label-text">描述（可选）</span>
               </label>
               <textarea
-                className="textarea textarea-bordered"
+                className="my-input min-h-[80px] resize-none"
                 placeholder="简单描述这个习惯集..."
                 value={description}
                 onInput={(e) => setDescription((e.target as HTMLTextAreaElement).value)}
@@ -160,7 +166,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
               <div className="flex gap-2 items-center">
                 <input
                   type="number"
-                  className="input input-bordered w-20"
+                  className="my-input w-20"
                   min={0}
                   max={9999}
                   value={goalHours}
@@ -169,7 +175,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
                 <span className="text-sm">小时</span>
                 <input
                   type="number"
-                  className="input input-bordered w-20"
+                  className="my-input w-20"
                   min={0}
                   max={59}
                   value={goalMinutes}
@@ -201,6 +207,8 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
               ))}
             </div>
           </div>
+
+          <WallpaperSelector value={wallpaper} onChange={setWallpaper} />
 
           <div className="flex gap-2">
             <button

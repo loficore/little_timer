@@ -29,13 +29,13 @@ export const Header: FunctionalComponent<HeaderProps> = ({
   onBackClick,
 }) => {
   return (
-    <div className="navbar bg-base-200 border-b border-base-300 shrink-0">
+    <div className="navbar my-topbar shrink-0 px-2 sm:px-3">
       <div className="flex-1">
         {showBack && (
           <button
             onClick={onBackClick}
             title={t("common.back")}
-            className="btn btn-ghost btn-sm gap-1"
+            className="my-back-btn"
           >
             <ArrowLeftIconComponent />
             <span>{t("common.back")}</span>
@@ -43,14 +43,14 @@ export const Header: FunctionalComponent<HeaderProps> = ({
         )}
       </div>
       <div className="flex-none">
-        <h1 className="text-lg font-semibold">{title}</h1>
+        <h1 className="my-topbar-title text-lg font-semibold">{title}</h1>
       </div>
       <div className="flex-1 flex justify-end gap-2">
         {showStats && (
           <button
             onClick={onStatsClick}
             title={t("stats.title") || "统计"}
-            className="btn btn-ghost btn-circle"
+            className="my-icon-btn"
           >
             <ChartIcon />
           </button>
@@ -59,7 +59,7 @@ export const Header: FunctionalComponent<HeaderProps> = ({
           <button
             onClick={onSettingsClick}
             title={t("common.settings_title")}
-            className="btn btn-ghost btn-circle"
+            className="my-icon-btn"
           >
             <SettingsIcon />
           </button>

@@ -7,7 +7,7 @@ interface ModeItem {
   /** 显示标签 */
   label: string;
   /** 模式图标 */
-  icon: VNode;
+  icon: VNode | null;
 }
 
 interface ModeSelectorProps {
@@ -42,8 +42,8 @@ export const ModeSelector: FunctionalComponent<ModeSelectorProps> = ({
             onClick={() => onModeChange(key)}
             className={`p-2 sm:p-3 md:p-4 rounded-xl flex flex-col items-center gap-1 sm:gap-2 text-xs sm:text-sm font-medium transition-all duration-200 hover:scale-105 active:scale-95 min-h-15 sm:min-h-20 ${
               activeMode === key
-                ? "btn btn-primary"
-                : "btn btn-outline"
+                ? "btn-primary"
+                : "my-btn-secondary"
             }`}
           >
             <span className="w-6 h-6">{icon}</span>

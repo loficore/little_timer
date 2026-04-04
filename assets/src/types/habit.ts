@@ -5,6 +5,7 @@ export interface HabitSet {
   name: string;
   description: string;
   color: string;
+  wallpaper?: string;
   created_at?: string;
 }
 
@@ -14,6 +15,7 @@ export interface Habit {
   name: string;
   goal_seconds: number;
   color: string;
+  wallpaper?: string;
   created_at?: string;
 }
 
@@ -30,6 +32,16 @@ export interface HabitWithProgress extends Habit {
   today_seconds: number;
   today_count: number;
   progress: number; // 0-100 percentage
+}
+
+export interface HabitDetail {
+  id: number;
+  name: string;
+  goal_seconds: number;
+  color: string;
+  today_seconds: number;
+  streak: number;
+  progress_percent: number;
 }
 
 export interface HabitSetWithHabits extends HabitSet {

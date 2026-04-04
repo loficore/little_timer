@@ -18,6 +18,11 @@ export interface Settings {
         language: string;
         default_mode: string;
         theme_mode: string;
+        wallpaper?: string;
+        sound_enabled?: boolean;
+        sound_tick?: boolean;
+        sound_finish?: boolean;
+        sound_volume?: number;
     };
     countdown: object;
     stopwatch: object;
@@ -55,17 +60,71 @@ export class APIClient {
      * @param {number} [habitId] 习惯 ID（可选）
      * @returns {Promise<{habit_id: number | null}>} 返回一个 Promise，表示操作完成
      */
-    async startTimer(habitId?: number): Promise<{ habit_id: number | null }> {
-        const body = habitId ? JSON.stringify({ habit_id: habitId }) : '';
+    async startTimer(habitId?: number, options?: {
+        mode?: 'countdown' | 'stopwatch';
+        workDuration?: number;
+        restDuration?: number;
+        loopCount?: number;
+    }): Promise<{ habit_id: number | null; session_id?: number }> {
+        const body: Record<string, any> = {};
+        if (habitId) body.habit_id = habitId;
+        if (options) {
+            if (options.mode) body.mode = options.mode;
+            if (options.workDuration) body.work_duration = options.workDuration;
+            if (options.restDuration) body.rest_duration = options.restDuration;
+            if (options.loopCount) body.loop_count = options.loopCount;
+        }
         const response = await fetch(`${this.baseUrl}/api/start`, {
             method: 'POST',
-            headers: body ? { 'Content-Type': 'application/json' } : {},
-            body: body || undefined
+            headers: Object.keys(body).length > 0 ? { 'Content-Type': 'application/json' } : {},
+            body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined
         });
         if (!response.ok) {
             throw new Error(`Error starting timer: ${response.statusText}`);
         }
         return await response.json();
+    }
+
+    /**
+     * 结束计时器（停止并计入统计）
+     * @returns {Promise<{elapsed_seconds: number}>} 累计时间
+     */
+    async finishTimer(): Promise<{ status: string; elapsed_seconds: number; session_id?: number }> {
+        const response = await fetch(`${this.baseUrl}/api/timer/finish`, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Error finishing timer: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 获取计时进度（用于刷新恢复）
+     * @returns {Promise<TimerProgress>} 计时进度
+     */
+    async getTimerProgress(): Promise<{
+        session_id: number | null;
+        habit_id: number | null;
+        mode: string;
+        is_running: boolean;
+        is_paused: boolean;
+        is_finished: boolean;
+        elapsed_seconds: number;
+        remaining_seconds: number;
+        in_rest: boolean;
+    }> {
+        const response = await fetch(`${this.baseUrl}/api/timer/progress`);
+        if (!response.ok) {
+            throw new Error(`Error getting timer progress: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 恢复计时器（从暂停继续）
+     * @param {number} [habitId] 习惯 ID（可选）
+     */
+    async resumeTimer(habitId?: number): Promise<{ habit_id: number | null }> {
+        return this.startTimer(habitId);
     }
 
     /**
@@ -194,13 +253,14 @@ export class APIClient {
      * @param {string} name 名称
      * @param {string} description 描述
      * @param {string} color 颜色
+     * @param {string} wallpaper 壁纸（可选）
      * @returns {Promise<any>}
      */
-    async updateHabitSet(id: number, name: string, description: string, color: string): Promise<any> {
+    async updateHabitSet(id: number, name: string, description: string, color: string, wallpaper?: string): Promise<any> {
         const response = await fetch(`${this.baseUrl}/api/habit-sets/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description, color })
+            body: JSON.stringify({ name, description, color, wallpaper: wallpaper || '' })
         });
         if (!response.ok) {
             throw new Error(`Error updating habit set: ${response.statusText}`);
@@ -283,16 +343,18 @@ export class APIClient {
      * @param {string} name 名称
      * @param {number} goalSeconds 目标时长（秒）
      * @param {string} color 颜色
+     * @param {string} wallpaper 壁纸（可选）
      * @returns {Promise<any>}
      */
-    async updateHabit(id: number, name: string, goalSeconds: number, color: string): Promise<any> {
+    async updateHabit(id: number, name: string, goalSeconds: number, color: string, wallpaper?: string): Promise<any> {
         const response = await fetch(`${this.baseUrl}/api/habits/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name,
                 goal_seconds: goalSeconds,
-                color
+                color,
+                wallpaper: wallpaper || ''
             })
         });
         if (!response.ok) {
@@ -360,6 +422,30 @@ export class APIClient {
         const response = await fetch(`${this.baseUrl}/api/habits/${habitId}/streak?${params.toString()}`);
         if (!response.ok) {
             throw new Error(`Error fetching streak: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 获取习惯详情
+     * @param {number} habitId 习惯 ID
+     * @param {string} [date] 日期（可选，默认今天）
+     * @returns {Promise<{ id: number; name: string; goal_seconds: number; color: string; today_seconds: number; streak: number; progress_percent: number }>} 返回习惯详情对象
+     */
+    async getHabitDetail(habitId: number, date?: string): Promise<{
+        id: number;
+        name: string;
+        goal_seconds: number;
+        color: string;
+        today_seconds: number;
+        streak: number;
+        progress_percent: number;
+    }> {
+        const params = new URLSearchParams();
+        if (date) params.set('date', date);
+        const response = await fetch(`${this.baseUrl}/api/habits/${habitId}/detail?${params.toString()}`);
+        if (!response.ok) {
+            throw new Error(`Error fetching habit detail: ${response.statusText}`);
         }
         return await response.json();
     }

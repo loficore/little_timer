@@ -1,11 +1,22 @@
 import type { FunctionalComponent } from "preact";
 
+type Page = "timer" | "habits" | "stats" | "settings";
+
 interface SidebarProps {
-    currentPage: "habits" | "stats" | "settings";
-    onNavigate: (page: "habits" | "stats" | "settings") => void;
+    currentPage: Page;
+    onNavigate: (page: Page) => void;
 }
 
 const navItems = [
+    {
+        id: "timer" as const,
+        label: "计时",
+        icon: (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        ),
+    },
     {
         id: "habits" as const,
         label: "习惯",
@@ -38,12 +49,12 @@ const navItems = [
 
 export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavigate }) => {
     return (
-        <aside className="flex flex-col w-60 bg-base-200 border-r border-base-300 h-full shrink-0">
+        <aside className="my-sidebar flex flex-col w-60 h-full shrink-0">
             {/* Logo */}
-            <div className="p-4 border-b border-base-300">
-                <h1 className="text-xl font-bold flex items-center gap-2">
+            <div className="p-4 border-b border-white/10">
+                <h1 className="text-xl font-bold flex items-center gap-2 text-white/90">
                     <span>🎯</span>
-                    <span>Little Timer</span>
+                    <span className="text-white">Little Timer</span>
                 </h1>
             </div>
 
@@ -52,11 +63,7 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
                 {navItems.map((item) => (
                     <button
                         key={item.id}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
-                            currentPage === item.id
-                                ? "bg-primary text-primary-content"
-                                : "hover:bg-base-300"
-                        }`}
+                        className={`my-sidebar-nav-btn ${currentPage === item.id ? "is-active" : ""}`}
                         onClick={() => onNavigate(item.id)}
                     >
                         {item.icon}
@@ -66,7 +73,7 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
             </nav>
 
             {/* Footer */}
-            <div className="p-4 border-t border-base-300 text-center text-sm text-base-content/60">
+            <div className="p-4 border-t border-white/10 text-center text-sm text-white/60">
                 <p>v1.0.0</p>
             </div>
         </aside>

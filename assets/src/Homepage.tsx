@@ -391,10 +391,10 @@ const HomePage = memo((props: HomePageProps) => {
     if (selectedHabit) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center px-4 py-8">
-          <div className="text-2xl font-bold mb-2" style={{ color: selectedHabit.color }}>
+          <div className="text-2xl font-bold mb-2 text-white/90" style={{ color: selectedHabit.color }}>
             {selectedHabit.name}
           </div>
-          <div className="text-sm text-base-content/60 mb-8">
+          <div className="text-sm text-white/50 mb-8">
             目标: {Math.floor(selectedHabit.goal_seconds / 60)} 分钟
           </div>
           
@@ -409,7 +409,7 @@ const HomePage = memo((props: HomePageProps) => {
           
           <div className="mt-6">
             <button
-              className="btn btn-outline btn-sm"
+              className="my-btn-secondary"
               onClick={() => {
                 if (apiClientRef.current) {
                   void apiClientRef.current.startRest();
@@ -432,14 +432,14 @@ const HomePage = memo((props: HomePageProps) => {
               <span className="loading loading-spinner"></span>
             </div>
           ) : habits.length === 0 ? (
-            <div className="text-center py-8 text-base-content/50">
+            <div className="text-center py-8 text-white/40">
               暂无习惯，点击下方添加
             </div>
           ) : (
             habits.map((habit) => (
               <div
                 key={habit.id}
-                className="card bg-base-200 cursor-pointer hover:scale-[1.02] transition-transform"
+                className="my-surface-card rounded-xl cursor-pointer hover:scale-[1.02] transition-transform"
                 onClick={() => onHabitClick?.(habit)}
               >
                 <div className="card-body p-4 flex-row items-center justify-between">
@@ -455,14 +455,14 @@ const HomePage = memo((props: HomePageProps) => {
                       </div>
                     </div>
                   </div>
-                  <div className="text-base-content/40">▶</div>
+                  <div className="text-base-content/30">▶</div>
                 </div>
               </div>
             ))
           )}
           
           <button
-            className="btn btn-outline btn-block mt-4"
+            className="my-btn-secondary w-full mt-4"
             onClick={() => {
               if (selectedSetId) {
                 setModalState({ isOpen: true, mode: "habit", setId: selectedSetId });
@@ -479,14 +479,14 @@ const HomePage = memo((props: HomePageProps) => {
     return (
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {habitSets.length === 0 ? (
-          <div className="text-center py-8 text-base-content/50">
+          <div className="text-center py-8 text-white/40">
             暂无习惯集，点击下方创建
           </div>
         ) : (
           habitSets.map((set) => (
             <div
               key={set.id}
-              className="card bg-base-200 cursor-pointer hover:scale-[1.02] transition-transform"
+              className="my-surface-card rounded-xl cursor-pointer hover:scale-[1.02] transition-transform"
               onClick={() => onSetClick?.(set.id)}
             >
               <div className="card-body p-4">
@@ -508,7 +508,7 @@ const HomePage = memo((props: HomePageProps) => {
         )}
         
         <button
-          className="btn btn-primary btn-block mt-4"
+          className="btn btn-primary btn-block mt-4 bg-primary/80 hover:bg-primary"
           onClick={() => setModalState({ isOpen: true, mode: "set" })}
         >
           + 创建习惯集
@@ -527,8 +527,11 @@ const HomePage = memo((props: HomePageProps) => {
   };
 
   return (
-    <div className="flex flex-col w-screen h-screen bg-primary-dark dark:bg-primary-dark transition-colors duration-300 animate-fadeIn overflow-hidden pb-16 lg:pb-0">
-      <Header
+    <div 
+      className="flex flex-col w-screen h-screen transition-colors duration-300 animate-fadeIn overflow-hidden pb-16 lg:pb-0"
+    >
+      <div className="flex flex-col w-full h-full bg-black/40">
+        <Header
         title={getTitle()}
         showSettings={false}
         showBack={!!selectedSetId || !!selectedHabit}
@@ -579,6 +582,7 @@ const HomePage = memo((props: HomePageProps) => {
         className="px-4 py-3 text-center text-text-secondary-dark text-xs border-t border-border-dark bg-primary-dark shrink-0 hidden lg:block"
       >
         <p>{t("common.version")}</p>
+      </div>
       </div>
     </div>
   );

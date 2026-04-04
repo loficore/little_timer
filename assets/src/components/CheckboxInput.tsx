@@ -13,15 +13,15 @@ export const CheckboxInput = ({
 }: CheckboxInputProps) => {
   return (
     <div className="form-control">
-      <label className="label cursor-pointer">
-        <span className="label-text">{label}</span>
+      <label className="label cursor-pointer gap-3">
         <input
           type="checkbox"
           checked={value}
           disabled={disabled}
           onChange={(e) => !disabled && onChange(e.currentTarget.checked)}
-          className="toggle toggle-primary"
+          className="my-checkbox"
         />
+        <span className="label-text">{label}</span>
       </label>
     </div>
   );

@@ -1,5 +1,6 @@
 import { SettingItem } from "./SettingItem";
 import { SelectInput } from "./SelectInput";
+import { WallpaperSelector } from "./WallpaperSelector";
 import { t } from "../utils/i18n";
 
 interface BasicSettingsProps {
@@ -8,6 +9,13 @@ interface BasicSettingsProps {
     language: string;
     default_mode: string;
     theme_mode: string;
+    wallpaper?: string;
+    sound_enabled: boolean;
+    sound_tick: boolean;
+    sound_finish: boolean;
+    sound_volume: number;
+    layout_density?: string;
+    time_display_style?: string;
   };
   onChange: (config: any) => void;
 }
@@ -36,11 +44,27 @@ export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
     { value: "dark", label: t("settings.basic.theme_dark") },
   ];
 
+  const densityOptions = [
+    { value: "compact", label: t("settings.basic.layout_compact") },
+    { value: "normal", label: t("settings.basic.layout_normal") },
+    { value: "spacious", label: t("settings.basic.layout_spacious") },
+  ];
+
+  const timeDisplayStyleOptions = [
+    { value: "classic", label: t("settings.basic.time_display_classic") },
+    { value: "seven_segment", label: t("settings.basic.time_display_seven_segment") },
+  ];
+
   return (
     <div
       className="space-y-4 sm:space-y-6 animate-slideUp"
       style={{ animationDelay: "0.3s", animationFillMode: "both" }}
     >
+      <WallpaperSelector
+        value={config.wallpaper || ""}
+        onChange={(wallpaper) => onChange({ ...config, wallpaper })}
+      />
+
       <SettingItem label={t("settings.basic.timezone")}>
         <SelectInput
           value={config.timezone}
@@ -76,6 +100,93 @@ export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
           options={themeOptions}
           onChange={(value) => onChange({ ...config, theme_mode: value })}
         />
+      </SettingItem>
+
+      <SettingItem label={t("settings.basic.layout_density")}>
+        <SelectInput
+          value={config.layout_density || "normal"}
+          options={densityOptions}
+          onChange={(value) => onChange({ ...config, layout_density: value })}
+        />
+      </SettingItem>
+
+      <SettingItem label={t("settings.basic.time_display_style")}>
+        <SelectInput
+          value={config.time_display_style || "classic"}
+          options={timeDisplayStyleOptions}
+          onChange={(value) => onChange({ ...config, time_display_style: value })}
+        />
+      </SettingItem>
+
+      <SettingItem label={t("settings.basic.sound_enabled")}>
+        <div className="space-y-3">
+          <label className="label cursor-pointer rounded-lg px-3 py-2 border border-base-300 bg-base-200/50">
+            <span className="label-text">{t("settings.basic.sound_finish")}</span>
+            <input
+              type="checkbox"
+              className="toggle toggle-primary"
+              checked={config.sound_finish}
+              disabled={!config.sound_enabled}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  sound_finish: e.currentTarget.checked,
+                })
+              }
+            />
+          </label>
+
+          <label className="label cursor-pointer rounded-lg px-3 py-2 border border-base-300 bg-base-200/50">
+            <span className="label-text">{t("settings.basic.sound_tick")}</span>
+            <input
+              type="checkbox"
+              className="toggle toggle-secondary"
+              checked={config.sound_tick}
+              disabled={!config.sound_enabled}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  sound_tick: e.currentTarget.checked,
+                })
+              }
+            />
+          </label>
+
+          <label className="label cursor-pointer rounded-lg px-3 py-2 border border-base-300 bg-base-200/50">
+            <span className="label-text font-medium">{t("settings.basic.sound_master_switch")}</span>
+            <input
+              type="checkbox"
+              className="toggle toggle-accent"
+              checked={config.sound_enabled}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  sound_enabled: e.currentTarget.checked,
+                })
+              }
+            />
+          </label>
+
+          <div className="rounded-lg px-3 py-3 border border-base-300 bg-base-200/30">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span>{t("settings.basic.sound_volume")}</span>
+              <span className="font-medium">{config.sound_volume}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={config.sound_volume}
+              disabled={!config.sound_enabled}
+              onInput={(e) => {
+                const target = e.currentTarget;
+                onChange({ ...config, sound_volume: parseInt(target.value, 10) });
+              }}
+              className="range range-primary range-sm"
+            />
+          </div>
+        </div>
       </SettingItem>
     </div>
   );

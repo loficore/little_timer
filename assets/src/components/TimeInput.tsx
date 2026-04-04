@@ -69,7 +69,7 @@ export const TimeInput = ({
               max={maxHours}
               value={hours}
               onChange={(e) => handleHoursChange(parseInt(e.currentTarget.value) || 0)}
-              className="input input-bordered w-16 text-center"
+              className="my-input w-16 text-center"
             />
             <span className="label-text-alt mt-1">{t("common.hours")}</span>
           </div>
@@ -83,7 +83,7 @@ export const TimeInput = ({
               max={59}
               value={minutes}
               onChange={(e) => handleMinutesChange(parseInt(e.currentTarget.value) || 0)}
-              className="input input-bordered w-16 text-center"
+              className="my-input w-16 text-center"
             />
             <span className="label-text-alt mt-1">{t("common.minutes")}</span>
           </div>
@@ -97,7 +97,7 @@ export const TimeInput = ({
               max={59}
               value={seconds}
               onChange={(e) => handleSecondsChange(parseInt(e.currentTarget.value) || 0)}
-              className="input input-bordered w-16 text-center"
+              className="my-input w-16 text-center"
             />
             <span className="label-text-alt mt-1">{t("common.seconds")}</span>
           </div>

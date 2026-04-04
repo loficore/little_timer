@@ -12,19 +12,19 @@ interface StatusBadgeProps {
 }
 
 /**
- * 获取 DaisyUI badge 变体类名
+ * 获取 Material You 徽章类名
  */
 const getStatusVariant = (status: StatusType): string => {
   const variants: Record<StatusType, string> = {
-    running: "badge-primary",
-    paused: "badge-neutral",
-    finished: "badge-success",
+    running: "my-badge-running",
+    paused: "my-badge-paused",
+    finished: "my-badge-finished",
   };
   return variants[status];
 };
 
 /**
- * 状态徽章组件 - 基于 DaisyUI badge
+ * 状态徽章组件 - Material You 风格
  */
 export const StatusBadge: FunctionalComponent<StatusBadgeProps> = ({
   status,
@@ -35,10 +35,12 @@ export const StatusBadge: FunctionalComponent<StatusBadgeProps> = ({
 
   return (
     <span
-      className={`badge ${variant} gap-2 text-xs sm:text-sm animate-slideUp`}
+      className={`${variant} gap-2 text-xs sm:text-sm animate-slideUp`}
       style={{ animationDelay, animationFillMode: "both" }}
     >
-      {status === "running" && <span className="badge badge-xs badge-primary animate-pulse" />}
+      {status === "running" && (
+        <span className="w-2 h-2 rounded-full bg-white/80 animate-pulse" />
+      )}
       {label}
     </span>
   );

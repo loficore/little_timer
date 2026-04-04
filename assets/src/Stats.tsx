@@ -224,7 +224,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
   const totalSessions = filteredSessions.length;
 
   return (
-    <div className="flex flex-col flex-1 bg-base-100 dark:bg-base-100 transition-colors duration-300 overflow-hidden pb-16 lg:pb-0">
+    <div className="flex flex-col flex-1 bg-transparent pb-16 lg:pb-0">
       <Header
         title={t("stats.title") || "统计"}
         showSettings={false}
@@ -233,7 +233,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
       />
 
       {/* Time Range Selector */}
-      <div className="flex gap-2 p-4 border-b border-base-300">
+      <div className="my-surface-panel flex gap-2 p-4">
         {(["today", "week", "month"] as TimeRange[]).map((range) => (
           <button
             key={range}
@@ -246,7 +246,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
       </div>
 
       {/* Habit Filter */}
-      <div className="flex gap-2 p-4 border-b border-base-300 overflow-x-auto">
+      <div className="my-surface-panel flex gap-2 p-4 overflow-x-auto">
         <button
           className={`btn btn-sm ${selectedHabitId === null ? "btn-primary" : "btn-ghost"}`}
           onClick={() => setSelectedHabitId(null)}
@@ -268,13 +268,13 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {/* Summary Cards */}
         <div className="grid grid-cols-2 gap-4">
-          <div className="card bg-base-200 shadow-lg">
+          <div className="card my-surface-card">
             <div className="card-body p-4">
               <h3 className="text-sm text-base-content/60">总专注时间</h3>
               <p className="text-2xl font-bold text-primary">{formatDuration(totalSeconds)}</p>
             </div>
           </div>
-          <div className="card bg-base-200 shadow-lg">
+          <div className="card my-surface-card">
             <div className="card-body p-4">
               <h3 className="text-sm text-base-content/60">完成次数</h3>
               <p className="text-2xl font-bold text-secondary">{totalSessions}</p>
@@ -284,7 +284,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
 
         {/* Pie Chart */}
         {!selectedHabitId && (
-          <div className="card bg-base-200 shadow-lg">
+          <div className="card my-surface-card">
             <div className="card-body p-4">
               <h3 className="text-lg font-semibold mb-4">时间分布</h3>
               {isLoading ? (
@@ -301,24 +301,6 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
             </div>
           </div>
         )}
-
-        {/* Bar Chart */}
-        <div className="card bg-base-200 shadow-lg">
-          <div className="card-body p-4">
-            <h3 className="text-lg font-semibold mb-4">每日趋势</h3>
-            {isLoading ? (
-              <div className="h-[300px] flex items-center justify-center">
-                <span className="loading loading-spinner loading-lg"></span>
-              </div>
-            ) : filteredSessions.length === 0 ? (
-              <div className="h-[300px] flex items-center justify-center text-base-content/50">
-                暂无数据
-              </div>
-            ) : (
-              <div ref={barChartRef}></div>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   );

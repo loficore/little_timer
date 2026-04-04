@@ -77,7 +77,7 @@ export const NumberInput = ({
           disabled={disabled}
           onChange={handleChange}
           onBlur={handleBlur}
-          className={`input input-bordered w-full ${error ? "input-error" : ""} ${
+          className={`my-input w-full ${error ? "border-error" : ""} ${
             disabled ? "disabled" : ""
           }`}
         />

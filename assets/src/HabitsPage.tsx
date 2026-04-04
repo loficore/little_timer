@@ -2,14 +2,11 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import type { FunctionalComponent } from "preact";
 import { Header } from "./components/Header";
 import { HabitModal } from "./components/HabitModal";
-import { APIClient, type TimerState } from "./utils/apiClient";
-import { SSEClient } from "./utils/sseClient";
+import { APIClient } from "./utils/apiClient";
 import { logSuccess, logError } from "./utils/logger";
 import type { HabitSet, Habit, HabitWithProgress } from "./types/habit";
 
 interface HabitsPageProps {
-    selectedHabit?: Habit | null;
-    onHabitClick?: (habit: Habit | null) => void;
     onStatsClick?: () => void;
     onSettingsClick?: () => void;
 }
@@ -22,8 +19,6 @@ const formatDuration = (totalSeconds: number): string => {
 };
 
 export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
-    selectedHabit,
-    onHabitClick,
     onStatsClick,
     onSettingsClick,
 }) => {
@@ -43,36 +38,10 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
     } | null>(null);
 
     const apiClientRef = useRef(new APIClient(window.location.origin));
-    const sseClientRef = useRef<SSEClient | null>(null);
-    const [timerState, setTimerState] = useState<TimerState | null>(null);
-    const sessionRecordedRef = useRef(false);
 
     useEffect(() => {
-        loadData();
+        void loadData();
     }, []);
-
-    useEffect(() => {
-        if (selectedHabit) {
-            sessionRecordedRef.current = false;
-            startTimer(selectedHabit.id);
-        }
-    }, [selectedHabit?.id]);
-
-    useEffect(() => {
-        if (timerState && timerState.is_finished && selectedHabit) {
-            if (!sessionRecordedRef.current) {
-                sessionRecordedRef.current = true;
-                const habitId = timerState.habit_id || selectedHabit.id;
-                const elapsed = timerState.elapsed ?? selectedHabit.goal_seconds;
-                const today = new Date().toISOString().split("T")[0];
-                apiClientRef.current.createSession(habitId, elapsed, 1, today).then(() => {
-                    logSuccess("✓ Session 已自动记录");
-                }).catch((e: any) => {
-                    logError(`❌ 记录 session 失败: ${e}`);
-                });
-            }
-        }
-    }, [timerState?.is_finished]);
 
     const loadData = async () => {
         try {
@@ -91,26 +60,6 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
         }
     };
 
-    const startTimer = async (habitId: number) => {
-        try {
-            await apiClientRef.current.startTimer(habitId);
-            setupSSE();
-        } catch (e: any) {
-            logError(`启动计时失败: ${e}`);
-        }
-    };
-
-    const setupSSE = () => {
-        if (sseClientRef.current) {
-            sseClientRef.current.close();
-        }
-        const client = new SSEClient(window.location.origin);
-        client.connect((state: TimerState) => {
-            setTimerState(state);
-        });
-        sseClientRef.current = client;
-    };
-
     const handleDelete = async () => {
         if (!deleteConfirm) return;
         try {
@@ -122,7 +71,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
             }
             logSuccess("✓ 删除成功");
             setDeleteConfirm(null);
-            loadData();
+            void loadData();
         } catch (e: any) {
             logError(`删除失败: ${e}`);
         }
@@ -132,74 +81,61 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
         return habits.filter((h) => h.set_id === setId);
     };
 
-    const timeDisplay = selectedHabit && timerState
-        ? formatDuration(timerState.time)
-        : "00:00:00";
+    const getCardBackgroundStyle = (habit: Habit | HabitSet) => {
+        const wp = habit.wallpaper;
+        if (!wp) return {};
+
+        const isGradient = wp.startsWith("linear");
+        const isImage = wp.startsWith("http");
+        const isColor = wp.startsWith("#");
+
+        if (isGradient) {
+            return { background: wp };
+        } else if (isImage) {
+            return {
+                backgroundImage: `url(${wp})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+            };
+        } else if (isColor) {
+            return { backgroundColor: wp };
+        }
+        return {};
+    };
 
     return (
-        <div className="flex flex-col flex-1 bg-base-100 overflow-hidden">
+        <div className="flex flex-col flex-1 bg-transparent overflow-hidden">
             <Header
-                title={selectedHabit ? selectedHabit.name : "习惯管理"}
+                title="习惯管理"
                 showSettings={false}
-                showBack={!!selectedHabit}
-                onBackClick={() => onHabitClick?.(null as any)}
+                showBack={true}
+                onBackClick={() => {
+                    // 空回调，返回时不执行任何操作
+                }}
                 onStatsClick={onStatsClick}
                 onSettingsClick={onSettingsClick}
             />
 
-            {selectedHabit && timerState && (
-                <div className="bg-base-200 p-6 text-center">
-                    <div className="text-5xl font-mono font-bold text-primary">
-                        {timeDisplay}
-                    </div>
-                    <div className="mt-2 flex justify-center gap-4">
-                        {timerState.is_running ? (
-                            <button
-                                className="btn btn-primary"
-                                onClick={() => apiClientRef.current.pauseTimer()}
-                            >
-                                暂停
-                            </button>
-                        ) : (
-                            <button
-                                className="btn btn-primary"
-                                onClick={() => startTimer(selectedHabit.id)}
-                            >
-                                开始
-                            </button>
-                        )}
-                        <button
-                            className="btn btn-ghost"
-                            onClick={() => apiClientRef.current.resetTimer()}
-                        >
-                            重置
-                        </button>
-                    </div>
-                </div>
-            )}
-
             <div className="flex-1 overflow-y-auto p-4">
-                {!selectedHabit && (
-                    <div className="flex justify-between items-center mb-4">
-                        <h2 className="text-xl font-bold">习惯集</h2>
-                        <button
-                            className="btn btn-primary btn-sm"
-                            onClick={() => setModalState({ isOpen: true, mode: "set" })}
-                        >
-                            + 添加
-                        </button>
-                    </div>
-                )}
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold">习惯集</h2>
+                    <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => setModalState({ isOpen: true, mode: "set" })}
+                    >
+                        + 添加
+                    </button>
+                </div>
 
                 <div className="space-y-3">
                     {habitSets.map((set) => {
                         const setHabits = getHabitsBySet(set.id);
                         const isExpanded = expandedSetId === set.id;
                         return (
-                            <div key={set.id} className="bg-base-200 rounded-lg overflow-hidden">
+                            <div key={set.id} className="my-surface-card rounded-xl overflow-hidden">
                                 <div
                                     className="p-4 flex items-center justify-between cursor-pointer"
-                                    onClick={() => !selectedHabit && setExpandedSetId(isExpanded ? null : set.id)}
+                                    onClick={() => setExpandedSetId(isExpanded ? null : set.id)}
                                 >
                                     <div className="flex items-center gap-3">
                                         <div
@@ -216,34 +152,32 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                             </p>
                                         </div>
                                     </div>
-                                    {!selectedHabit && (
-                                        <div className="flex gap-2" onClick={(e: any) => e.stopPropagation()}>
-                                            <button
-                                                className="btn btn-ghost btn-sm btn-circle"
-                                                onClick={() => setModalState({
-                                                    isOpen: true,
-                                                    mode: "set",
-                                                    editData: set,
-                                                })}
-                                            >
-                                                ✏️
-                                            </button>
-                                            <button
-                                                className="btn btn-ghost btn-sm btn-circle"
-                                                onClick={() => setDeleteConfirm({
-                                                    type: "set",
-                                                    id: set.id,
-                                                    name: set.name,
-                                                })}
-                                            >
-                                                🗑️
-                                            </button>
-                                        </div>
-                                    )}
+                                    <div className="flex gap-2" onClick={(e: Event) => e.stopPropagation()}>
+                                        <button
+                                            className="btn btn-ghost btn-sm btn-circle"
+                                            onClick={() => setModalState({
+                                                isOpen: true,
+                                                mode: "set",
+                                                editData: set,
+                                            })}
+                                        >
+                                            ✏️
+                                        </button>
+                                        <button
+                                            className="btn btn-ghost btn-sm btn-circle"
+                                            onClick={() => setDeleteConfirm({
+                                                type: "set",
+                                                id: set.id,
+                                                name: set.name,
+                                            })}
+                                        >
+                                            🗑️
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {isExpanded && (
-                                    <div className="border-t border-base-300 p-3 space-y-2">
+                                    <div className="border-t border-white/10 p-3 space-y-2">
                                         {setHabits.length === 0 ? (
                                             <p className="text-center text-base-content/50 py-2">
                                                 暂无习惯，点击下方添加
@@ -252,22 +186,22 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                             setHabits.map((habit) => (
                                                 <div
                                                     key={habit.id}
-                                                    className="p-3 bg-base-100 rounded-lg flex items-center justify-between cursor-pointer hover:bg-base-300 transition-colors"
-                                                    onClick={() => onHabitClick?.(habit)}
+                                                    className="p-3 rounded-lg flex items-center justify-between cursor-pointer hover:bg-white/10 transition-colors overflow-hidden"
+                                                    style={getCardBackgroundStyle(habit)}
                                                 >
                                                     <div className="flex items-center gap-3">
                                                         <div
-                                                            className="w-3 h-3 rounded-full"
+                                                            className="w-3 h-3 rounded-full shrink-0"
                                                             style={{ backgroundColor: habit.color }}
                                                         />
                                                         <div>
                                                             <p className="font-medium">{habit.name}</p>
-                                                            <p className="text-xs text-base-content/60">
+                                                            <p className="text-xs">
                                                                 目标: {formatDuration(habit.goal_seconds)}
                                                             </p>
                                                         </div>
                                                     </div>
-                                                    <div className="flex gap-2" onClick={(e: any) => e.stopPropagation()}>
+                                                    <div className="flex gap-2 shrink-0">
                                                         <button
                                                             className="btn btn-ghost btn-sm btn-circle"
                                                             onClick={() => setModalState({
@@ -326,7 +260,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                 onClose={() => setModalState({ isOpen: false, mode: "set" })}
                 onSuccess={() => {
                     setModalState({ isOpen: false, mode: "set" });
-                    loadData();
+                    void loadData();
                 }}
             />
 
@@ -349,7 +283,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                             </button>
                             <button
                                 className="btn btn-error flex-1"
-                                onClick={handleDelete}
+                                onClick={() => void handleDelete()}
                             >
                                 删除
                             </button>

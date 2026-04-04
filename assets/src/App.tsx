@@ -1,31 +1,176 @@
-import { useState } from "preact/hooks";
+import { useState, useEffect } from "preact/hooks";
 import { Sidebar } from "./components/Sidebar";
+import { TimerPage } from "./TimerPage";
 import { HabitsPage } from "./HabitsPage";
 import { SettingsPage } from "./Settings.tsx";
 import { StatsPage } from "./Stats.tsx";
 import { ErrorNotification } from "./components/ErrorNotification.tsx";
-import type { Habit } from "./types/habit.ts";
+import { APIClient } from "./utils/apiClient";
 
-type Page = "habits" | "stats" | "settings";
+type Page = "timer" | "habits" | "stats" | "settings";
+const WALLPAPER_STORAGE_KEY = "global_wallpaper";
+const WALLPAPER_DEBUG_STORAGE_KEY = "debug_wallpaper";
+const WALLPAPER_FALLBACK_GRADIENT = "linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 50%, #0d0d0d 100%)";
+
+const normalizeWallpaper = (value: unknown): string => {
+  return typeof value === "string" ? value.trim() : "";
+};
+
+const isWallpaperDebugEnabled = (): boolean => {
+  try {
+    if (typeof window === "undefined") return false;
+
+    const search = new URLSearchParams(window.location.search);
+    if (search.has("debugWallpaper")) return true;
+
+    return localStorage.getItem(WALLPAPER_DEBUG_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+const logWallpaperDebug = (event: string, payload?: Record<string, unknown>) => {
+  if (!isWallpaperDebugEnabled()) return;
+
+  const time = new Date().toISOString();
+  // eslint-disable-next-line no-console
+  console.info("[wallpaper-debug]", time, event, payload || {});
+};
+
+const readCachedWallpaper = (): string => {
+  try {
+    return normalizeWallpaper(localStorage.getItem(WALLPAPER_STORAGE_KEY));
+  } catch {
+    return "";
+  }
+};
 
 export const App = () => {
-  const [page, setPage] = useState<Page>("habits");
-  const [selectedHabit, setSelectedHabit] = useState<Habit | null>(null);
+  const [page, setPage] = useState<Page>("timer");
+  const [globalWallpaper, setGlobalWallpaper] = useState<string | null>(() => {
+    const cached = readCachedWallpaper();
+    return cached || null;
+  });
 
   const navigateTo = (newPage: Page) => {
     setPage(newPage);
-    setSelectedHabit(null);
   };
 
-  const handleHabitClick = (habit: Habit | null) => {
-    setSelectedHabit(habit);
+  const updateGlobalWallpaper = (value: string, source = "unknown") => {
+    const next = normalizeWallpaper(value);
+
+    logWallpaperDebug("updateGlobalWallpaper", {
+      source,
+      incoming: value,
+      normalized: next,
+      prev: globalWallpaper,
+    });
+
+    setGlobalWallpaper(next);
+
+    try {
+      if (next) {
+        localStorage.setItem(WALLPAPER_STORAGE_KEY, next);
+      } else {
+        localStorage.removeItem(WALLPAPER_STORAGE_KEY);
+      }
+    } catch {
+      // 忽略 localStorage 不可用场景
+    }
   };
+
+  useEffect(() => {
+    const client = new APIClient(window.location.origin);
+    client.getSettings().then(settings => {
+      const serverWallpaper = normalizeWallpaper(settings.basic?.wallpaper);
+      const cachedWallpaper = readCachedWallpaper();
+
+      logWallpaperDebug("serverSettingsLoaded", {
+        serverWallpaper,
+        cachedWallpaper,
+      });
+
+      // 服务端空值时保留本地最近一次有效值，避免刷新后背景闪回黑色
+      updateGlobalWallpaper(serverWallpaper || cachedWallpaper, "server-settings");
+    }).catch(() => {
+      // 忽略设置获取错误
+      const cachedWallpaper = readCachedWallpaper();
+      logWallpaperDebug("serverSettingsFailed", { cachedWallpaper });
+      updateGlobalWallpaper(cachedWallpaper, "server-fallback-cache");
+    });
+  }, []);
+
+  const getWallpaperStyle = () => {
+    const wp = normalizeWallpaper(globalWallpaper);
+    if (!wp) return null;
+
+    if (wp.startsWith("linear")) {
+      return { type: "gradient" as const, value: wp };
+    }
+
+    if (wp.startsWith("#")) {
+      return { type: "color" as const, value: wp };
+    }
+
+    // 兜底：除渐变和纯色外，统一按图片 URL/路径处理（支持 https/data/blob/相对路径）
+    return { type: "image" as const, value: wp };
+  };
+
+  useEffect(() => {
+    // 首次加载设置前不改动背景，避免刷新时出现黑屏闪回
+    if (globalWallpaper === null) {
+      logWallpaperDebug("skipApplyWallpaper", { reason: "pending-initial-load" });
+      return;
+    }
+
+    const html = document.documentElement;
+    const wallpaperInfo = getWallpaperStyle();
+
+    logWallpaperDebug("applyWallpaper:start", {
+      globalWallpaper,
+      wallpaperType: wallpaperInfo?.type || "none",
+      wallpaperValue: wallpaperInfo?.value || "",
+    });
+
+    // 清除 html 的所有背景样式和动画
+    html.style.background = "";
+    html.style.backgroundImage = "";
+    html.style.backgroundColor = "";
+    html.style.backgroundSize = "";
+    html.style.backgroundPosition = "";
+    html.style.backgroundRepeat = "";
+    html.style.backgroundAttachment = "";
+    html.style.animation = "none";
+
+    // 根据壁纸类型设置 html 元素背景
+    if (wallpaperInfo) {
+      if (wallpaperInfo.type === "gradient") {
+        html.style.background = wallpaperInfo.value;
+      } else if (wallpaperInfo.type === "image") {
+        // 图片层失败时仍显示兜底渐变，避免退化成纯黑背景
+        html.style.backgroundColor = "#0d0d0d";
+        html.style.backgroundImage = `url("${wallpaperInfo.value.replace(/\"/g, "\\\"")}"), ${WALLPAPER_FALLBACK_GRADIENT}`;
+        html.style.backgroundSize = "cover, 140% 140%";
+        html.style.backgroundPosition = "center center, center center";
+        html.style.backgroundRepeat = "no-repeat, no-repeat";
+      } else if (wallpaperInfo.type === "color") {
+        html.style.background = wallpaperInfo.value;
+      }
+      html.style.backgroundAttachment = "fixed";
+    }
+
+    logWallpaperDebug("applyWallpaper:end", {
+      htmlBackground: html.style.background,
+      htmlBackgroundImage: html.style.backgroundImage,
+      htmlAnimation: html.style.animation,
+    });
+  }, [globalWallpaper]);
 
   return (
     <>
       <ErrorNotification visible={true} />
 
-      <div className="flex h-screen bg-base-100">
+      <div className="flex h-screen bg-transparent">
         {/* 侧边栏 - 桌面端 */}
         <div className="hidden lg:block lg:flex shrink-0">
           <Sidebar currentPage={page} onNavigate={navigateTo} />
@@ -33,31 +178,48 @@ export const App = () => {
 
         {/* 主内容区 */}
         <main className="flex-1 flex flex-col overflow-hidden pb-20 lg:pb-0">
+          <div className={page === "timer" ? "flex-1" : "hidden"}>
+            <TimerPage
+              onHabitsClick={() => navigateTo("habits")}
+            />
+          </div>
           {page === "habits" && (
             <HabitsPage
-              selectedHabit={selectedHabit}
-              onHabitClick={handleHabitClick}
               onStatsClick={() => navigateTo("stats")}
               onSettingsClick={() => navigateTo("settings")}
             />
           )}
           {page === "stats" && (
-            <StatsPage onBackClick={() => navigateTo("habits")} />
+            <StatsPage onBackClick={() => navigateTo("timer")} />
           )}
           {page === "settings" && (
-            <SettingsPage onBackClick={() => navigateTo("habits")} />
+            <SettingsPage 
+              onBackClick={() => navigateTo("timer")} 
+              wallpaper={globalWallpaper || ""}
+              onWallpaperChange={(wallpaper) => updateGlobalWallpaper(wallpaper, "settings-prop")}
+            />
           )}
         </main>
       </div>
 
       {/* 底部导航 - 移动端 */}
       <nav
-        className="btm-nav btm-nav-md lg:hidden fixed inset-x-0 bottom-0 w-full z-50"
+        className="btm-nav btm-nav-md my-bottom-nav lg:hidden fixed inset-x-0 bottom-0 w-full z-50"
         data-testid="bottom-nav"
       >
         <a
+          data-testid="nav-timer"
+          className={`my-bottom-nav-item ${page === "timer" ? "active" : ""}`}
+          onClick={() => navigateTo("timer")}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="btm-nav-label">计时</span>
+        </a>
+        <a
           data-testid="nav-habits"
-          className={page === "habits" ? "active" : ""}
+          className={`my-bottom-nav-item ${page === "habits" ? "active" : ""}`}
           onClick={() => navigateTo("habits")}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -67,7 +229,7 @@ export const App = () => {
         </a>
         <a
           data-testid="nav-stats"
-          className={page === "stats" ? "active" : ""}
+          className={`my-bottom-nav-item ${page === "stats" ? "active" : ""}`}
           onClick={() => navigateTo("stats")}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -77,7 +239,7 @@ export const App = () => {
         </a>
         <a
           data-testid="nav-settings"
-          className={page === "settings" ? "active" : ""}
+          className={`my-bottom-nav-item ${page === "settings" ? "active" : ""}`}
           onClick={() => navigateTo("settings")}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

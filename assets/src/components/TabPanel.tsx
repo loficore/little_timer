@@ -3,7 +3,7 @@ import type { ComponentChildren, VNode } from "preact";
 interface Tab {
   id: string;
   label: string;
-  icon?: VNode | undefined;
+  icon?: VNode | null | undefined;
 }
 
 interface TabPanelProps {
@@ -23,16 +23,16 @@ export const TabPanel = ({
 }: TabPanelProps) => {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <div className={`tabs tabs-boxed bg-base-300 p-1 ${isAnimated ? "animate-slideUp" : ""}`}>
+      <div className={`my-tabs ${isAnimated ? "animate-slideUp" : ""}`}>
         {tabs.map((tab) => (
-          <a
+          <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`tab flex-1 gap-2 ${activeTab === tab.id ? "tab-active" : ""}`}
+            className={`my-tab ${activeTab === tab.id ? "my-tab-active" : ""}`}
           >
             {tab.icon && <span className="w-4 h-4">{tab.icon}</span>}
             <span className="hidden sm:inline">{tab.label}</span>
-          </a>
+          </button>
         ))}
       </div>
       <div

@@ -33,12 +33,12 @@ describe("TabPanel 组件", () => {
       </TabPanel>,
     );
 
-    const buttons = container.querySelectorAll("a");
+    const buttons = container.querySelectorAll("button");
     const countdownButton = Array.from(buttons).find((btn) =>
       btn.textContent?.includes("倒计时"),
     );
 
-    expect(countdownButton?.className).toContain("tab-active");
+    expect(countdownButton?.className).toContain("my-tab-active");
   });
 
   it("应该在点击标签页时调用 onTabChange", () => {
@@ -48,7 +48,7 @@ describe("TabPanel 组件", () => {
       </TabPanel>,
     );
 
-    const buttons = container.querySelectorAll("a");
+    const buttons = container.querySelectorAll("button");
     const stopwatchButton = Array.from(buttons).find((btn) =>
       btn.textContent?.includes("正计时"),
     );

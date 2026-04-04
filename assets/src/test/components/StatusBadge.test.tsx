@@ -9,7 +9,7 @@ describe("StatusBadge 组件", () => {
     );
 
     expect(container.textContent).toContain("运行中");
-    expect(container.querySelector("span")?.className).toContain("badge-primary");
+    expect(container.querySelector("span")?.className).toContain("my-badge-running");
   });
 
   it("应该正确渲染暂停状态", () => {
@@ -18,7 +18,7 @@ describe("StatusBadge 组件", () => {
     );
 
     expect(container.textContent).toContain("已暂停");
-    expect(container.querySelector("span")?.className).toContain("badge-neutral");
+    expect(container.querySelector("span")?.className).toContain("my-badge-paused");
   });
 
   it("应该正确渲染完成状态", () => {
@@ -27,7 +27,7 @@ describe("StatusBadge 组件", () => {
     );
 
     expect(container.textContent).toContain("已完成");
-    expect(container.querySelector("span")?.className).toContain("badge-success");
+    expect(container.querySelector("span")?.className).toContain("my-badge-finished");
   });
 
   it("应该支持动画延迟", () => {

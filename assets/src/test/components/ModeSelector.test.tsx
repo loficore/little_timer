@@ -67,7 +67,7 @@ describe("ModeSelector 组件", () => {
       btn.textContent?.includes("秒表"),
     );
 
-    expect(stopwatchBtn?.className).toContain("btn-outline");
+    expect(stopwatchBtn?.className).toContain("my-btn-secondary");
   });
 
   it("点击模式按钮应该触发回调", () => {
@@ -118,7 +118,7 @@ describe("ModeSelector 组件", () => {
     countdownBtn = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent?.includes("倒计时"),
     );
-    expect(countdownBtn?.className).toContain("btn-outline");
+    expect(countdownBtn?.className).toContain("my-btn-secondary");
 
     const stopwatchBtn = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent?.includes("秒表"),

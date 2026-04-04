@@ -63,12 +63,13 @@ pub fn toJsonAlloc(
 
     // 序列化 basic
     try w.writeAll("\"basic\":{");
-    try w.print("\"timezone\":{},\"language\":\"{s}\",\"default_mode\":\"{s}\",\"theme_mode\":\"{s}\"", .{
+    try w.print("\"timezone\":{},\"language\":\"{s}\",\"default_mode\":\"{s}\",\"theme_mode\":\"{s}\",\"wallpaper\":", .{
         config.basic.timezone,
         config.basic.language,
         @tagName(config.basic.default_mode),
         config.basic.theme_mode,
     });
+    try writeEscapedJsonString(w, config.basic.wallpaper);
     try w.writeAll("},");
 
     // 序列化 clock_defaults（使用前端期望的格式）

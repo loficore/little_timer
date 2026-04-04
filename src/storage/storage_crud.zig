@@ -65,12 +65,13 @@ pub const CrudManager = struct {
 
         // 使用 UPSERT 操作（INSERT OR REPLACE）
         self.db.?.exec(
-            "INSERT OR REPLACE INTO settings (id, timezone, language, default_mode, theme_mode, duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            "INSERT OR REPLACE INTO settings (id, timezone, language, default_mode, theme_mode, wallpaper, duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
             .{
                 config.basic.timezone,
                 config.basic.language,
                 default_mode_str,
                 config.basic.theme_mode,
+                config.basic.wallpaper,
                 config.clock_defaults.countdown.duration_seconds,
                 @intFromBool(config.clock_defaults.countdown.loop),
                 config.clock_defaults.countdown.loop_count,
@@ -101,7 +102,7 @@ pub const CrudManager = struct {
         }
 
         var rows = try self.db.?.rows(
-            "SELECT timezone, language, default_mode, theme_mode, duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval FROM settings WHERE id = 1;",
+            "SELECT timezone, language, default_mode, theme_mode, COALESCE(wallpaper, ''), duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval FROM settings WHERE id = 1;",
             .{},
         );
         defer rows.deinit();
@@ -116,14 +117,15 @@ pub const CrudManager = struct {
         const language = row.get([]const u8, 1);
         const default_mode_str = row.get([]const u8, 2);
         const theme_mode = row.get([]const u8, 3);
-        const duration_seconds_raw = row.get(i64, 4);
-        const countdown_loop_raw = row.get(i64, 5);
-        const countdown_loop_count_raw = row.get(i64, 6);
-        const countdown_loop_interval_raw = row.get(i64, 7);
-        const stopwatch_max_seconds_raw = row.get(i64, 8);
-        const log_level = row.get([]const u8, 9);
-        const log_enable_timestamp_raw = row.get(i64, 10);
-        const log_tick_interval = row.get(i64, 11);
+        const wallpaper = row.get([]const u8, 4);
+        const duration_seconds_raw = row.get(i64, 5);
+        const countdown_loop_raw = row.get(i64, 6);
+        const countdown_loop_count_raw = row.get(i64, 7);
+        const countdown_loop_interval_raw = row.get(i64, 8);
+        const stopwatch_max_seconds_raw = row.get(i64, 9);
+        const log_level = row.get([]const u8, 10);
+        const log_enable_timestamp_raw = row.get(i64, 11);
+        const log_tick_interval = row.get(i64, 12);
 
         // 类型转换
         const timezone: i8 = @intCast(timezone_raw);
@@ -137,6 +139,8 @@ pub const CrudManager = struct {
         errdefer allocator.free(language_copy);
         const theme_mode_copy = try allocator.dupe(u8, theme_mode);
         errdefer allocator.free(theme_mode_copy);
+        const wallpaper_copy = try allocator.dupe(u8, wallpaper);
+        errdefer allocator.free(wallpaper_copy);
         const log_level_copy = try allocator.dupe(u8, log_level);
         errdefer allocator.free(log_level_copy);
 
@@ -152,6 +156,7 @@ pub const CrudManager = struct {
                 .language = language_copy,
                 .default_mode = default_mode,
                 .theme_mode = theme_mode_copy,
+                .wallpaper = wallpaper_copy,
             },
             .clock_defaults = .{
                 .countdown = .{

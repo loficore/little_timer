@@ -8,12 +8,74 @@ const clock = @import("clock.zig");
 const settings = @import("../settings/settings_manager.zig");
 const interface = @import("interface.zig");
 const error_recovery = @import("utils/error_recovery.zig");
+const habit_crud = @import("../storage/habit_crud.zig");
 
 const EventThrottle = struct {
     last_event_time: i64 = 0,
     last_event_type: ?interface.EventType = null,
     debounce_ms: i64 = 100,
 };
+
+fn computeSessionElapsedSeconds(session: *const habit_crud.TimerSessionRow, now_ts: i64) i64 {
+    var effective_paused_seconds = session.paused_total_seconds;
+
+    if (session.pause_started_at) |pause_started_at| {
+        if (now_ts > pause_started_at) {
+            effective_paused_seconds += now_ts - pause_started_at;
+        }
+    }
+
+    if (now_ts <= session.started_at or now_ts <= effective_paused_seconds) {
+        return 0;
+    }
+
+    return now_ts - session.started_at - effective_paused_seconds;
+}
+
+fn updatePauseAccounting(session: *const habit_crud.TimerSessionRow, now_ts: i64) struct {
+    paused_total_seconds: i64,
+    pause_started_at: ?i64,
+} {
+    var paused_total_seconds = session.paused_total_seconds;
+    var pause_started_at = session.pause_started_at;
+
+    if (session.is_paused) {
+        if (pause_started_at == null) {
+            pause_started_at = now_ts;
+        }
+    } else if (pause_started_at) |started_at| {
+        if (now_ts > started_at) {
+            paused_total_seconds += now_ts - started_at;
+        }
+        pause_started_at = null;
+    }
+
+    return .{
+        .paused_total_seconds = paused_total_seconds,
+        .pause_started_at = pause_started_at,
+    };
+}
+
+fn computeElapsedFromAccounting(
+    started_at: i64,
+    paused_total_seconds: i64,
+    pause_started_at: ?i64,
+    now_ts: i64,
+) i64 {
+    var effective_paused_seconds = paused_total_seconds;
+
+    if (pause_started_at) |started_pause_at| {
+        if (now_ts > started_pause_at) {
+            effective_paused_seconds += now_ts - started_pause_at;
+        }
+    }
+
+    if (now_ts <= started_at or now_ts <= effective_paused_seconds) {
+        return 0;
+    }
+
+    return now_ts - started_at - effective_paused_seconds;
+}
 
 /// 全局 App 实例指针，用于回调函数访问
 var global_app: ?*MainApplication = null;
@@ -30,6 +92,16 @@ pub const MainApplication = struct {
     event_throttle: EventThrottle = .{},
     /// 当前正在计时的习惯 ID
     current_habit_id: ?i64 = null,
+    /// 当前计时会话 ID（用于持久化）
+    current_timer_session_id: ?i64 = null,
+    /// 当前计时会话开始时间（秒）
+    current_timer_session_started_at: ?i64 = null,
+    /// 当前计时会话累计暂停时长（秒）
+    current_timer_session_paused_total_seconds: i64 = 0,
+    /// 当前暂停起始时间（秒）
+    current_timer_session_pause_started_at: ?i64 = null,
+    /// 上次保存进度的时间（用于节流）
+    last_save_time: i64 = 0,
 
     /// 初始化应用程序（在指针上原地初始化）
     ///
@@ -153,6 +225,14 @@ pub const MainApplication = struct {
             logger.global_logger.err("更新显示失败: {any}", .{err});
             self.error_recovery.recordError("更新显示失败", "DISPLAY_UPDATE");
         };
+
+        // 每隔几秒自动保存计时进度（仅当正在运行时）
+        const now_ns = std.time.nanoTimestamp();
+        const now_ms: i64 = @intCast(@divFloor(now_ns, 1_000_000));
+        if (now_ms - self.last_save_time > 5000) { // 5 秒保存一次
+            self.last_save_time = now_ms;
+            self.saveTimerProgress();
+        }
     }
 
     /// 时钟事件处理器
@@ -213,6 +293,216 @@ pub const MainApplication = struct {
             // HTTP 服务器会通过 SSE 推送更新，前端会自动同步
             logger.global_logger.info("✓ 设置已更新，时钟已重新初始化", .{});
         }
+    }
+
+    /// 保存当前计时进度到数据库
+    pub fn saveTimerProgress(self: *MainApplication) void {
+        const session_id = self.current_timer_session_id orelse return;
+        const db = self.settings_manager.sqlite_db orelse return;
+
+        const session = db.habit_manager.getTimerSessionById(session_id) catch null;
+        if (session) |s| {
+            defer self.allocator.free(s.mode);
+        }
+
+        const clock_state = self.clock_manager.update();
+        const remaining = clock_state.getRemainingSeconds();
+        const is_running = !clock_state.isPaused();
+        const is_finished = clock_state.isFinished();
+        const is_paused = clock_state.isPaused();
+        const current_round = clock_state.getCurrentRound();
+        const in_rest = clock_state.inRest();
+
+        const now_ts: i64 = @intCast(std.time.timestamp());
+        var paused_total_seconds: i64 = 0;
+        var pause_started_at: ?i64 = null;
+
+        if (session) |s| {
+            const pause_state = updatePauseAccounting(&s, now_ts);
+            paused_total_seconds = pause_state.paused_total_seconds;
+            pause_started_at = pause_state.pause_started_at;
+        }
+
+        if (self.current_timer_session_started_at == null) {
+            if (session) |s| {
+                self.current_timer_session_started_at = s.started_at;
+            }
+        }
+
+        self.current_timer_session_paused_total_seconds = paused_total_seconds;
+        self.current_timer_session_pause_started_at = pause_started_at;
+
+        const elapsed_seconds = if (session) |s|
+            computeSessionElapsedSeconds(&s, now_ts)
+        else
+            clock_state.getElapsedSeconds();
+
+        db.habit_manager.updateTimerSession(
+            session_id,
+            elapsed_seconds,
+            remaining,
+            paused_total_seconds,
+            pause_started_at,
+            now_ts,
+            is_running,
+            is_paused,
+            is_finished,
+            current_round,
+            in_rest,
+        ) catch |err| {
+            logger.global_logger.err("保存 timer_sessions 进度失败: {any}", .{err});
+        };
+    }
+
+    /// 加载保存的计时进度（用于页面刷新恢复）
+    pub fn loadTimerProgress(self: *MainApplication) void {
+        const db = self.settings_manager.sqlite_db orelse return;
+
+        const session = db.habit_manager.getActiveTimerSession() catch null;
+        if (session == null) {
+            logger.global_logger.debug("当前没有可恢复的计时会话", .{});
+            return;
+        }
+
+        const s = session.?;
+        defer self.allocator.free(s.mode);
+        self.current_timer_session_id = s.id;
+        self.current_habit_id = s.habit_id;
+        self.current_timer_session_started_at = s.started_at;
+        self.current_timer_session_paused_total_seconds = s.paused_total_seconds;
+        self.current_timer_session_pause_started_at = s.pause_started_at;
+
+        // 根据保存的状态恢复 clock
+        const mode: interface.ModeEnumT = if (std.mem.eql(u8, s.mode, "countdown"))
+            .COUNTDOWN_MODE
+        else
+            .STOPWATCH_MODE;
+
+        const config: interface.ClockTaskConfig = if (mode == .COUNTDOWN_MODE)
+            .{
+                .default_mode = .COUNTDOWN_MODE,
+                .countdown = .{
+                    .duration_seconds = @intCast(s.work_duration),
+                    .loop = s.loop_count > 0,
+                    .loop_interval_seconds = @intCast(s.rest_duration),
+                    .loop_count = @intCast(s.loop_count),
+                },
+                .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
+            }
+        else
+            .{
+                .default_mode = .STOPWATCH_MODE,
+                .countdown = .{ .duration_seconds = 25 * 60, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 },
+                .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
+            };
+
+        self.clock_manager = clock.ClockManager.init(config);
+
+        // 恢复状态
+        const display = self.clock_manager.update();
+        switch (display.getMode()) {
+            .COUNTDOWN_MODE => {
+                display.COUNTDOWN_MODE.remaining_ms = if (s.remaining_seconds) |r| r * 1000 else s.work_duration * 1000;
+                display.COUNTDOWN_MODE.is_paused = s.is_paused;
+                display.COUNTDOWN_MODE.is_finished = s.is_finished;
+                display.COUNTDOWN_MODE.in_rest = s.in_rest;
+            },
+            .STOPWATCH_MODE => {
+                display.STOPWATCH_MODE.esplased_ms = s.elapsed_seconds * 1000;
+                display.STOPWATCH_MODE.is_paused = s.is_paused;
+                display.STOPWATCH_MODE.is_finished = s.is_finished;
+            },
+        }
+
+        logger.global_logger.info("✓ 已恢复计时会话记录 ID: {}", .{s.id});
+    }
+
+    /// 创建新的计时会话
+    pub fn createTimerSession(self: *MainApplication, habit_id: ?i64, mode: []const u8, work_duration: i64, rest_duration: i64, loop_count: i64) !i64 {
+        const db = self.settings_manager.sqlite_db orelse return error.DatabaseNotOpen;
+
+        const session_id = try db.habit_manager.createTimerSession(
+            habit_id,
+            mode,
+            work_duration,
+            rest_duration,
+            loop_count,
+        );
+
+        self.current_timer_session_id = session_id;
+        self.current_habit_id = habit_id;
+        self.current_timer_session_started_at = @intCast(std.time.timestamp());
+        self.current_timer_session_paused_total_seconds = 0;
+        self.current_timer_session_pause_started_at = null;
+
+        logger.global_logger.info("✓ 已创建计时会话记录 ID: {}", .{session_id});
+        return session_id;
+    }
+
+    /// 完成并记录计时会话
+    pub fn finishTimerSession(self: *MainApplication) !i64 {
+        const session_id = self.current_timer_session_id orelse return 0;
+        const db = self.settings_manager.sqlite_db orelse return error.DatabaseNotOpen;
+
+        const session = db.habit_manager.getTimerSessionById(session_id) catch null;
+        const clock_state = self.clock_manager.update();
+        const now_ts: i64 = @intCast(std.time.timestamp());
+
+        // 触发 clock 结束事件
+        self.clock_manager.handleEvent(.user_finish_timer);
+
+        // 标记 session 为完成
+        try db.habit_manager.finishTimerSession(session_id);
+
+        // 以会话账本为准计算累计运行时间，避免依赖 SSE tick。
+        var elapsed: i64 = if (self.current_timer_session_started_at) |started_at|
+            computeElapsedFromAccounting(
+                started_at,
+                self.current_timer_session_paused_total_seconds,
+                self.current_timer_session_pause_started_at,
+                now_ts,
+            )
+        else
+            clock_state.getElapsedSeconds();
+
+        if (session) |s| {
+            defer self.allocator.free(s.mode);
+
+            const db_elapsed = computeSessionElapsedSeconds(&s, now_ts);
+
+            if (db_elapsed > elapsed) {
+                elapsed = db_elapsed;
+            }
+
+            if (s.elapsed_seconds > elapsed) {
+                elapsed = s.elapsed_seconds;
+            }
+        }
+
+        if (elapsed <= 0) {
+            elapsed = clock_state.getElapsedSeconds();
+        }
+
+        logger.global_logger.info("✓ 会话统计已完成，累计运行时间: {} 秒", .{elapsed});
+
+        return elapsed;
+    }
+
+    /// 重置并删除计时会话
+    pub fn resetTimerSession(self: *MainApplication) void {
+        if (self.current_timer_session_id) |session_id| {
+            const db = self.settings_manager.sqlite_db;
+            if (db) |d| {
+                d.habit_manager.deleteTimerSession(session_id) catch |err| {
+                    logger.global_logger.err("删除计时会话失败: {any}", .{err});
+                };
+            }
+        }
+        self.current_timer_session_id = null;
+        self.current_timer_session_started_at = null;
+        self.current_timer_session_paused_total_seconds = 0;
+        self.current_timer_session_pause_started_at = null;
+        self.current_habit_id = null;
     }
 
     /// 清理应用程序资源

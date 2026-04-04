@@ -34,6 +34,7 @@ pub const SettingsManager = struct {
     owned_theme_mode: ?[]u8 = null,
     owned_log_level: ?[]u8 = null,
     owned_log_dir: ?[]u8 = null,
+    owned_wallpaper: ?[]u8 = null,
 
     /// 设置模块初始化
     ///
@@ -102,10 +103,12 @@ pub const SettingsManager = struct {
         if (self.owned_theme_mode) |old| self.allocator.free(old);
         if (self.owned_log_level) |old| self.allocator.free(old);
         if (self.owned_log_dir) |old| self.allocator.free(old);
+        if (self.owned_wallpaper) |old| self.allocator.free(old);
         self.owned_language = null;
         self.owned_theme_mode = null;
         self.owned_log_level = null;
         self.owned_log_dir = null;
+        self.owned_wallpaper = null;
 
         const new_config = self.sqlite_db.?.*.loadSettings(self.allocator) catch |err| {
             logger.global_logger.err("从 SQLite 加载设置失败: {any}", .{err});
@@ -116,12 +119,14 @@ pub const SettingsManager = struct {
         // 保存原始指针，稍后释放
         const old_language = new_config.basic.language;
         const old_theme_mode = new_config.basic.theme_mode;
+        const old_wallpaper = new_config.basic.wallpaper;
         const old_log_level = new_config.logging.level;
         const old_log_dir = new_config.logging.log_dir;
 
         // 获取新配置中的字符串所有权
         self.owned_language = try self.allocator.dupe(u8, new_config.basic.language);
         self.owned_theme_mode = try self.allocator.dupe(u8, new_config.basic.theme_mode);
+        self.owned_wallpaper = try self.allocator.dupe(u8, new_config.basic.wallpaper);
         self.owned_log_level = try self.allocator.dupe(u8, new_config.logging.level);
 
         if (new_config.logging.log_dir.len > 0) {
@@ -131,6 +136,7 @@ pub const SettingsManager = struct {
         // 释放 loadSettings 分配的原始字符串
         self.allocator.free(old_language);
         self.allocator.free(old_theme_mode);
+        self.allocator.free(old_wallpaper);
         self.allocator.free(old_log_level);
         if (old_log_dir.len > 0) {
             self.allocator.free(old_log_dir);
@@ -143,6 +149,7 @@ pub const SettingsManager = struct {
                 .language = self.owned_language.?,
                 .default_mode = new_config.basic.default_mode,
                 .theme_mode = self.owned_theme_mode.?,
+                .wallpaper = self.owned_wallpaper.?,
             },
             .clock_defaults = new_config.clock_defaults,
             .logging = .{
@@ -177,11 +184,13 @@ pub const SettingsManager = struct {
         if (self.owned_language) |old| self.allocator.free(old);
         if (self.owned_theme_mode) |old| self.allocator.free(old);
         if (self.owned_log_level) |old| self.allocator.free(old);
+        if (self.owned_wallpaper) |old| self.allocator.free(old);
 
         // 创建默认设置
         self.owned_language = try self.allocator.dupe(u8, "ZH");
         self.owned_theme_mode = try self.allocator.dupe(u8, "dark");
         self.owned_log_level = try self.allocator.dupe(u8, "INFO");
+        self.owned_wallpaper = try self.allocator.dupe(u8, "");
 
         self.config = SettingsConfig{
             .basic = .{
@@ -189,6 +198,7 @@ pub const SettingsManager = struct {
                 .language = self.owned_language.?,
                 .default_mode = .countdown,
                 .theme_mode = self.owned_theme_mode.?,
+                .wallpaper = self.owned_wallpaper.?,
             },
             .clock_defaults = .{
                 .countdown = .{
@@ -335,6 +345,11 @@ pub const SettingsManager = struct {
     }
 
     /// 简化的JSON设置解析
+    /// 参数：
+    /// - **self**: SettingsManager实例指针
+    /// - **json_str**: 包含设置的JSON字符串
+    /// 返回：
+    /// - !void: 如果解析失败则返回错误
     fn parseSettingsFromJson(self: *SettingsManager, json_str: []const u8) !void {
         logger.global_logger.debug("parseSettingsFromJson 收到 JSON: {s}", .{json_str});
 
@@ -371,6 +386,12 @@ pub const SettingsManager = struct {
                 if (self.owned_theme_mode) |old| self.allocator.free(old);
                 self.owned_theme_mode = try self.allocator.dupe(u8, theme_val.string);
                 self.config.basic.theme_mode = self.owned_theme_mode.?;
+            }
+
+            if (basic_val.object.get("wallpaper")) |wallpaper_val| {
+                if (self.owned_wallpaper) |old| self.allocator.free(old);
+                self.owned_wallpaper = try self.allocator.dupe(u8, wallpaper_val.string);
+                self.config.basic.wallpaper = self.owned_wallpaper.?;
             }
         }
 
@@ -563,6 +584,7 @@ pub const SettingsManager = struct {
         if (self.owned_language) |old| self.allocator.free(old);
         if (self.owned_theme_mode) |old| self.allocator.free(old);
         if (self.owned_log_level) |old| self.allocator.free(old);
+        if (self.owned_wallpaper) |old| self.allocator.free(old);
 
         // 清空预设
         self.presets.clear();
@@ -573,11 +595,13 @@ pub const SettingsManager = struct {
         // 复制新的默认字符串
         self.owned_language = try self.allocator.dupe(u8, self.config.basic.language);
         self.owned_theme_mode = try self.allocator.dupe(u8, self.config.basic.theme_mode);
+        self.owned_wallpaper = try self.allocator.dupe(u8, self.config.basic.wallpaper);
         self.owned_log_level = try self.allocator.dupe(u8, self.config.logging.level);
 
         // 更新指针指向我们的副本
         self.config.basic.language = self.owned_language.?;
         self.config.basic.theme_mode = self.owned_theme_mode.?;
+        self.config.basic.wallpaper = self.owned_wallpaper.?;
         self.config.logging.level = self.owned_log_level.?;
 
         // 保存到数据库
@@ -614,6 +638,7 @@ pub const SettingsManager = struct {
         if (self.owned_theme_mode) |s| self.allocator.free(s);
         if (self.owned_log_level) |s| self.allocator.free(s);
         if (self.owned_log_dir) |s| self.allocator.free(s);
+        if (self.owned_wallpaper) |s| self.allocator.free(s);
 
         // 释放堆上分配的 sqlite_db
         if (self.sqlite_db != null) {

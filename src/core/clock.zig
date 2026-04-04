@@ -190,6 +190,22 @@ pub const ClockState = union(ModeEnumT) {
             .STOPWATCH_MODE => |*stopwatch| @divTrunc(@as(i64, @intCast(stopwatch.esplased_ms)), 1000),
         };
     }
+
+    /// 获取剩余时间（秒数），仅倒计时支持
+    pub fn getRemainingSeconds(self: *const ClockState) i64 {
+        return switch (self.*) {
+            .COUNTDOWN_MODE => |*countdown| @divTrunc(countdown.remaining_ms, 1000),
+            .STOPWATCH_MODE => 0,
+        };
+    }
+
+    /// 获取当前轮次，仅倒计时支持
+    pub fn getCurrentRound(self: *const ClockState) i64 {
+        return switch (self.*) {
+            .COUNTDOWN_MODE => |*countdown| @intCast(countdown.loop_count - countdown.loop_remaining + 1),
+            .STOPWATCH_MODE => 0,
+        };
+    }
 };
 
 pub const ClockManager = struct {
@@ -298,17 +314,17 @@ pub const ClockManager = struct {
                     .COUNTDOWN_MODE => {
                         if (self.state.COUNTDOWN_MODE.is_paused) {
                             self.state.COUNTDOWN_MODE.is_paused = false;
-                            logger.global_logger.info("Clock: 倒计时已启动", .{});
+                            logger.global_logger.info("Clock: 倒计时进入运行状态", .{});
                         } else {
-                            logger.global_logger.debug("Clock: 倒计时已在运行，忽略重复启动事件", .{});
+                            logger.global_logger.debug("Clock: 倒计时已在运行，忽略重复开始事件", .{});
                         }
                     },
                     .STOPWATCH_MODE => {
                         if (self.state.STOPWATCH_MODE.is_paused) {
                             self.state.STOPWATCH_MODE.is_paused = false;
-                            logger.global_logger.info("Clock: 秒表已启动", .{});
+                            logger.global_logger.info("Clock: 正计时进入运行状态", .{});
                         } else {
-                            logger.global_logger.debug("Clock: 秒表已在运行，忽略重复启动事件", .{});
+                            logger.global_logger.debug("Clock: 正计时已在运行，忽略重复开始事件", .{});
                         }
                     },
                 }
@@ -318,23 +334,23 @@ pub const ClockManager = struct {
                     .COUNTDOWN_MODE => {
                         if (!self.state.COUNTDOWN_MODE.is_paused) {
                             self.state.COUNTDOWN_MODE.is_paused = true;
-                            logger.global_logger.info("Clock: 倒计时已暂停", .{});
+                            logger.global_logger.info("Clock: 倒计时进入暂停状态", .{});
                         } else {
-                            logger.global_logger.debug("Clock: 倒计时已暂停，忽略重复暂停事件", .{});
+                            logger.global_logger.debug("Clock: 倒计时已处于暂停状态，忽略重复暂停事件", .{});
                         }
                     },
                     .STOPWATCH_MODE => {
                         if (!self.state.STOPWATCH_MODE.is_paused) {
                             self.state.STOPWATCH_MODE.is_paused = true;
-                            logger.global_logger.info("Clock: 秒表已暂停", .{});
+                            logger.global_logger.info("Clock: 正计时进入暂停状态", .{});
                         } else {
-                            logger.global_logger.debug("Clock: 秒表已暂停，忽略重复暂停事件", .{});
+                            logger.global_logger.debug("Clock: 正计时已处于暂停状态，忽略重复暂停事件", .{});
                         }
                     },
                 }
             },
             .user_reset_timer => {
-                logger.global_logger.info("Clock: 收到重置事件", .{});
+                logger.global_logger.info("Clock: 当前时钟状态已重置为初始值", .{});
                 // 重置计时器
                 switch (self.state) {
                     .COUNTDOWN_MODE => {
@@ -350,6 +366,20 @@ pub const ClockManager = struct {
                         self.state.STOPWATCH_MODE.esplased_ms = 0;
                         self.state.STOPWATCH_MODE.is_paused = true;
                         self.state.STOPWATCH_MODE.is_finished = false;
+                    },
+                }
+            },
+            .user_finish_timer => {
+                logger.global_logger.info("Clock: 当前会话已结束，时钟状态已冻结", .{});
+                // 结束计时器：停止但标记为已完成（用于计入统计）
+                switch (self.state) {
+                    .COUNTDOWN_MODE => {
+                        self.state.COUNTDOWN_MODE.is_paused = true;
+                        self.state.COUNTDOWN_MODE.is_finished = true;
+                    },
+                    .STOPWATCH_MODE => {
+                        self.state.STOPWATCH_MODE.is_paused = true;
+                        self.state.STOPWATCH_MODE.is_finished = true;
                     },
                 }
             },

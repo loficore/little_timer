@@ -15,6 +15,7 @@ pub const HabitSetRow = struct {
     name: []const u8,
     description: []const u8,
     color: []const u8,
+    wallpaper: []const u8,
 };
 
 pub const HabitRow = struct {
@@ -23,6 +24,7 @@ pub const HabitRow = struct {
     name: []const u8,
     goal_seconds: i64,
     color: []const u8,
+    wallpaper: []const u8,
 };
 
 pub const SessionRow = struct {
@@ -32,6 +34,27 @@ pub const SessionRow = struct {
     count: i64,
     started_at: []const u8,
     date: []const u8,
+};
+
+pub const TimerSessionRow = struct {
+    id: i64,
+    habit_id: ?i64,
+    mode: []const u8,
+    started_at: i64,
+    updated_at: i64,
+    is_running: bool,
+    is_finished: bool,
+    is_paused: bool,
+    elapsed_seconds: i64,
+    paused_total_seconds: i64,
+    pause_started_at: ?i64,
+    last_synced_at: ?i64,
+    remaining_seconds: ?i64,
+    work_duration: i64,
+    rest_duration: i64,
+    loop_count: i64,
+    current_round: i64,
+    in_rest: bool,
 };
 
 /// 习惯 CRUD 管理器
@@ -82,7 +105,7 @@ pub const HabitCrudManager = struct {
     /// - **HabitError.QueryFailed**：如果数据库查询失败
     pub fn getAllHabitSets(self: *HabitCrudManager) ![]HabitSetRow {
         const db = self.db orelse return HabitError.QueryFailed;
-        var rows = try db.rows("SELECT id, name, description, color FROM habit_sets ORDER BY created_at DESC;", .{});
+        var rows = try db.rows("SELECT id, name, description, color, COALESCE(wallpaper, '') FROM habit_sets ORDER BY created_at DESC;", .{});
         defer rows.deinit();
 
         var list = std.ArrayList(HabitSetRow){};
@@ -94,6 +117,7 @@ pub const HabitCrudManager = struct {
                 .name = try self.allocator.dupe(u8, row.get([]const u8, 1)),
                 .description = try self.allocator.dupe(u8, row.get([]const u8, 2)),
                 .color = try self.allocator.dupe(u8, row.get([]const u8, 3)),
+                .wallpaper = try self.allocator.dupe(u8, row.get([]const u8, 4)),
             });
         }
         return list.toOwnedSlice(self.allocator);
@@ -107,11 +131,11 @@ pub const HabitCrudManager = struct {
     /// - **color**：新的习惯集颜色（字符串格式，如 "#FF0000"）
     /// 错误：
     /// - **HabitError.QueryFailed**：如果数据库查询失败
-    pub fn updateHabitSet(self: *HabitCrudManager, id: i64, name: []const u8, description: []const u8, color: []const u8) !void {
+    pub fn updateHabitSet(self: *HabitCrudManager, id: i64, name: []const u8, description: []const u8, color: []const u8, wallpaper: []const u8) !void {
         const db = self.db orelse return HabitError.QueryFailed;
         try db.exec(
-            "UPDATE habit_sets SET name = ?, description = ?, color = ? WHERE id = ?;",
-            .{ name, description, color, id },
+            "UPDATE habit_sets SET name = ?, description = ?, color = ?, wallpaper = ? WHERE id = ?;",
+            .{ name, description, color, wallpaper, id },
         );
     }
 
@@ -155,7 +179,7 @@ pub const HabitCrudManager = struct {
     /// - **HabitError.QueryFailed**：如果数据库查询失败
     pub fn getAllHabits(self: *HabitCrudManager) ![]HabitRow {
         const db = self.db orelse return HabitError.QueryFailed;
-        var rows = try db.rows("SELECT id, set_id, name, goal_seconds, color FROM habits ORDER BY created_at DESC;", .{});
+        var rows = try db.rows("SELECT id, set_id, name, goal_seconds, color, COALESCE(wallpaper, '') FROM habits ORDER BY created_at DESC;", .{});
         defer rows.deinit();
 
         var list = std.ArrayList(HabitRow){};
@@ -168,6 +192,7 @@ pub const HabitCrudManager = struct {
                 .name = try self.allocator.dupe(u8, row.get([]const u8, 2)),
                 .goal_seconds = row.get(i64, 3),
                 .color = try self.allocator.dupe(u8, row.get([]const u8, 4)),
+                .wallpaper = try self.allocator.dupe(u8, row.get([]const u8, 5)),
             });
         }
         return list.toOwnedSlice(self.allocator);
@@ -182,7 +207,7 @@ pub const HabitCrudManager = struct {
     /// - **HabitError.QueryFailed**：如果数据库查询失败
     pub fn getHabitsBySet(self: *HabitCrudManager, set_id: i64) ![]HabitRow {
         const db = self.db orelse return HabitError.QueryFailed;
-        var rows = try db.rows("SELECT id, set_id, name, goal_seconds, color FROM habits WHERE set_id = ? ORDER BY created_at DESC;", .{set_id});
+        var rows = try db.rows("SELECT id, set_id, name, goal_seconds, color, COALESCE(wallpaper, '') FROM habits WHERE set_id = ? ORDER BY created_at DESC;", .{set_id});
         defer rows.deinit();
 
         var list = std.ArrayList(HabitRow){};
@@ -195,6 +220,7 @@ pub const HabitCrudManager = struct {
                 .name = try self.allocator.dupe(u8, row.get([]const u8, 2)),
                 .goal_seconds = row.get(i64, 3),
                 .color = try self.allocator.dupe(u8, row.get([]const u8, 4)),
+                .wallpaper = try self.allocator.dupe(u8, row.get([]const u8, 5)),
             });
         }
         return list.toOwnedSlice(self.allocator);
@@ -208,11 +234,11 @@ pub const HabitCrudManager = struct {
     /// - **color**：新的习惯颜色（字符串格式，如 "#FF0000"）
     /// 错误：
     /// - **HabitError.QueryFailed**：如果数据库查询失败
-    pub fn updateHabit(self: *HabitCrudManager, id: i64, name: []const u8, goal_seconds: i64, color: []const u8) !void {
+    pub fn updateHabit(self: *HabitCrudManager, id: i64, name: []const u8, goal_seconds: i64, color: []const u8, wallpaper: []const u8) !void {
         const db = self.db orelse return HabitError.QueryFailed;
         try db.exec(
-            "UPDATE habits SET name = ?, goal_seconds = ?, color = ? WHERE id = ?;",
-            .{ name, goal_seconds, color, id },
+            "UPDATE habits SET name = ?, goal_seconds = ?, color = ?, wallpaper = ? WHERE id = ?;",
+            .{ name, goal_seconds, color, wallpaper, id },
         );
     }
 
@@ -224,6 +250,31 @@ pub const HabitCrudManager = struct {
     pub fn deleteHabit(self: *HabitCrudManager, id: i64) !void {
         const db = self.db orelse return HabitError.QueryFailed;
         try db.exec("DELETE FROM habits WHERE id = ?;", .{id});
+    }
+
+    /// 获取指定习惯的详情
+    /// 参数：
+    /// - **id**：习惯 ID
+    /// 返回：
+    /// - **?HabitRow**：习惯信息，如果不存在则返回 null
+    /// 错误：
+    /// - **HabitError.QueryFailed**：如果数据库查询失败
+    pub fn getHabitById(self: *HabitCrudManager, id: i64) !?HabitRow {
+        const db = self.db orelse return HabitError.QueryFailed;
+        var rows = try db.rows("SELECT id, set_id, name, goal_seconds, color, COALESCE(wallpaper, '') FROM habits WHERE id = ?;", .{id});
+        defer rows.deinit();
+
+        if (rows.next()) |row| {
+            return .{
+                .id = row.get(i64, 0),
+                .set_id = row.get(i64, 1),
+                .name = try self.allocator.dupe(u8, row.get([]const u8, 2)),
+                .goal_seconds = row.get(i64, 3),
+                .color = try self.allocator.dupe(u8, row.get([]const u8, 4)),
+                .wallpaper = try self.allocator.dupe(u8, row.get([]const u8, 5)),
+            };
+        }
+        return null;
     }
 
     // === 记录 CRUD ===
@@ -370,6 +421,178 @@ pub const HabitCrudManager = struct {
         return streak;
     }
 
+    // === Timer Session CRUD ===
+
+    /// 创建新的计时会话
+    pub fn createTimerSession(
+        self: *HabitCrudManager,
+        habit_id: ?i64,
+        mode: []const u8,
+        work_duration: i64,
+        rest_duration: i64,
+        loop_count: i64,
+    ) !i64 {
+        const db = self.db orelse return HabitError.QueryFailed;
+        const now_ts: i64 = @intCast(std.time.timestamp());
+
+        // 处理 nullable habit_id
+        const hid_null: ?i64 = if (habit_id != null) habit_id else null;
+
+        try db.exec(
+            \\INSERT INTO timer_sessions 
+            \\(habit_id, mode, started_at, updated_at, is_running, is_finished, is_paused, elapsed_seconds, paused_total_seconds, pause_started_at, last_synced_at, remaining_seconds, work_duration, rest_duration, loop_count, current_round, in_rest)
+            \\VALUES (?, ?, ?, ?, 1, 0, 0, 0, 0, NULL, ?, ?, ?, ?, ?, 0, 0);
+        , .{
+            hid_null,
+            mode,
+            now_ts,
+            now_ts,
+            now_ts,
+            work_duration,
+            work_duration,
+            rest_duration,
+            loop_count,
+        });
+
+        var rows = try db.rows("SELECT last_insert_rowid();", .{});
+        defer rows.deinit();
+        const row = rows.next() orelse return HabitError.QueryFailed;
+        return row.get(i64, 0);
+    }
+
+    /// 更新计时会话状态
+    pub fn updateTimerSession(
+        self: *HabitCrudManager,
+        session_id: i64,
+        elapsed_seconds: i64,
+        remaining_seconds: ?i64,
+        paused_total_seconds: i64,
+        pause_started_at: ?i64,
+        last_synced_at: ?i64,
+        is_running: bool,
+        is_paused: bool,
+        is_finished: bool,
+        current_round: i64,
+        in_rest: bool,
+    ) !void {
+        const db = self.db orelse return HabitError.QueryFailed;
+        const now = std.time.timestamp();
+
+        try db.exec(
+            \\UPDATE timer_sessions 
+            \\SET updated_at = ?, elapsed_seconds = ?, remaining_seconds = ?, paused_total_seconds = ?, pause_started_at = ?, last_synced_at = ?, is_running = ?, is_paused = ?, is_finished = ?, current_round = ?, in_rest = ?
+            \\WHERE id = ?;
+        , .{
+            now,
+            elapsed_seconds,
+            remaining_seconds,
+            paused_total_seconds,
+            pause_started_at,
+            last_synced_at,
+            if (is_running) @as(i64, 1) else @as(i64, 0),
+            if (is_paused) @as(i64, 1) else @as(i64, 0),
+            if (is_finished) @as(i64, 1) else @as(i64, 0),
+            current_round,
+            if (in_rest) @as(i64, 1) else @as(i64, 0),
+            session_id,
+        });
+    }
+
+    /// 获取当前活跃的计时会话
+    pub fn getActiveTimerSession(self: *HabitCrudManager) !?TimerSessionRow {
+        const db = self.db orelse return HabitError.QueryFailed;
+
+        var rows = try db.rows(
+            \\SELECT id, habit_id, mode, started_at, updated_at, is_running, is_finished, is_paused, 
+            \\elapsed_seconds, paused_total_seconds, pause_started_at, last_synced_at, remaining_seconds, work_duration, rest_duration, loop_count, current_round, in_rest
+            \\FROM timer_sessions 
+            \\WHERE is_finished = 0 
+            \\ORDER BY updated_at DESC 
+            \\LIMIT 1;
+        , .{});
+        defer rows.deinit();
+
+        if (rows.next()) |row| {
+            return .{
+                .id = row.get(i64, 0),
+                .habit_id = row.get(?i64, 1),
+                .mode = try self.allocator.dupe(u8, row.get([]const u8, 2)),
+                .started_at = row.get(i64, 3),
+                .updated_at = row.get(i64, 4),
+                .is_running = row.get(i64, 5) == 1,
+                .is_finished = row.get(i64, 6) == 1,
+                .is_paused = row.get(i64, 7) == 1,
+                .elapsed_seconds = row.get(i64, 8),
+                .paused_total_seconds = row.get(i64, 9),
+                .pause_started_at = row.get(?i64, 10),
+                .last_synced_at = row.get(?i64, 11),
+                .remaining_seconds = row.get(?i64, 12),
+                .work_duration = row.get(i64, 13),
+                .rest_duration = row.get(i64, 14),
+                .loop_count = row.get(i64, 15),
+                .current_round = row.get(i64, 16),
+                .in_rest = row.get(i64, 17) == 1,
+            };
+        }
+        return null;
+    }
+
+    /// 根据会话 ID 获取计时会话
+    pub fn getTimerSessionById(self: *HabitCrudManager, session_id: i64) !?TimerSessionRow {
+        const db = self.db orelse return HabitError.QueryFailed;
+
+        var rows = try db.rows(
+            \\SELECT id, habit_id, mode, started_at, updated_at, is_running, is_finished, is_paused,
+            \\elapsed_seconds, paused_total_seconds, pause_started_at, last_synced_at, remaining_seconds, work_duration, rest_duration, loop_count, current_round, in_rest
+            \\FROM timer_sessions
+            \\WHERE id = ?
+            \\LIMIT 1;
+        , .{session_id});
+        defer rows.deinit();
+
+        if (rows.next()) |row| {
+            return .{
+                .id = row.get(i64, 0),
+                .habit_id = row.get(?i64, 1),
+                .mode = try self.allocator.dupe(u8, row.get([]const u8, 2)),
+                .started_at = row.get(i64, 3),
+                .updated_at = row.get(i64, 4),
+                .is_running = row.get(i64, 5) == 1,
+                .is_finished = row.get(i64, 6) == 1,
+                .is_paused = row.get(i64, 7) == 1,
+                .elapsed_seconds = row.get(i64, 8),
+                .paused_total_seconds = row.get(i64, 9),
+                .pause_started_at = row.get(?i64, 10),
+                .last_synced_at = row.get(?i64, 11),
+                .remaining_seconds = row.get(?i64, 12),
+                .work_duration = row.get(i64, 13),
+                .rest_duration = row.get(i64, 14),
+                .loop_count = row.get(i64, 15),
+                .current_round = row.get(i64, 16),
+                .in_rest = row.get(i64, 17) == 1,
+            };
+        }
+        return null;
+    }
+
+    /// 删除计时会话
+    pub fn deleteTimerSession(self: *HabitCrudManager, session_id: i64) !void {
+        const db = self.db orelse return HabitError.QueryFailed;
+        try db.exec("DELETE FROM timer_sessions WHERE id = ?;", .{session_id});
+    }
+
+    /// 完成计时会话（标记为完成）
+    pub fn finishTimerSession(self: *HabitCrudManager, session_id: i64) !void {
+        const db = self.db orelse return HabitError.QueryFailed;
+        const now = std.time.timestamp();
+
+        try db.exec(
+            \\UPDATE timer_sessions 
+            \\SET updated_at = ?, is_running = 0, is_finished = 1, is_paused = 0
+            \\WHERE id = ?;
+        , .{ now, session_id });
+    }
+
     // === 清理内存 ===
     /// 释放习惯集信息占用的内存
     /// 参数：
@@ -381,6 +604,7 @@ pub const HabitCrudManager = struct {
             self.allocator.free(s.name);
             self.allocator.free(s.description);
             self.allocator.free(s.color);
+            self.allocator.free(s.wallpaper);
         }
         self.allocator.free(sets);
     }
@@ -394,6 +618,7 @@ pub const HabitCrudManager = struct {
         for (habits) |h| {
             self.allocator.free(h.name);
             self.allocator.free(h.color);
+            self.allocator.free(h.wallpaper);
         }
         self.allocator.free(habits);
     }

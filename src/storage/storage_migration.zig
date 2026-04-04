@@ -6,7 +6,7 @@ const interface = @import("../core/interface.zig");
 const logger = @import("../core/logger.zig");
 
 /// 数据库模式版本常量
-pub const CURRENT_SCHEMA_VERSION = 2;
+pub const CURRENT_SCHEMA_VERSION = 5;
 
 /// SQLite 错误类型
 pub const MigrationError = error{
@@ -109,10 +109,86 @@ pub const MigrationManager = struct {
             try self.createTables();
             try self.setSchemaVersion(to_version);
             logger.global_logger.info("✓ 数据库迁移完成 (1 -> 2)", .{});
+        } else if (from_version == 2 and to_version == 3) {
+            // 迁移到版本 3：添加 wallpaper 字段
+            try self.migrateToV3();
+            try self.setSchemaVersion(to_version);
+            logger.global_logger.info("✓ 数据库迁移完成 (2 -> 3)", .{});
+        } else if (from_version == 3 and to_version == 4) {
+            // 迁移到版本 4：添加 timer_sessions 表
+            try self.migrateToV4();
+            try self.setSchemaVersion(to_version);
+            logger.global_logger.info("✓ 数据库迁移完成 (3 -> 4)", .{});
+        } else if (from_version == 4 and to_version == 5) {
+            // 迁移到版本 5：添加暂停记账字段
+            try self.migrateToV5();
+            try self.setSchemaVersion(to_version);
+            logger.global_logger.info("✓ 数据库迁移完成 (4 -> 5)", .{});
         } else {
             logger.global_logger.err("❌ 不支持的迁移路径: {} -> {}", .{ from_version, to_version });
             return MigrationError.MigrationFailed;
         }
+    }
+
+    /// 迁移到版本 5：添加暂停记账字段
+    fn migrateToV5(self: *MigrationManager) !void {
+        const db = self.db orelse return;
+
+        db.exec("ALTER TABLE timer_sessions ADD COLUMN paused_total_seconds INTEGER NOT NULL DEFAULT 0;", .{}) catch {};
+        db.exec("ALTER TABLE timer_sessions ADD COLUMN pause_started_at INTEGER;", .{}) catch {};
+        db.exec("ALTER TABLE timer_sessions ADD COLUMN last_synced_at INTEGER;", .{}) catch {};
+
+        logger.global_logger.info("已迁移到版本 5(timer_sessions pause accounting)", .{});
+    }
+
+    /// 迁移到版本 3：添加 wallpaper 字段
+    fn migrateToV3(self: *MigrationManager) !void {
+        const db = self.db orelse return;
+
+        db.exec("ALTER TABLE habit_sets ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
+        db.exec("ALTER TABLE habits ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
+        db.exec("ALTER TABLE settings ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
+
+        logger.global_logger.info("已迁移到版本 3(wallpaper)", .{});
+    }
+
+    /// 迁移到版本 4：添加 timer_sessions 表
+    fn migrateToV4(self: *MigrationManager) !void {
+        const db = self.db orelse return;
+
+        const create_timer_sessions_sql =
+            \\CREATE TABLE IF NOT EXISTS timer_sessions (
+            \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
+            \\    habit_id INTEGER,
+            \\    mode TEXT NOT NULL CHECK(mode IN ('countdown', 'stopwatch')),
+            \\    started_at INTEGER NOT NULL,
+            \\    updated_at INTEGER NOT NULL,
+            \\    is_running INTEGER NOT NULL DEFAULT 0,
+            \\    is_finished INTEGER NOT NULL DEFAULT 0,
+            \\    is_paused INTEGER NOT NULL DEFAULT 0,
+            \\    elapsed_seconds INTEGER NOT NULL DEFAULT 0,
+            \\    paused_total_seconds INTEGER NOT NULL DEFAULT 0,
+            \\    pause_started_at INTEGER,
+            \\    last_synced_at INTEGER,
+            \\    remaining_seconds INTEGER,
+            \\    work_duration INTEGER NOT NULL DEFAULT 0,
+            \\    rest_duration INTEGER NOT NULL DEFAULT 0,
+            \\    loop_count INTEGER NOT NULL DEFAULT 0,
+            \\    current_round INTEGER NOT NULL DEFAULT 0,
+            \\    in_rest INTEGER NOT NULL DEFAULT 0,
+            \\    FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE SET NULL
+            \\);
+        ;
+
+        db.exec(create_timer_sessions_sql, .{}) catch |err| {
+            logger.global_logger.err("❌ 创建 timer_sessions 表失败: {any}", .{err});
+            return MigrationError.TableCreationFailed;
+        };
+
+        db.exec("CREATE INDEX IF NOT EXISTS idx_timer_sessions_habit_id ON timer_sessions(habit_id);", .{}) catch {};
+        db.exec("CREATE INDEX IF NOT EXISTS idx_timer_sessions_is_running ON timer_sessions(is_running);", .{}) catch {};
+
+        logger.global_logger.info("已迁移到版本 4(timer_sessions)", .{});
     }
 
     /// 创建所有数据表（基础版本）
@@ -166,6 +242,30 @@ pub const MigrationManager = struct {
             \\);
         ;
 
+        const create_timer_sessions_sql =
+            \\CREATE TABLE IF NOT EXISTS timer_sessions (
+            \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
+            \\    habit_id INTEGER,
+            \\    mode TEXT NOT NULL CHECK(mode IN ('countdown', 'stopwatch')),
+            \\    started_at INTEGER NOT NULL,
+            \\    updated_at INTEGER NOT NULL,
+            \\    is_running INTEGER NOT NULL DEFAULT 0,
+            \\    is_finished INTEGER NOT NULL DEFAULT 0,
+            \\    is_paused INTEGER NOT NULL DEFAULT 0,
+            \\    elapsed_seconds INTEGER NOT NULL DEFAULT 0,
+            \\    paused_total_seconds INTEGER NOT NULL DEFAULT 0,
+            \\    pause_started_at INTEGER,
+            \\    last_synced_at INTEGER,
+            \\    remaining_seconds INTEGER,
+            \\    work_duration INTEGER NOT NULL DEFAULT 0,
+            \\    rest_duration INTEGER NOT NULL DEFAULT 0,
+            \\    loop_count INTEGER NOT NULL DEFAULT 0,
+            \\    current_round INTEGER NOT NULL DEFAULT 0,
+            \\    in_rest INTEGER NOT NULL DEFAULT 0,
+            \\    FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE SET NULL
+            \\);
+        ;
+
         // 优化的设置表：添加更多约束
         const create_settings_sql = "CREATE TABLE IF NOT EXISTS settings (" ++
             " id INTEGER PRIMARY KEY CHECK (id = 1)," ++
@@ -205,6 +305,11 @@ pub const MigrationManager = struct {
             return MigrationError.TableCreationFailed;
         };
 
+        self.db.?.exec(create_timer_sessions_sql, .{}) catch |err| {
+            logger.global_logger.err("❌ 创建计时会话表失败: {any}", .{err});
+            return MigrationError.TableCreationFailed;
+        };
+
         self.db.?.exec(create_settings_sql, .{}) catch |err| {
             logger.global_logger.err("❌ 创建设置表失败: {any}", .{err});
             return MigrationError.TableCreationFailed;
@@ -237,6 +342,9 @@ pub const MigrationManager = struct {
                 // 索引创建失败不是致命错误，继续执行
             };
         }
+
+        self.db.?.exec("CREATE INDEX IF NOT EXISTS idx_timer_sessions_habit_id ON timer_sessions(habit_id);", .{}) catch {};
+        self.db.?.exec("CREATE INDEX IF NOT EXISTS idx_timer_sessions_is_running ON timer_sessions(is_running);", .{}) catch {};
 
         logger.global_logger.info("✓ 索引创建完成", .{});
     }

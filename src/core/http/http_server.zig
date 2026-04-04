@@ -72,22 +72,115 @@ fn handleStart(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respon
     const body = request.body() orelse "";
 
     var habit_id: ?i64 = null;
+    var mode: []const u8 = "stopwatch";
+    var work_duration: i64 = 25 * 60;
+    var rest_duration: i64 = 0;
+    var loop_count: i64 = 0;
+
     if (body.len > 0) {
         const parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch null;
+        defer if (parsed) |p| p.deinit();
         if (parsed) |p| {
-            defer p.deinit();
             if (p.value.object.get("habit_id")) |hid| {
                 if (hid == .integer) {
                     habit_id = hid.integer;
                 }
             }
+            if (p.value.object.get("mode")) |m| {
+                if (m == .string) {
+                    if (std.mem.eql(u8, m.string, "countdown")) {
+                        mode = "countdown";
+                    } else {
+                        mode = "stopwatch";
+                    }
+                }
+            }
+            if (p.value.object.get("work_duration")) |wd| {
+                if (wd == .integer) {
+                    work_duration = wd.integer;
+                }
+            }
+            if (p.value.object.get("rest_duration")) |rd| {
+                if (rd == .integer) {
+                    rest_duration = rd.integer;
+                }
+            }
+            if (p.value.object.get("loop_count")) |lc| {
+                if (lc == .integer) {
+                    loop_count = lc.integer;
+                }
+            }
         }
     }
+
+    const db = h.app.settings_manager.sqlite_db orelse {
+        try response.json(.{ .err = "Database not open" }, .{});
+        return;
+    };
+
+    // 如果当前已有暂停中的会话，则视为恢复同一会话，而不是创建新会话
+    if (h.app.current_timer_session_id) |session_id| {
+        const session = db.habit_manager.getTimerSessionById(session_id) catch null;
+        if (session) |s| {
+            defer h.allocator.free(s.mode);
+
+            // 幂等保护：已有运行中的会话时，重复 start 请求不再创建新会话。
+            if (s.is_running and !s.is_finished and !s.is_paused) {
+                h.app.current_habit_id = habit_id orelse s.habit_id;
+                triggerSSEPush(h);
+                try response.json(.{ .status = "already_running", .habit_id = h.app.current_habit_id, .session_id = session_id }, .{});
+                return;
+            }
+
+            const current_clock = h.app.clock_manager.update();
+            if ((current_clock.isPaused() and !current_clock.isFinished()) or s.is_paused) {
+                var paused_total_seconds = s.paused_total_seconds;
+                const now_ts: i64 = @intCast(std.time.timestamp());
+                if (s.pause_started_at) |ps| {
+                    if (now_ts > ps) {
+                        paused_total_seconds += now_ts - ps;
+                    }
+                }
+
+                h.app.clock_manager.handleEvent(.user_start_timer);
+                _ = db.habit_manager.updateTimerSession(
+                    session_id,
+                    s.elapsed_seconds,
+                    s.remaining_seconds,
+                    paused_total_seconds,
+                    null,
+                    now_ts,
+                    true,
+                    false,
+                    false,
+                    s.current_round,
+                    s.in_rest,
+                ) catch {};
+
+                h.app.current_habit_id = habit_id orelse s.habit_id;
+                triggerSSEPush(h);
+                try response.json(.{ .status = "started", .habit_id = h.app.current_habit_id, .session_id = session_id }, .{});
+                return;
+            }
+        }
+
+        h.app.resetTimerSession();
+    }
+
+    // 创建新的计时会话
+    const session_id = h.app.createTimerSession(habit_id, mode, work_duration, rest_duration, loop_count) catch {
+        // 如果创建失败，回退到旧行为
+        h.app.current_habit_id = habit_id;
+        h.app.clock_manager.handleEvent(.user_start_timer);
+        triggerSSEPush(h);
+        try response.json(.{ .status = "started", .habit_id = habit_id }, .{});
+        return;
+    };
 
     h.app.current_habit_id = habit_id;
     h.app.clock_manager.handleEvent(.user_start_timer);
     triggerSSEPush(h);
-    try response.json(.{ .status = "started", .habit_id = habit_id }, .{});
+    try response.json(.{ .status = "started", .habit_id = habit_id, .session_id = session_id }, .{});
 }
 
 fn handleStartRest(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
@@ -117,16 +210,91 @@ fn handleStartRest(h: *HttpHandler, request: *httpz.Request, response: *httpz.Re
 fn handlePause(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
     _ = request;
     h.app.clock_manager.handleEvent(.user_pause_timer);
+    h.app.saveTimerProgress();
     triggerSSEPush(h);
     try response.json(.{ .status = "paused" }, .{});
 }
 
 fn handleReset(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
     _ = request;
+    h.app.resetTimerSession();
     h.app.current_habit_id = null;
     h.app.clock_manager.handleEvent(.user_reset_timer);
     triggerSSEPush(h);
     try response.json(.{ .status = "reset" }, .{});
+}
+
+fn handleFinish(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
+
+    const habit_id = h.app.current_habit_id;
+    const session_id = h.app.current_timer_session_id;
+
+    // 完成计时会话，获取用于统计的 elapsed
+    const elapsed = h.app.finishTimerSession() catch {
+        // 如果失败，回退到旧行为
+        h.app.clock_manager.handleEvent(.user_finish_timer);
+        const clock_state = h.app.clock_manager.update();
+        const elapsed_seconds = clock_state.getElapsedSeconds();
+        triggerSSEPush(h);
+        try response.json(.{ .status = "finished", .elapsed_seconds = elapsed_seconds }, .{});
+        return;
+    };
+
+    // 创建 session 记录（用于统计）
+    if (habit_id != null and elapsed > 0) {
+        // 获取今天的日期字符串
+        const timestamp: i64 = @intCast(std.time.timestamp());
+        const es = std.time.epoch.EpochSeconds{ .secs = @as(u64, @intCast(timestamp)) };
+        const yd = es.getEpochDay().calculateYearDay();
+        const md = yd.calculateMonthDay();
+        var buffer: [10]u8 = undefined;
+        const today = std.fmt.bufPrint(&buffer, "{d:0>4}-{d:0>2}-{d:0>2}", .{ yd.year, md.month.numeric(), md.day_index + 1 }) catch "";
+
+        _ = h.app.settings_manager.sqlite_db.?.habit_manager.createSession(
+            habit_id.?,
+            elapsed,
+            1,
+            today,
+        ) catch |err| {
+            logger.global_logger.err("创建日统计记录失败: {any}", .{err});
+        };
+    }
+
+    // 清理 session
+    h.app.resetTimerSession();
+
+    triggerSSEPush(h);
+    try response.json(.{ .status = "finished", .elapsed_seconds = elapsed, .session_id = session_id }, .{});
+}
+
+fn handleGetProgress(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    _ = request;
+
+    // 仅在进程内尚未持有会话状态时才从数据库恢复，避免重复恢复覆盖当前运行态。
+    if (h.app.current_timer_session_id == null) {
+        h.app.loadTimerProgress();
+    }
+
+    const session_id = h.app.current_timer_session_id;
+    const habit_id = h.app.current_habit_id;
+    const clock_state = h.app.clock_manager.update();
+    const mode_key = switch (clock_state.getMode()) {
+        .COUNTDOWN_MODE => "countdown",
+        .STOPWATCH_MODE => "stopwatch",
+    };
+
+    try response.json(.{
+        .session_id = session_id,
+        .habit_id = habit_id,
+        .mode = mode_key,
+        .is_running = !clock_state.isPaused(),
+        .is_paused = clock_state.isPaused(),
+        .is_finished = clock_state.isFinished(),
+        .elapsed_seconds = clock_state.getElapsedSeconds(),
+        .remaining_seconds = clock_state.getRemainingSeconds(),
+        .in_rest = clock_state.inRest(),
+    }, .{});
 }
 
 fn handleModeChange(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
@@ -328,6 +496,7 @@ fn handleUpdateHabitSet(h: *HttpHandler, request: *httpz.Request, response: *htt
     var name: []const u8 = undefined;
     var description_str: []const u8 = undefined;
     var color_str: []const u8 = undefined;
+    var wallpaper: []const u8 = undefined;
 
     if (root.get("name")) |val| {
         if (val == .string and val.string.len > 0) {
@@ -340,6 +509,9 @@ fn handleUpdateHabitSet(h: *HttpHandler, request: *httpz.Request, response: *htt
     if (root.get("color")) |val| {
         if (val == .string) color_str = val.string;
     }
+    if (root.get("wallpaper")) |val| {
+        if (val == .string) wallpaper = val.string;
+    }
 
     if (name.len == 0) {
         try response.json(.{ .err = "Missing name" }, .{});
@@ -348,14 +520,15 @@ fn handleUpdateHabitSet(h: *HttpHandler, request: *httpz.Request, response: *htt
 
     if (description_str.len == 0) description_str = "";
     if (color_str.len == 0) color_str = "#6366f1";
+    if (wallpaper.len == 0) wallpaper = "";
 
-    h.app.settings_manager.sqlite_db.?.*.habit_manager.updateHabitSet(id, name, description_str, color_str) catch |err| {
+    h.app.settings_manager.sqlite_db.?.*.habit_manager.updateHabitSet(id, name, description_str, color_str, wallpaper) catch |err| {
         logger.global_logger.err("更新习惯集失败: {any}", .{err});
         try response.json(.{ .err = "Failed to update habit set" }, .{});
         return;
     };
 
-    try response.json(.{ .id = id, .name = name, .description = description_str, .color = color_str }, .{});
+    try response.json(.{ .id = id, .name = name, .description = description_str, .color = color_str, .wallpaper = wallpaper }, .{});
 }
 
 fn handleDeleteHabitSet(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
@@ -476,7 +649,7 @@ fn handleUpdateHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.
     var name: []const u8 = undefined;
     var goal_seconds: i64 = 0;
     var color_str: []const u8 = undefined;
-    var set_id: i64 = 0;
+    var wallpaper: []const u8 = undefined;
 
     if (root.get("name")) |val| {
         if (val == .string and val.string.len > 0) {
@@ -489,8 +662,8 @@ fn handleUpdateHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.
     if (root.get("color")) |val| {
         if (val == .string) color_str = val.string;
     }
-    if (root.get("set_id")) |val| {
-        if (val == .integer) set_id = val.integer;
+    if (root.get("wallpaper")) |val| {
+        if (val == .string) wallpaper = val.string;
     }
 
     if (name.len == 0) {
@@ -500,14 +673,15 @@ fn handleUpdateHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.
 
     if (goal_seconds == 0) goal_seconds = 1500;
     if (color_str.len == 0) color_str = "#6366f1";
+    if (wallpaper.len == 0) wallpaper = "";
 
-    h.app.settings_manager.sqlite_db.?.*.habit_manager.updateHabit(id, name, goal_seconds, color_str) catch |err| {
+    h.app.settings_manager.sqlite_db.?.*.habit_manager.updateHabit(id, name, goal_seconds, color_str, wallpaper) catch |err| {
         logger.global_logger.err("更新习惯失败: {any}", .{err});
         try response.json(.{ .err = "Failed to update habit" }, .{});
         return;
     };
 
-    try response.json(.{ .id = id, .name = name, .goal_seconds = goal_seconds, .color = color_str }, .{});
+    try response.json(.{ .id = id, .name = name, .goal_seconds = goal_seconds, .color = color_str, .wallpaper = wallpaper }, .{});
 }
 
 // === 记录 API ===
@@ -619,6 +793,44 @@ fn handleGetHabitStreak(h: *HttpHandler, request: *httpz.Request, response: *htt
     try response.json(.{ .habit_id = habit_id, .streak = streak }, .{});
 }
 
+fn handleGetHabitDetail(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    const id_str = request.params.get("id") orelse {
+        try response.json(.{ .err = "Missing id" }, .{});
+        return;
+    };
+    const habit_id = std.fmt.parseInt(i64, id_str, 10) catch {
+        try response.json(.{ .err = "Invalid id" }, .{});
+        return;
+    };
+
+    const date_param = request.params.get("date") orelse "2026-03-31";
+
+    const habit = h.app.settings_manager.sqlite_db.?.*.habit_manager.getHabitById(habit_id) catch {
+        try response.json(.{ .err = "Failed to get habit" }, .{});
+        return;
+    };
+
+    const h_row = habit orelse {
+        try response.json(.{ .err = "Habit not found" }, .{});
+        return;
+    };
+
+    const today_seconds = h.app.settings_manager.sqlite_db.?.*.habit_manager.getHabitTodaySeconds(habit_id, date_param) catch 0;
+    const streak = h.app.settings_manager.sqlite_db.?.*.habit_manager.getHabitStreak(habit_id, h_row.goal_seconds) catch 0;
+
+    const progress_percent: i64 = if (h_row.goal_seconds > 0) @divTrunc(today_seconds * 100, h_row.goal_seconds) else 0;
+
+    try response.json(.{
+        .id = h_row.id,
+        .name = h_row.name,
+        .goal_seconds = h_row.goal_seconds,
+        .color = h_row.color,
+        .today_seconds = today_seconds,
+        .streak = streak,
+        .progress_percent = progress_percent,
+    }, .{});
+}
+
 pub const HttpServerManager = struct {
     server: httpz.Server(*HttpHandler),
     handler: HttpHandler,
@@ -658,9 +870,12 @@ pub const HttpServerManager = struct {
         router.post("/api/sessions", handleCreateSession, .{});
         router.get("/api/sessions", handleGetSessions, .{});
         router.get("/api/habits/:id/streak", handleGetHabitStreak, .{});
+        router.get("/api/habits/:id/detail", handleGetHabitDetail, .{});
 
         // 计时器 API
         router.post("/api/timer/rest", handleStartRest, .{});
+        router.post("/api/timer/finish", handleFinish, .{});
+        router.get("/api/timer/progress", handleGetProgress, .{});
 
         logger.global_logger.info("HTTP 服务器路由注册完成", .{});
 

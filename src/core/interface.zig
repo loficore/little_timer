@@ -37,6 +37,7 @@ pub const ClockEvent = union(enum) {
     user_start_timer: void, // 用户开始计时
     user_pause_timer: void, // 用户暂停计时
     user_reset_timer: void, // 用户重置计时
+    user_finish_timer: void, // 用户结束计时（停止并计入统计）
     user_change_mode: ModeEnumT, // 用户更改模式
     user_change_config: ClockTaskConfig, // 用户更改配置
 };
@@ -56,6 +57,7 @@ pub const SettingsConfig = struct {
         language: []const u8 = "ZH", // 语言代码
         default_mode: DefaultMode = .countdown, // 默认启动模式
         theme_mode: []const u8 = "dark", // 主题模式
+        wallpaper: []const u8 = "", // 全局壁纸
     } = .{},
 
     /// 默认时钟设置

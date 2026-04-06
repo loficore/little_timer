@@ -738,13 +738,17 @@ fn handleCreateSession(h: *HttpHandler, request: *httpz.Request, response: *http
 }
 
 fn handleGetSessions(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const date = request.params.get("date");
-    const start_date = request.params.get("start_date");
-    const end_date = request.params.get("end_date");
+    const query = try request.query();
+    const date = query.get("date");
+    const start_date = query.get("start_date");
+    const end_date = query.get("end_date");
+
+    std.debug.print("[handleGetSessions] date={s}, start_date={s}, end_date={s}\n", .{ date orelse "null", start_date orelse "null", end_date orelse "null" });
 
     var sessions: []habit_crud.SessionRow = &.{};
 
     if (start_date != null and end_date != null) {
+        std.debug.print("[handleGetSessions] calling getSessionsByDateRange\n", .{});
         sessions = h.app.settings_manager.sqlite_db.?.*.habit_manager.getSessionsByDateRange(start_date.?, end_date.?) catch {
             try response.json(.{ .err = "Failed to get sessions" }, .{});
             return;
@@ -765,6 +769,11 @@ fn handleGetSessions(h: *HttpHandler, request: *httpz.Request, response: *httpz.
             try response.json(.{ .err = "Failed to get sessions" }, .{});
             return;
         };
+    }
+
+    std.debug.print("[handleGetSessions] returning {} sessions\n", .{sessions.len});
+    for (sessions) |s| {
+        std.debug.print("  session: id={}, habit_id={}, duration={}, date={s}\n", .{ s.id, s.habit_id, s.duration_seconds, s.date });
     }
 
     try response.json(sessions, .{});

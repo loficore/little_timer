@@ -2,6 +2,7 @@ import type { TimerState } from './apiClient';
 
 export type EventCallback = (state: TimerState) => void;
 export type ErrorCallback = (error: Event) => void;
+export type ConnectCallback = () => void;
 
 /**
  * SSE 客户端，用于连接到后端 SSE 服务器并接收计时器状态更新
@@ -14,6 +15,7 @@ export class SSEClient {
     private reconnectDelay = 1000;
     private onEvent: EventCallback | null = null;
     private onError: ErrorCallback | null = null;
+    private onConnect: ConnectCallback | null = null;
 
     /**
      * 构造函数，接受 SSE 服务器的基础 URL
@@ -27,10 +29,12 @@ export class SSEClient {
      * 连接到 SSE 服务器并设置事件回调
      * @param {EventCallback} onEvent - 当接收到新的计时器状态时调用的回调函数
      * @param {ErrorCallback} [onError] - 当连接发生错误时调用的可选回调函数
+     * @param {ConnectCallback} [onConnect] - 当连接成功建立时调用的可选回调函数
      */
-    connect(onEvent: EventCallback, onError?: ErrorCallback): void {
+    connect(onEvent: EventCallback, onError?: ErrorCallback, onConnect?: ConnectCallback): void {
         this.onEvent = onEvent;
         this.onError = onError || null;
+        this.onConnect = onConnect || null;
         this.createConnection();
     }
 
@@ -40,6 +44,10 @@ export class SSEClient {
         this.eventSource.onopen = () => {
             console.log('SSE connection opened');
             this.reconnectAttempts = 0;
+            // 连接成功时立即通知
+            if (this.onConnect) {
+                this.onConnect();
+            }
         };
 
         this.eventSource.onmessage = (event: MessageEvent) => {

@@ -33,7 +33,7 @@ export interface Settings {
  * API 客户端，用于与后端 API 进行交互
  */
 export class APIClient {
-    private baseUrl: string;
+    public baseUrl: string;
 
     /**
      * 构造函数，接受 API 基础 URL
@@ -200,18 +200,6 @@ export class APIClient {
         if (!response.ok) {
             throw new Error(`Error updating settings: ${response.statusText}`);
         }
-    }
-
-    /**
-     * 获取预设列表
-     * @returns {Promise<object>} 返回一个 Promise，解析为预设列表对象
-     */
-    async getPresets(): Promise<object> {
-        const response = await fetch(`${this.baseUrl}/api/presets`);
-        if (!response.ok) {
-            throw new Error(`Error fetching presets: ${response.statusText}`);
-        }
-        return await response.json();
     }
 
     // === 习惯集 API ===

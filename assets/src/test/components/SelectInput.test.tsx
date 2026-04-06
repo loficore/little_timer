@@ -24,8 +24,8 @@ describe("SelectInput 组件", () => {
       />,
     );
 
-    const select = screen.getByDisplayValue("中文") as HTMLSelectElement;
-    expect(select.value).toBe("zh");
+    const button = document.querySelector('button');
+    expect(button?.textContent).toContain("中文");
   });
 
   it("应该渲染所有选项", () => {
@@ -38,8 +38,11 @@ describe("SelectInput 组件", () => {
       />,
     );
 
-    const optionElements = container.querySelectorAll("option");
-    expect(optionElements.length).toBe(3);
+    const button = container.querySelector('button');
+    fireEvent.click(button);
+
+    const optionButtons = document.querySelectorAll('.absolute button');
+    expect(optionButtons.length).toBe(3);
   });
 
   it("应该在选择变化时调用 onChange", () => {
@@ -52,8 +55,11 @@ describe("SelectInput 组件", () => {
       />,
     );
 
-    const select = screen.getByDisplayValue("中文");
-    fireEvent.change(select, { target: { value: "en" } });
+    const button = document.querySelector('button');
+    fireEvent.click(button);
+
+    const optionButtons = document.querySelectorAll('.absolute button');
+    fireEvent.click(optionButtons[1]);
 
     expect(mockOnChange).toHaveBeenCalledWith("en");
   });
@@ -69,8 +75,8 @@ describe("SelectInput 组件", () => {
       />,
     );
 
-    const select = screen.getByDisplayValue("中文") as HTMLSelectElement;
-    expect(select.disabled).toBe(true);
+    const button = document.querySelector('button') as HTMLButtonElement;
+    expect(button?.disabled).toBe(true);
   });
 
   it("应该显示标签", () => {

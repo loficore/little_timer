@@ -1,3 +1,6 @@
+import tickSoundUrl from "../../audio/clock.mp3";
+import finishSoundUrl from "../../audio/ding.mp3";
+
 export interface AudioPreferences {
   sound_enabled: boolean;
   sound_tick: boolean;
@@ -55,120 +58,93 @@ export const saveAudioPreferences = (prefs: AudioPreferences): void => {
 };
 
 class AudioEngine {
-  private context: AudioContext | null = null;
+  private tickAudio: HTMLAudioElement | null = null;
 
-  private masterGain: GainNode | null = null;
+  private finishAudio: HTMLAudioElement | null = null;
 
   private preferences: AudioPreferences = DEFAULT_AUDIO_PREFERENCES;
 
   setPreferences(prefs: AudioPreferences): void {
     this.preferences = normalizeAudioPreferences(prefs);
-    if (this.masterGain) {
-      this.masterGain.gain.value = this.resolveMasterGain();
+    if (!this.preferences.sound_enabled || !this.preferences.sound_tick) {
+      this.stopTick();
     }
   }
 
   async unlock(): Promise<void> {
-    const ready = this.ensureContext();
-    if (!ready || !this.context) {
-      return;
-    }
-
-    if (this.context.state === "suspended") {
-      await this.context.resume();
-    }
+    this.ensureAudioElements();
+    return Promise.resolve();
   }
 
   playTick(): void {
     if (!this.preferences.sound_enabled || !this.preferences.sound_tick) {
       return;
     }
-    this.playPulse(1300, 0.06, 0.14, "triangle");
+
+    this.playAudio(this.getTickAudio(), true);
+  }
+
+  stopTick(): void {
+    const audio = this.tickAudio;
+    if (!audio) {
+      return;
+    }
+
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+    } catch {
+      // 忽略停止过程中的浏览器限制
+    }
   }
 
   playFinish(): void {
+    this.stopTick();
     if (!this.preferences.sound_enabled || !this.preferences.sound_finish) {
       return;
     }
 
-    this.playPulse(860, 0.12, 0.36, "sine", 0);
-    this.playPulse(1080, 0.14, 0.28, "triangle", 0.16);
+    this.playAudio(this.getFinishAudio());
   }
 
-  private resolveMasterGain(): number {
-    if (!this.preferences.sound_enabled) {
-      return 0;
+  private ensureAudioElements(): void {
+    if (!this.tickAudio) {
+      this.tickAudio = new Audio(tickSoundUrl);
+      this.tickAudio.loop = true;
+      this.tickAudio.preload = "auto";
     }
-    return (this.preferences.sound_volume / 100) * 0.35;
+
+    if (!this.finishAudio) {
+      this.finishAudio = new Audio(finishSoundUrl);
+      this.finishAudio.preload = "auto";
+    }
   }
 
-  private resolveAudioContextClass(): (new () => AudioContext) | null {
-    if (typeof window === "undefined") {
-      return null;
-    }
-
-    const win = window as Window & { webkitAudioContext?: new () => AudioContext };
-    const nativeAudioContext =
-      typeof globalThis.AudioContext === "function" ? globalThis.AudioContext : null;
-    return nativeAudioContext ?? win.webkitAudioContext ?? null;
+  private getTickAudio(): HTMLAudioElement {
+    this.ensureAudioElements();
+    return this.tickAudio as HTMLAudioElement;
   }
 
-  private ensureContext(): boolean {
-    if (this.context && this.masterGain) {
-      return true;
-    }
+  private getFinishAudio(): HTMLAudioElement {
+    this.ensureAudioElements();
+    return this.finishAudio as HTMLAudioElement;
+  }
 
-    const AudioContextClass = this.resolveAudioContextClass();
-    if (!AudioContextClass) {
-      return false;
+  private playAudio(audio: HTMLAudioElement, loop = false): void {
+    if (this.preferences.sound_volume <= 0) {
+      return;
     }
 
     try {
-      this.context = new AudioContextClass();
-      this.masterGain = this.context.createGain();
-      this.masterGain.gain.value = this.resolveMasterGain();
-      this.masterGain.connect(this.context.destination);
-      return true;
+      audio.currentTime = 0;
+      audio.loop = loop;
+      audio.volume = this.preferences.sound_volume / 100;
+      void audio.play().catch(() => {
+        // 浏览器限制或解码失败时静默降级
+      });
     } catch {
-      this.context = null;
-      this.masterGain = null;
-      return false;
+      // 浏览器不支持音频播放时保持静默
     }
-  }
-
-  private playPulse(
-    frequency: number,
-    durationSeconds: number,
-    pulseGain: number,
-    waveform: OscillatorType,
-    delaySeconds = 0,
-  ): void {
-    if (!this.preferences.sound_enabled || this.preferences.sound_volume <= 0) {
-      return;
-    }
-
-    const ready = this.ensureContext();
-    if (!ready || !this.context || !this.masterGain) {
-      return;
-    }
-
-    const startAt = this.context.currentTime + delaySeconds;
-    const endAt = startAt + durationSeconds;
-
-    const oscillator = this.context.createOscillator();
-    oscillator.type = waveform;
-    oscillator.frequency.value = frequency;
-
-    const gain = this.context.createGain();
-    gain.gain.setValueAtTime(0.0001, startAt);
-    gain.gain.exponentialRampToValueAtTime(pulseGain, startAt + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, endAt);
-
-    oscillator.connect(gain);
-    gain.connect(this.masterGain);
-
-    oscillator.start(startAt);
-    oscillator.stop(endAt + 0.02);
   }
 }
 

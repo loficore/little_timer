@@ -1,7 +1,34 @@
 # Little Timer 开发计划
 
 ## 目标
+
 将计时器应用重构为**习惯养成应用**，计时为基础功能，习惯养成为核心。
+
+### 性能优化目标 (Vercel React Best Practices)
+
+按照 Vercel React Best Practices 优化前端代码，提升性能、可维护性和模块化程度。
+
+#### 问题分析
+
+1. **代码重复**
+   - `formatDuration` 在 Homepage.tsx, TimerPage.tsx, HabitsPage.tsx, Stats.tsx 中重复定义
+   - API 客户端在每个组件中独立实例化
+
+2. **重新渲染问题** (rerender-*)
+   - 大量内联函数和对象作为 props
+   - 缺少 memo/useCallback 优化
+   - 组件内定义组件 (rerender-no-inline-components)
+
+3. **Bundle Size 问题** (bundle-*)
+   - 所有组件一次性加载
+   - apexcharts 库全量导入
+
+4. **数据获取问题** (client-*)
+   - 每个组件独立创建 APIClient 实例
+   - 没有请求去重和缓存
+
+5. **模块化不足**
+   - `TimerPage.tsx` 超过 700 行，职责过多
 
 ---
 
@@ -64,17 +91,91 @@
 
 > **Bug 修复**：settings_manager.zig 未解析 wallpaper 字段，Settings.tsx 未加载 wallpaper - 已修复
 
-### Phase 9.1: 壁纸显示逻辑修复（进行中 🔄）
+---
 
-**问题**：选择壁纸后，CSS 默认黑色渐变和用户壁纸叠加在一起，不是"选择哪个就显示哪个"。
+## 实施阶段
 
-**修复方案**：将壁纸从 body 改为应用到 html 元素，直接覆盖 CSS 样式。
+### Phase 1: 工具层统一化 ⏳
 
-- [ ] App.tsx - 壁纸应用到 html 元素而非 body
-- [ ] globals.css - 添加 has-wallpaper 类用于禁用默认背景
-- [ ] 验证：选择无/渐变/纯色/图片各自正确显示
+- [ ] 创建 `src/utils/formatters.ts` - 统一格式化函数 (formatDuration 等)
+- [ ] 创建 `src/utils/constants.ts` - 统一常量定义
+- [ ] 统一 API 客户端实例化模式 (单例模式)
 
-### Phase 8: UI 美化与动画统一 ⏳
+### Phase 2: 数据层抽象 (Hooks) ⏳
+
+- [ ] 创建 `src/hooks/useTimer.ts` - 计时器状态管理
+- [ ] 创建 `src/hooks/useHabits.ts` - 习惯数据管理
+- [ ] 创建 `src/hooks/useSSE.ts` - SSE 连接管理
+- [ ] 创建 `src/hooks/useSettings.ts` - 设置管理
+
+### Phase 3: 组件拆分 (TimerPage) ⏳
+
+- [ ] 拆分出 `TimerControls.tsx` - 控制按钮组件
+- [ ] 拆分出 `TimerConfig.tsx` - 计时配置面板
+- [ ] 拆分出 `HabitPicker.tsx` - 习惯选择器
+- [ ] 拆分出 `TimerProgress.tsx` - 进度显示组件
+
+### Phase 4: 性能优化 ⏳
+
+- [ ] 全局 memo 策略 - 确保所有组件使用 memo 包裹
+- [ ] 提取内联 SVG 为独立组件 (Sidebar.tsx icons)
+- [ ] 动态导入 apexcharts (bundle-dynamic-imports)
+- [ ] 优化状态派生 - 减少不必要的 useEffect
+
+### Phase 5: 目录结构重组 ⏳
+
+```
+src/
+├── pages/           # 页面组件
+├── components/      # 通用组件
+├── hooks/           # 自定义 hooks
+├── utils/           # 工具函数
+└── types/           # 类型定义
+```
+
+---
+
+## 验收标准
+
+1. [ ] 消除所有 `formatDuration` 重复定义
+2. [ ] TimerPage 组件代码行数控制在 300 行以内
+3. [ ] 所有 API 调用通过 hooks 管理
+4. [ ] 动态导入 apexcharts
+5. [ ] 通过 `bun run build:check` 类型检查
+6. [ ] 通过 `bun run lint` 代码规范检查
+
+### 12.1 修复选择习惯弹窗样式
+
+**问题**: 点击"选择习惯"后弹窗背景与全局背景不协调，可能导致页面变红
+
+**修复**: TimerPage.tsx 的 showHabitPicker 弹窗改为毛玻璃风格
+
+- [x] 修改弹窗 className 使用 `my-surface-card`
+
+### 12.2 美化计时选项下拉框
+
+**问题**: 计时模式 `<select>` 使用默认样式，与设计风格不统一
+
+**修复**: 应用已有的 `timer-option-control` 样式类
+
+- [x] TimerPage.tsx - 验证 `<select>` 使用正确样式类
+
+### 12.3 修复 i18n 缺少翻译
+
+**问题**: 统计页面顶栏显示 "stats.title" 字面量，而非"统计"
+
+**修复**: 在 i18n/zh.toml 添加缺失的翻译
+
+- [x] 添加 `[stats]` 段落和 `title = "统计"`
+
+### 12.4 修复统计页面时间分布图表
+
+**问题**: 统计页面时间分布图表区域空白
+
+**修复**: 检查 Stats.tsx 中 pie chart 渲染逻辑
+
+- [x] 后端 handleGetSessions 使用 `request.params` 获取 query string，改为使用 `request.query()` 方法
+- [x] 前端添加 `habits.length > 0` 条件检查
 
 - [ ] 背景渐变层次
 - [ ] 微质感按钮样式
@@ -82,7 +183,7 @@
 - [ ] 时间显示发光效果
 - [ ] 统一过渡动画
 
-### Phase 11: 统一 Material You 组件样式
+## Phase 11: 统一 Material You 组件样式
 
 - [ ] 创建统一表单控件样式（.my-input, .my-select）
 - [ ] 创建统一徽章样式（.my-badge-*）
@@ -91,6 +192,69 @@
 - [ ] 替换所有 DaisyUI 徽章
 - [ ] 替换所有 DaisyUI 次要按钮
 - [ ] 统一卡片样式
+
+---
+
+## Phase 13: 前端 UI 样式修复 ✅
+
+### 问题1：自定义时间选择组件
+
+- [x] 创建自定义数字选择器组件，替代原生 input
+- [x] 在 TimeInput.tsx、NumberInput.tsx、TimerConfig.tsx、TimerPage.tsx、HabitModal.tsx 中使用
+
+### 问题2：毛玻璃效果缺失
+
+- [x] TimerPage - 选择习惯按钮增强毛玻璃效果
+- [x] TimerPage - 时间选择容器添加毛玻璃效果
+- [x] TimerConfig - 配置面板添加毛玻璃效果
+
+### 问题3：深色遮罩问题
+
+- [x] HabitPicker 移除深色遮罩
+- [x] HabitModal 移除深色遮罩  
+- [x] TimerPage habit picker 移除深色遮罩
+
+---
+
+## Phase 12: 测试扩展 ✅
+
+### 后端测试 (12/12 模块覆盖) ✅
+
+| 模块 | 文件 | 状态 |
+|------|------|------|
+| 时钟 | `test_clock.zig` | ✅ 完成 |
+| 设置 | `test_settings.zig` | ✅ 完成 |
+| 错误恢复 | `test_error_recovery.zig` | ✅ 完成 |
+| 日志 | `test_logger.zig` | ✅ 完成 |
+| 设置校验 | `test_settings_validator.zig` | ✅ 完成 |
+| 边界条件 | `test_boundary_conditions.zig` | ✅ 完成 |
+| HTTP 服务器 | `test_http_server.zig` | ✅ 完成 |
+| 存储层 | `test_storage.zig` | ✅ 完成 |
+| 主应用 | `test_app.zig` | ✅ 完成 |
+| 数据迁移 | `test_migration.zig` | ✅ 完成 |
+| CRUD | `habit_crud.zig` | ✅ 完成 |
+| 备份恢复 | `storage_backup.zig` | ✅ 完成 |
+| 健康检查 | `storage_health.zig` | ✅ 完成 |
+| 预设管理 | `settings_presets.zig` | ❌ 已废弃 |
+
+### 前端测试补充计划
+
+#### 已覆盖 (23/30+)
+
+| 类型 | 模块 | 状态 |
+|------|------|------|
+| 组件 | Button, Header, TimeDisplay, TabPanel, SelectInput, NumberInput, CheckboxInput, FormGroup, FormSection, ModeSelector, StatusBadge, ControlPanel, Sidebar, TimerControls, HabitPicker | ✅ 完成 |
+| 工具 | formatDuration (统一版), apiClient, formatters, i18n | ✅ 完成 |
+| Hooks | useTimer, useSSE, useSettings, useHabits | ✅ 完成 |
+
+#### 待补充
+
+| 优先级 | 类型 | 模块 |
+|--------|------|------|
+| 中 | 组件 | TimerConfig, TimerProgress, DropdownSelect, SevenSegmentDisplay |
+| 低 | 组件 | WallpaperSelector, HabitModal, TimeInput, BasicSettings, ErrorNotification, CountdownSettings, SettingItem 等 |
+| 低 | 页面 | Homepage, Settings, TimerPage, HabitsPage, Stats |
+| 低 | 工具 | audio.ts, share.ts |
 
 ### Phase 5: 倒计时模式 ⏳
 

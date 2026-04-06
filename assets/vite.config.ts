@@ -4,6 +4,9 @@ import { viteSingleFile } from 'vite-plugin-singlefile'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
+  build: {
+    assetsInlineLimit: Number.MAX_SAFE_INTEGER,
+  },
   plugins: [
     tailwindcss(),
     preact(), // 代替 react()

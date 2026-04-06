@@ -58,3 +58,8 @@ test_tmp/
 .opencode/
 
 temp.txt
+
+
+assets/test-results
+
+assets/src/test/visual/

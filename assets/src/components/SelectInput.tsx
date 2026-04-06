@@ -1,3 +1,5 @@
+import { DropdownSelect } from "./DropdownSelect";
+
 interface SelectOption {
   value: string | number;
   label: string;
@@ -27,18 +29,13 @@ export const SelectInput = ({
           <span className="label-text">{label}</span>
         </label>
       )}
-      <select
+      <DropdownSelect
         value={value}
+        options={options}
+        onChange={(val) => onChange(String(val))}
         disabled={disabled}
-        onChange={(e) => onChange(e.currentTarget.value)}
-        className={`my-select w-full ${disabled ? "disabled" : ""}`}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        minWidth="100%"
+      />
       {hint && (
         <label className="label">
           <span className="label-text-alt">{hint}</span>

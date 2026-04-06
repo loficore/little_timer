@@ -1,5 +1,6 @@
 import { useState, useEffect } from "preact/hooks";
 import type { FunctionalComponent } from "preact";
+import { t } from "../utils/i18n";
 
 interface WallpaperSelectorProps {
   value: string;
@@ -69,7 +70,7 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
   return (
     <div className="form-control mb-6">
       <label className="label">
-        <span className="label-text">壁纸</span>
+        <span className="label-text">{t("modal.wallpaper")}</span>
       </label>
 
       <div className="tabs tabs-boxed mb-3">
@@ -78,21 +79,21 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
           className={`tab ${wallpaperType === "gradient" ? "tab-active" : ""}`}
           onClick={() => setWallpaperType("gradient")}
         >
-          渐变
+          {t("modal.gradient")}
         </button>
         <button
           type="button"
           className={`tab ${wallpaperType === "color" ? "tab-active" : ""}`}
           onClick={() => setWallpaperType("color")}
         >
-          纯色
+          {t("modal.solid")}
         </button>
         <button
           type="button"
           className={`tab ${wallpaperType === "image" ? "tab-active" : ""}`}
           onClick={() => setWallpaperType("image")}
         >
-          图片
+          {t("modal.image")}
         </button>
       </div>
 
@@ -109,10 +110,10 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
               }`}
               style={g.value ? { background: g.value } : { background: "#2a2a2a" }}
               onClick={() => handleGradientSelect(g.value)}
-              title={g.name}
+              title={t(`modal.gradient_${g.id}`)}
             >
               {!g.value && (
-                <span className="text-xs text-base-content/50">无</span>
+                <span className="text-xs text-base-content/50">{t("modal.none")}</span>
               )}
             </button>
           ))}
@@ -148,7 +149,7 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
           <input
             type="text"
             className="my-input w-full text-sm"
-            placeholder="输入图片 URL..."
+            placeholder={t("modal.image_url_placeholder")}
             value={imageUrl}
             onInput={(e) => handleImageUrlChange((e.target as HTMLInputElement).value)}
           />
@@ -156,7 +157,7 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
             <div className="h-20 rounded-lg overflow-hidden bg-base-200">
               <img
                 src={imageUrl}
-                alt="预览"
+                alt={t("modal.preview")}
                 className="w-full h-full object-cover"
                 onError={() => {
                   // 忽略图片加载错误

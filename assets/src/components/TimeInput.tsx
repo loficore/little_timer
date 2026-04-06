@@ -1,4 +1,7 @@
+import { memo } from "preact/compat";
+import type { FunctionalComponent } from "preact";
 import { useState, useEffect } from "preact/hooks";
+import { PickerNumberInput } from "./PickerNumberInput";
 import { t } from "../utils/i18n";
 
 interface TimeInputProps {
@@ -12,7 +15,7 @@ interface TimeInputProps {
   hint?: string;
 }
 
-export const TimeInput = ({
+export const TimeInput: FunctionalComponent<TimeInputProps> = memo(({
   value,
   onChange,
   label,
@@ -21,7 +24,7 @@ export const TimeInput = ({
   showMinutes = true,
   showSeconds = true,
   hint,
-}: TimeInputProps) => {
+}) => {
   const [hours, setHours] = useState(0);
   const [minutes, setMinutes] = useState(0);
   const [seconds, setSeconds] = useState(0);
@@ -60,44 +63,38 @@ export const TimeInput = ({
           <span className="label-text">{label}</span>
         </label>
       )}
-      <div className="flex items-center justify-center gap-2">
+      <div className="flex items-center justify-center gap-3 sm:gap-4">
         {showHours && (
           <div className="flex flex-col items-center">
-            <input
-              type="number"
+            <PickerNumberInput
+              value={hours}
               min={0}
               max={maxHours}
-              value={hours}
-              onChange={(e) => handleHoursChange(parseInt(e.currentTarget.value) || 0)}
-              className="my-input w-16 text-center"
+              onChange={handleHoursChange}
             />
             <span className="label-text-alt mt-1">{t("common.hours")}</span>
           </div>
         )}
-        <span className="text-lg font-bold">:</span>
+        <span className="text-lg font-bold -mt-4">:</span>
         {showMinutes && (
           <div className="flex flex-col items-center">
-            <input
-              type="number"
+            <PickerNumberInput
+              value={minutes}
               min={0}
               max={59}
-              value={minutes}
-              onChange={(e) => handleMinutesChange(parseInt(e.currentTarget.value) || 0)}
-              className="my-input w-16 text-center"
+              onChange={handleMinutesChange}
             />
             <span className="label-text-alt mt-1">{t("common.minutes")}</span>
           </div>
         )}
-        <span className="text-lg font-bold">:</span>
+        <span className="text-lg font-bold -mt-4">:</span>
         {showSeconds && (
           <div className="flex flex-col items-center">
-            <input
-              type="number"
+            <PickerNumberInput
+              value={seconds}
               min={0}
               max={59}
-              value={seconds}
-              onChange={(e) => handleSecondsChange(parseInt(e.currentTarget.value) || 0)}
-              className="my-input w-16 text-center"
+              onChange={handleSecondsChange}
             />
             <span className="label-text-alt mt-1">{t("common.seconds")}</span>
           </div>
@@ -110,4 +107,6 @@ export const TimeInput = ({
       )}
     </div>
   );
-};
+});
+
+TimeInput.displayName = "TimeInput";

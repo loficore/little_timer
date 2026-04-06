@@ -1,4 +1,7 @@
+import { memo } from "preact/compat";
+import type { FunctionalComponent } from "preact";
 import { useState } from "preact/hooks";
+import { PickerNumberInput } from "./PickerNumberInput";
 import { t } from "../utils/i18n";
 
 interface NumberInputProps {
@@ -12,53 +15,37 @@ interface NumberInputProps {
   disabled?: boolean;
 }
 
-export const NumberInput = ({
+export const NumberInput: FunctionalComponent<NumberInputProps> = memo(({
   value,
-  min,
-  max,
+  min = 0,
+  max = 9999,
   onChange,
   label,
   unit,
   hint,
   disabled = false,
-}: NumberInputProps) => {
+}) => {
   const [error, setError] = useState<string>("");
 
-  const handleChange = (e: Event) => {
-    const input = e.currentTarget as HTMLInputElement;
-    const rawValue = input.value.trim();
-
+  const handleChange = (newValue: number) => {
     setError("");
-
-    if (rawValue === "") {
+    
+    if (newValue === null || newValue === undefined) {
       setError(t("validation.input_required"));
       return;
     }
 
-    const numValue = parseInt(rawValue, 10);
-
-    if (Number.isNaN(numValue)) {
-      setError(t("validation.input_invalid"));
-      return;
-    }
-
-    if (min !== undefined && numValue < min) {
+    if (min !== undefined && newValue < min) {
       onChange(min);
       return;
     }
 
-    if (max !== undefined && numValue > max) {
+    if (max !== undefined && newValue > max) {
       onChange(max);
       return;
     }
 
-    onChange(numValue);
-  };
-
-  const handleBlur = () => {
-    if (value === null || value === undefined) {
-      setError(t("validation.input_required"));
-    }
+    onChange(newValue);
   };
 
   return (
@@ -69,17 +56,12 @@ export const NumberInput = ({
         </label>
       )}
       <div className="flex items-center gap-2">
-        <input
-          type="number"
-          min={min}
-          max={max}
+        <PickerNumberInput
           value={value}
-          disabled={disabled}
+          min={min ?? 0}
+          max={max ?? 9999}
           onChange={handleChange}
-          onBlur={handleBlur}
-          className={`my-input w-full ${error ? "border-error" : ""} ${
-            disabled ? "disabled" : ""
-          }`}
+          disabled={disabled}
         />
         {unit && (
           <span className="label-text-alt">{unit}</span>
@@ -91,4 +73,6 @@ export const NumberInput = ({
       </label>
     </div>
   );
-};
+});
+
+NumberInput.displayName = "NumberInput";

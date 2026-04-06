@@ -31,7 +31,7 @@ export const TabPanel = ({
             className={`my-tab ${activeTab === tab.id ? "my-tab-active" : ""}`}
           >
             {tab.icon && <span className="w-4 h-4">{tab.icon}</span>}
-            <span className="hidden sm:inline">{tab.label}</span>
+            <span className="text-[0.72rem] sm:text-sm leading-none">{tab.label}</span>
           </button>
         ))}
       </div>

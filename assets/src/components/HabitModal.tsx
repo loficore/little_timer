@@ -3,6 +3,8 @@ import type { FunctionalComponent } from "preact";
 import { APIClient } from "../utils/apiClient";
 import type { HabitSet, Habit } from "../types/habit";
 import { WallpaperSelector } from "./WallpaperSelector";
+import { PickerNumberInput } from "./PickerNumberInput";
+import { t } from "../utils/i18n";
 
 interface HabitModalProps {
   isOpen: boolean;
@@ -26,6 +28,33 @@ const COLORS = [
   "#3b82f6",
 ];
 
+const normalize_hex = (value: string): string | null => {
+  const trimmed = value.trim().toLowerCase();
+  const match = trimmed.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!match) return null;
+  const hex = match[1];
+  if (hex.length === 3) {
+    return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`;
+  }
+  return `#${hex}`;
+};
+
+const normalize_rgb_to_hex = (value: string): string | null => {
+  const trimmed = value.trim().toLowerCase();
+  const rgb_match = trimmed.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+  if (!rgb_match) return null;
+  const r = Number(rgb_match[1]);
+  const g = Number(rgb_match[2]);
+  const b = Number(rgb_match[3]);
+  if ([r, g, b].some((n) => Number.isNaN(n) || n < 0 || n > 255)) return null;
+  const to_hex = (n: number) => n.toString(16).padStart(2, "0");
+  return `#${to_hex(r)}${to_hex(g)}${to_hex(b)}`;
+};
+
+const normalize_color_value = (value: string): string | null => {
+  return normalize_hex(value) ?? normalize_rgb_to_hex(value);
+};
+
 export const HabitModal: FunctionalComponent<HabitModalProps> = ({
   isOpen,
   mode,
@@ -40,6 +69,8 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
   const [wallpaper, setWallpaper] = useState("");
   const [goalHours, setGoalHours] = useState(0);
   const [goalMinutes, setGoalMinutes] = useState(25);
+  const [colorInput, setColorInput] = useState(COLORS[0]);
+  const [colorInputError, setColorInputError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isEdit = !!editData;
@@ -50,6 +81,8 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
     if (editData) {
       setName(editData.name);
       setColor(editData.color || COLORS[0]);
+      setColorInput(editData.color || COLORS[0]);
+      setColorInputError("");
       const wallpaperValue = (editData as { wallpaper?: string }).wallpaper;
       setWallpaper(wallpaperValue || "");
       if ("description" in editData) {
@@ -64,6 +97,8 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
       setName("");
       setDescription("");
       setColor(COLORS[0]);
+      setColorInput(COLORS[0]);
+      setColorInputError("");
       setWallpaper("");
       setGoalHours(0);
       setGoalMinutes(25);
@@ -101,6 +136,8 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
       setName("");
       setDescription("");
       setColor(COLORS[0]);
+      setColorInput(COLORS[0]);
+      setColorInputError("");
       setWallpaper("");
       setGoalHours(0);
       setGoalMinutes(25);
@@ -113,31 +150,48 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
 
   const getTitle = () => {
     if (mode === "set") {
-      return isSetEdit ? "编辑习惯集" : "创建习惯集";
+      return isSetEdit ? t("modal.edit_set") : t("modal.create_set");
     }
-    return isHabitEdit ? "编辑习惯" : "添加习惯";
+    return isHabitEdit ? t("modal.edit_habit") : t("modal.add_habit");
   };
 
   const getSubmitText = () => {
-    if (isSubmitting) return "保存中...";
-    return isEdit ? "保存" : "创建";
+    if (isSubmitting) return t("button.saving");
+    return isEdit ? t("button.save") : t("button.create");
+  };
+
+  const handleColorSelect = (value: string) => {
+    setColor(value);
+    setColorInput(value);
+    setColorInputError("");
+  };
+
+  const handleColorInputBlur = () => {
+    const normalized = normalize_color_value(colorInput);
+    if (!normalized) {
+      setColorInputError(t("modal.color_invalid"));
+      return;
+    }
+    setColor(normalized);
+    setColorInput(normalized);
+    setColorInputError("");
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-base-100 rounded-lg p-6 w-full max-w-sm mx-4 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)' }}>
+      <div className="absolute inset-0" onClick={onClose} />
+      <div className="relative my-surface-card rounded-xl p-6 w-full max-w-sm mx-4">
         <h3 className="text-lg font-bold mb-4">{getTitle()}</h3>
         
         <form onSubmit={(e) => { void handleSubmit(e); }}>
           <div className="form-control mb-4">
             <label className="label">
-              <span className="label-text">名称</span>
+              <span className="label-text">{t("modal.name")}</span>
             </label>
             <input
               type="text"
               className="my-input"
-              placeholder={mode === "set" ? "如：学习习惯" : "如：背单词"}
+              placeholder={mode === "set" ? t("modal.name_placeholder_set") : t("modal.name_placeholder_habit")}
               value={name}
               onInput={(e) => setName((e.target as HTMLInputElement).value)}
               required
@@ -147,11 +201,11 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
           {mode === "set" && (
             <div className="form-control mb-4">
               <label className="label">
-                <span className="label-text">描述（可选）</span>
+                <span className="label-text">{t("modal.description")}</span>
               </label>
               <textarea
                 className="my-input min-h-[80px] resize-none"
-                placeholder="简单描述这个习惯集..."
+                placeholder={t("modal.description_placeholder")}
                 value={description}
                 onInput={(e) => setDescription((e.target as HTMLTextAreaElement).value)}
               />
@@ -161,31 +215,27 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
           {mode === "habit" && (
             <div className="form-control mb-4">
               <label className="label">
-                <span className="label-text">目标时长</span>
+                <span className="label-text">{t("modal.goal_duration")}</span>
               </label>
-              <div className="flex gap-2 items-center">
-                <input
-                  type="number"
-                  className="my-input w-20"
+              <div className="flex gap-3 items-center">
+                <PickerNumberInput
+                  value={goalHours}
                   min={0}
                   max={9999}
-                  value={goalHours}
-                  onInput={(e) => setGoalHours(parseInt((e.target as HTMLInputElement).value) || 0)}
+                  onChange={setGoalHours}
                 />
-                <span className="text-sm">小时</span>
-                <input
-                  type="number"
-                  className="my-input w-20"
+                <span className="text-sm">{t("modal.hours")}</span>
+                <PickerNumberInput
+                  value={goalMinutes}
                   min={0}
                   max={59}
-                  value={goalMinutes}
-                  onInput={(e) => setGoalMinutes(parseInt((e.target as HTMLInputElement).value) || 0)}
+                  onChange={setGoalMinutes}
                 />
-                <span className="text-sm">分钟</span>
+                <span className="text-sm">{t("modal.minutes")}</span>
               </div>
               <label className="label">
                 <span className="label-text-alt text-error">
-                  {(goalHours * 60 + goalMinutes) === 0 ? "请设置目标时长" : `目标: ${goalHours}h ${goalMinutes}m = ${(goalHours * 60 + goalMinutes)} 分钟`}
+                  {(goalHours * 60 + goalMinutes) === 0 ? t("modal.goal_error") : t("modal.goal_summary", { hours: goalHours, minutes: goalMinutes, total: (goalHours * 60 + goalMinutes) })}
                 </span>
               </label>
             </div>
@@ -193,19 +243,48 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
 
           <div className="form-control mb-6">
             <label className="label">
-              <span className="label-text">颜色</span>
+              <span className="label-text">{t("modal.color")}</span>
             </label>
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-2 flex-wrap mb-3">
               {COLORS.map((c) => (
                 <button
                   key={c}
                   type="button"
-                  className={`w-8 h-8 rounded-full ${color === c ? "ring-2 ring-offset-2 ring-base-content" : ""}`}
+                  className={`w-9 h-9 rounded-full border-2 transition-all ${
+                    color.toLowerCase() === c.toLowerCase()
+                      ? "border-primary ring-2 ring-primary/30"
+                      : "border-base-300 hover:border-base-content/40 hover:scale-105"
+                  }`}
                   style={{ backgroundColor: c }}
-                  onClick={() => setColor(c)}
+                  onClick={() => handleColorSelect(c)}
                 />
               ))}
             </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                className="my-input flex-1"
+                value={colorInput}
+                placeholder="#6366f1 或 rgb(99,102,241)"
+                onInput={(e) => {
+                  setColorInput((e.target as HTMLInputElement).value);
+                  if (colorInputError) setColorInputError("");
+                }}
+                onBlur={handleColorInputBlur}
+              />
+              <input
+                type="color"
+                className="w-10 h-10 rounded-lg cursor-pointer border border-base-300 bg-transparent"
+                value={normalize_hex(color) ?? COLORS[0]}
+                onChange={(e) => handleColorSelect((e.target as HTMLInputElement).value)}
+                title={t("modal.select_color")}
+              />
+            </div>
+            {colorInputError && (
+              <label className="label">
+                <span className="label-text-alt text-error">{colorInputError}</span>
+              </label>
+            )}
           </div>
 
           <WallpaperSelector value={wallpaper} onChange={setWallpaper} />
@@ -216,7 +295,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
               className="btn btn-ghost flex-1"
               onClick={onClose}
             >
-              取消
+              {t("button.cancel")}
             </button>
             <button
               type="submit"

@@ -339,6 +339,10 @@
   }
 
   .my-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem;
+    padding: 0.35rem max(0.5rem, env(safe-area-inset-right)) calc(0.35rem + env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
     background: linear-gradient(180deg, color-mix(in oklab, var(--my-surface) 84%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 90%, transparent) 100%);
     border-top: 1px solid var(--my-outline);
     backdrop-filter: blur(18px) saturate(122%);
@@ -347,10 +351,35 @@
   }
 
   .my-bottom-nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-height: 3.25rem;
+    width: 100%;
+    border: none;
+    background: transparent;
+    cursor: pointer;
     color: var(--my-on-surface-variant);
     border-radius: 0.9rem;
-    margin: 0.3rem 0.25rem;
+    margin: 0;
+    padding: 0.25rem 0.1rem;
     transition: background-color 140ms ease-out, color 140ms ease-out, transform 140ms ease-out;
+  }
+
+  .my-bottom-nav-item svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    flex-shrink: 0;
+  }
+
+  .my-bottom-nav-item .btm-nav-label {
+    font-size: 0.7rem;
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
   }
 
   .my-bottom-nav-item:hover {

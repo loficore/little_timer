@@ -5,12 +5,12 @@ import { HabitsPage } from "./HabitsPage";
 import { SettingsPage } from "./Settings.tsx";
 import { StatsPage } from "./Stats.tsx";
 import { ErrorNotification } from "./components/ErrorNotification.tsx";
-import { APIClient } from "./utils/apiClient";
+import { getAPIClient } from "./utils/apiClientSingleton";
+import { WALLPAPER_FALLBACK_GRADIENT, STORAGE_KEYS } from "./utils/constants";
 
 type Page = "timer" | "habits" | "stats" | "settings";
-const WALLPAPER_STORAGE_KEY = "global_wallpaper";
-const WALLPAPER_DEBUG_STORAGE_KEY = "debug_wallpaper";
-const WALLPAPER_FALLBACK_GRADIENT = "linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 50%, #0d0d0d 100%)";
+const WALLPAPER_STORAGE_KEY = STORAGE_KEYS.WALLPAPER;
+const WALLPAPER_DEBUG_STORAGE_KEY = STORAGE_KEYS.WALLPAPER_DEBUG;
 
 const normalizeWallpaper = (value: unknown): string => {
   return typeof value === "string" ? value.trim() : "";
@@ -80,7 +80,7 @@ export const App = () => {
   };
 
   useEffect(() => {
-    const client = new APIClient(window.location.origin);
+    const client = getAPIClient();
     client.getSettings().then(settings => {
       const serverWallpaper = normalizeWallpaper(settings.basic?.wallpaper);
       const cachedWallpaper = readCachedWallpaper();
@@ -149,7 +149,7 @@ export const App = () => {
       } else if (wallpaperInfo.type === "image") {
         // 图片层失败时仍显示兜底渐变，避免退化成纯黑背景
         html.style.backgroundColor = "#0d0d0d";
-        html.style.backgroundImage = `url("${wallpaperInfo.value.replace(/\"/g, "\\\"")}"), ${WALLPAPER_FALLBACK_GRADIENT}`;
+        html.style.backgroundImage = `url("${wallpaperInfo.value.replace(/"/g, '\\"')}"), ${WALLPAPER_FALLBACK_GRADIENT}`;
         html.style.backgroundSize = "cover, 140% 140%";
         html.style.backgroundPosition = "center center, center center";
         html.style.backgroundRepeat = "no-repeat, no-repeat";
@@ -204,10 +204,11 @@ export const App = () => {
 
       {/* 底部导航 - 移动端 */}
       <nav
-        className="btm-nav btm-nav-md my-bottom-nav lg:hidden fixed inset-x-0 bottom-0 w-full z-50"
+        className="my-bottom-nav lg:hidden fixed inset-x-0 bottom-0 w-full z-50"
         data-testid="bottom-nav"
       >
-        <a
+        <button
+          type="button"
           data-testid="nav-timer"
           className={`my-bottom-nav-item ${page === "timer" ? "active" : ""}`}
           onClick={() => navigateTo("timer")}
@@ -216,8 +217,9 @@ export const App = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <span className="btm-nav-label">计时</span>
-        </a>
-        <a
+        </button>
+        <button
+          type="button"
           data-testid="nav-habits"
           className={`my-bottom-nav-item ${page === "habits" ? "active" : ""}`}
           onClick={() => navigateTo("habits")}
@@ -226,8 +228,9 @@ export const App = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
           </svg>
           <span className="btm-nav-label">习惯</span>
-        </a>
-        <a
+        </button>
+        <button
+          type="button"
           data-testid="nav-stats"
           className={`my-bottom-nav-item ${page === "stats" ? "active" : ""}`}
           onClick={() => navigateTo("stats")}
@@ -236,8 +239,9 @@ export const App = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
           <span className="btm-nav-label">统计</span>
-        </a>
-        <a
+        </button>
+        <button
+          type="button"
           data-testid="nav-settings"
           className={`my-bottom-nav-item ${page === "settings" ? "active" : ""}`}
           onClick={() => navigateTo("settings")}
@@ -247,7 +251,7 @@ export const App = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
           <span className="btm-nav-label">设置</span>
-        </a>
+        </button>
       </nav>
     </>
   );

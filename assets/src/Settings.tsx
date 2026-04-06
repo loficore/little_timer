@@ -6,8 +6,8 @@ import { BasicSettings } from "./components/BasicSettings";
 import { CountdownSettings } from "./components/CountdownSettings";
 import { StopwatchSettings } from "./components/StopwatchSettings";
 import { t, setLanguage } from "./utils/i18n";
-import { APIClient } from "./utils/apiClient";
-import { ClockIconComponent } from "./utils/icons";
+import { getAPIClient } from "./utils/apiClientSingleton";
+import { ClockIconComponent, CheckIconComponent, ResetIcon } from "./utils/icons";
 import {
   DEFAULT_AUDIO_PREFERENCES,
   loadAudioPreferences,
@@ -86,14 +86,14 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   wallpaper,
   onWallpaperChange,
 }) => {
-  const apiClientRef = useRef<APIClient | null>(null);
+  const apiClientRef = useRef<ReturnType<typeof getAPIClient> | null>(null);
   const [config, setConfig] = useState<SettingsConfig>(DEFAULT_CONFIG);
   const [activeTab, setActiveTab] = useState("basic");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => {
-    apiClientRef.current = new APIClient(window.location.origin);
+    apiClientRef.current = getAPIClient();
   }, []);
 
   useEffect(() => {
@@ -339,12 +339,14 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="btn-primary"
+            className="btn-primary inline-flex items-center gap-2"
           >
-            {isSaving ? t("common.saving") : `💾 ${t("common.save")}`}
+            {!isSaving && <CheckIconComponent />}
+            {isSaving ? t("common.saving") : t("common.save")}
           </button>
-          <button onClick={handleReset} className="my-btn-secondary">
-            {`🔄 ${t("common.reset_default")}`}
+          <button onClick={handleReset} className="my-btn-secondary inline-flex items-center gap-2">
+            <ResetIcon />
+            {t("common.reset_default")}
           </button>
           {saveMessage && (
             <div className="px-4 sm:px-5 py-2 rounded-lg text-xs sm:text-sm font-medium bg-secondary-dark text-accent-dark animate-pulse">

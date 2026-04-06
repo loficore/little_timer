@@ -2,8 +2,8 @@ import type { FunctionalComponent } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import { Header } from "./components/Header";
 import { t } from "./utils/i18n";
-import { APIClient } from "./utils/apiClient";
-import ApexCharts from "apexcharts";
+import { getAPIClient } from "./utils/apiClientSingleton";
+import { formatDurationShort, formatDuration, getToday, getDaysAgo } from "./utils/formatters";
 
 interface StatsPageProps {
   onBackClick: () => void;
@@ -32,89 +32,167 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
   
   const pieChartRef = useRef<HTMLDivElement>(null);
   const barChartRef = useRef<HTMLDivElement>(null);
-  const pieChartInstance = useRef<ApexCharts | null>(null);
-  const barChartInstance = useRef<ApexCharts | null>(null);
-
-  useEffect(() => {
-    void loadData();
-  }, [timeRange]);
-
-  useEffect(() => {
-    if (!isLoading && sessions.length >= 0) {
-      renderCharts();
-    }
-    return () => {
-      if (pieChartInstance.current) {
-        pieChartInstance.current.destroy();
-      }
-      if (barChartInstance.current) {
-        barChartInstance.current.destroy();
-      }
-    };
-  }, [isLoading, sessions, habits, selectedHabitId]);
+  const pieChartInstanceRef = useRef<unknown>(null);
+  const barChartInstanceRef = useRef<unknown>(null);
 
   const loadData = async () => {
     setIsLoading(true);
+    console.log("[Stats loadData] starting...");
     try {
-      const client = new APIClient(window.location.origin);
+      const client = getAPIClient();
+      console.log("[Stats loadData] fetching habits...");
       const habitsData = await client.getHabits();
+      console.log("[Stats loadData] habits response:", habitsData);
       setHabits(Array.isArray(habitsData) ? habitsData : []);
       
       let startDate = "";
       let endDate = "";
-      const today = new Date().toISOString().split("T")[0];
+      const today = getToday();
       
       if (timeRange === "today") {
         startDate = endDate = today;
       } else if (timeRange === "week") {
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        startDate = weekAgo.toISOString().split("T")[0];
+        startDate = getDaysAgo(7);
         endDate = today;
       } else if (timeRange === "month") {
-        const monthAgo = new Date();
-        monthAgo.setDate(monthAgo.getDate() - 30);
-        startDate = monthAgo.toISOString().split("T")[0];
+        startDate = getDaysAgo(30);
         endDate = today;
       }
       
+      console.log("[Stats loadData] fetching sessions:", { startDate, endDate });
       if (startDate && endDate) {
         const sessionsData = await client.getSessions(undefined, startDate, endDate);
+        console.log("[Stats loadData] sessions response:", sessionsData);
         setSessions(Array.isArray(sessionsData) ? sessionsData : []);
       } else {
         setSessions([]);
       }
     } catch (e) {
-      console.error("Failed to load stats:", e);
+      console.error("[Stats loadData] error:", e);
     } finally {
       setIsLoading(false);
+      console.log("[Stats loadData] complete, isLoading=false");
     }
   };
 
-  const renderCharts = () => {
-    const filteredSessions = selectedHabitId 
-      ? sessions.filter(s => s && s.habit_id === selectedHabitId)
-      : sessions;
+  useEffect(() => {
+    console.log("[Stats] timeRange changed, loading data...", timeRange);
+    void loadData();
+  }, [timeRange]);
 
-    // Pie chart - time distribution (only when no habit filter)
+  useEffect(() => {
+    console.log("[Stats] rendering charts:", { isLoading, sessionsCount: sessions.length, habitsCount: habits.length, selectedHabitId });
+    if (!isLoading && sessions.length >= 0) {
+      void renderCharts();
+    }
+    return () => {
+      if (pieChartInstanceRef.current && typeof (pieChartInstanceRef.current as { destroy: () => void }).destroy === "function") {
+        (pieChartInstanceRef.current as { destroy: () => void }).destroy();
+      }
+      if (barChartInstanceRef.current && typeof (barChartInstanceRef.current as { destroy: () => void }).destroy === "function") {
+        (barChartInstanceRef.current as { destroy: () => void }).destroy();
+      }
+    };
+  }, [isLoading, sessions, habits, selectedHabitId]);
+
+  const renderCharts = async () => {
+    console.log("[Stats renderCharts] called with:", { 
+      sessionsCount: sessions.length, 
+      habitsCount: habits.length, 
+      selectedHabitId,
+      sessions: sessions.slice(0, 3),
+      habits: habits.slice(0, 3)
+    });
+    
+    let targetHabitId: number | null = null;
+    if (selectedHabitId !== null) {
+      const rawId = selectedHabitId;
+      if (typeof rawId === 'string') {
+        try {
+          targetHabitId = Number(BigInt(rawId));
+        } catch {
+          targetHabitId = parseInt(rawId, 10);
+        }
+      } else {
+        targetHabitId = Number(rawId);
+      }
+    }
+    
+    const filteredSessions = targetHabitId !== null
+      ? sessions.filter(s => {
+          const sId = Number(s.habit_id);
+          return s && Number.isFinite(sId) && sId === targetHabitId;
+        })
+      : sessions;
+    
+    console.log("[Stats renderCharts] filteredSessions:", { 
+      targetHabitId, 
+      count: filteredSessions.length,
+      sessions: filteredSessions.map(s => ({ habit_id: s.habit_id, duration: s.duration_seconds }))
+    });
+
     if (pieChartRef.current) {
-      if (pieChartInstance.current) {
-        pieChartInstance.current.destroy();
-        pieChartInstance.current = null;
+      if (pieChartInstanceRef.current && typeof (pieChartInstanceRef.current as { destroy: () => void }).destroy === "function") {
+        (pieChartInstanceRef.current as { destroy: () => void }).destroy();
+        pieChartInstanceRef.current = null;
       }
       
-      if (!selectedHabitId && sessions.length > 0) {
+      const canShowPie = !selectedHabitId && sessions.length > 0 && habits.length > 0;
+      console.log("[Stats renderCharts] pie chart check:", { canShowPie });
+      
+      if (canShowPie) {
         const habitTimeMap = new Map<number, number>();
+        
+        console.log("[Stats renderCharts] sessions for mapping:", sessions.map(s => ({ habit_id: s.habit_id, duration: s.duration_seconds })));
+        
         sessions.filter(s => s).forEach((s) => {
-          const current = habitTimeMap.get(s.habit_id) || 0;
-          habitTimeMap.set(s.habit_id, current + (s.duration_seconds || 0));
+          const rawId = s.habit_id;
+          let habitIdKey: number;
+          
+          if (typeof rawId === 'string') {
+            try {
+              habitIdKey = Number(BigInt(rawId));
+            } catch {
+              habitIdKey = parseInt(rawId, 10);
+            }
+          } else {
+            habitIdKey = Number(rawId);
+          }
+          
+          if (!Number.isFinite(habitIdKey) || habitIdKey > 9007199254740991 || habitIdKey < -9007199254740991) {
+            console.log("[Stats renderCharts] skipping invalid habit_id:", rawId);
+            return;
+          }
+          
+          const current = habitTimeMap.get(habitIdKey) || 0;
+          habitTimeMap.set(habitIdKey, current + (s.duration_seconds || 0));
         });
         
-        const series = habits.map((h) => habitTimeMap.get(h.id) || 0);
-        const labels = habits.map((h) => h.name);
+        console.log("[Stats renderCharts] habitTimeMap after conversion:", Object.fromEntries(habitTimeMap));
         
-        if (series.some((s) => s > 0)) {
-          const pieOptions: ApexCharts.ApexOptions = {
+        const validHabits = habits.filter(h => {
+          const hId = Number(h.id);
+          return Number.isFinite(hId) && hId <= 9007199254740991 && hId >= -9007199254740991;
+        });
+        
+        const series = validHabits.map((h) => {
+          const hId = Number(h.id);
+          return habitTimeMap.get(hId) || 0;
+        });
+        const labels = validHabits.map((h) => h.name);
+        const colors = validHabits.map((h) => h.color || "#6366f1");
+        
+        console.log("[Stats renderCharts] validHabits:", validHabits.map(h => ({ id: h.id, name: h.name })));
+        console.log("[Stats renderCharts] series:", series, "habits id:", validHabits.map(h => Number(h.id)));
+        
+        const hasPositiveData = series.some((s) => s > 0);
+        console.log("[Stats renderCharts] pie data:", { series, labels, hasPositiveData });
+        
+        if (hasPositiveData) {
+          const ApexChartsModule = await import("apexcharts");
+          const ApexCharts = ApexChartsModule.default;
+          
+          const pieOptions = {
             series: series,
             labels: labels,
             chart: {
@@ -122,7 +200,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
               height: 300,
               background: "transparent",
             },
-            colors: habits.map((h) => h.color || "#6366f1"),
+            colors: colors,
             plotOptions: {
               pie: {
                 donut: {
@@ -150,19 +228,23 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
             theme: { mode: "dark" }
           };
           
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-          pieChartInstance.current = new ApexCharts(pieChartRef.current, pieOptions as any);
-          void pieChartInstance.current.render();
+          pieChartInstanceRef.current = new ApexCharts(pieChartRef.current, pieOptions as Record<string, unknown>);
+          void (pieChartInstanceRef.current as { render: () => void }).render();
         }
       }
     }
     
-    // Bar chart - daily trend
     if (barChartRef.current) {
-      if (barChartInstance.current) {
-        barChartInstance.current.destroy();
-        barChartInstance.current = null;
+      if (barChartInstanceRef.current && typeof (barChartInstanceRef.current as { destroy: () => void }).destroy === "function") {
+        (barChartInstanceRef.current as { destroy: () => void }).destroy();
+        barChartInstanceRef.current = null;
       }
+      
+      console.log("[Stats renderCharts] bar chart check:", { 
+        filteredSessionsCount: filteredSessions.length,
+        selectedHabitId,
+        targetHabitId
+      });
       
       const dailyMap = new Map<string, number>();
       filteredSessions.filter(s => s).forEach((s) => {
@@ -170,27 +252,40 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
         dailyMap.set(s.date, current + (s.duration_seconds || 0));
       });
       
+      console.log("[Stats renderCharts] dailyMap:", Object.fromEntries(dailyMap));
+      
       const sortedDates = Array.from(dailyMap.keys()).sort();
       const seriesData = sortedDates.map(d => Math.round((dailyMap.get(d) || 0) / 60));
       
+      console.log("[Stats renderCharts] bar chart:", { sortedDates, seriesData, willRender: seriesData.length > 0 });
+      
       if (seriesData.length > 0) {
-        const barOptions: ApexCharts.ApexOptions = {
+        const ApexChartsModule = await import("apexcharts");
+        const ApexCharts = ApexChartsModule.default;
+        
+        const barOptions = {
           series: [{ name: "专注分钟", data: seriesData }],
           chart: {
             type: "bar",
-            height: 300,
+            height: 350,
             background: "transparent",
-            toolbar: { show: false }
+            toolbar: { show: false },
+            animations: { enabled: true }
           },
           plotOptions: {
             bar: {
               borderRadius: 4,
-              columnWidth: "60%"
+              columnWidth: "60%",
+              horizontal: false
             }
           },
           xaxis: {
             categories: sortedDates,
-            labels: { style: { colors: "#9ca3af" } }
+            labels: { 
+              style: { colors: "#9ca3af" },
+              rotate: -45,
+              maxHeight: 80
+            }
           },
           yaxis: {
             labels: { 
@@ -200,31 +295,48 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
           },
           colors: ["#6366f1"],
           grid: { borderColor: "#374151" },
-          theme: { mode: "dark" }
+          theme: { mode: "dark" },
+          responsive: [{
+            breakpoint: 480,
+            options: {
+              chart: { height: 200 },
+              plotOptions: { bar: { columnWidth: "80%" } }
+            }
+          }]
         };
         
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        barChartInstance.current = new ApexCharts(barChartRef.current, barOptions as any);
-        void barChartInstance.current.render();
+        barChartInstanceRef.current = new ApexCharts(barChartRef.current, barOptions as Record<string, unknown>);
+        void (barChartInstanceRef.current as { render: () => void }).render();
       }
     }
   };
 
-  const formatDuration = (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
-  };
-
-  const filteredSessions = selectedHabitId 
-    ? sessions.filter(s => s && s.habit_id === selectedHabitId)
-    : sessions;
-  const totalSeconds = filteredSessions.reduce((sum, s) => sum + (s?.duration_seconds || 0), 0);
-  const totalSessions = filteredSessions.length;
+  let filteredForStats: { habit_id: unknown; duration_seconds: number }[] = sessions;
+  let filteredSessions: { habit_id: unknown; duration_seconds: number; date: string }[] = sessions;
+  if (selectedHabitId !== null) {
+    const rawId = selectedHabitId;
+    let targetId: number;
+    if (typeof rawId === 'string') {
+      try {
+        targetId = Number(BigInt(rawId));
+      } catch {
+        targetId = parseInt(rawId, 10);
+      }
+    } else {
+      targetId = Number(rawId);
+    }
+    filteredForStats = sessions.filter(s => {
+      const sId = Number(s.habit_id);
+      return Number.isFinite(sId) && sId === targetId;
+    });
+    filteredSessions = filteredForStats as typeof filteredSessions;
+  }
+  
+  const totalSeconds = filteredForStats.reduce((sum, s) => sum + (s?.duration_seconds || 0), 0);
+  const totalSessions = filteredForStats.length;
 
   return (
-    <div className="flex flex-col flex-1 bg-transparent pb-16 lg:pb-0">
+    <div className="flex flex-col flex-1 bg-transparent pb-16 lg:pb-0 min-h-0">
       <Header
         title={t("stats.title") || "统计"}
         showSettings={false}
@@ -232,7 +344,6 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
         onBackClick={onBackClick}
       />
 
-      {/* Time Range Selector */}
       <div className="my-surface-panel flex gap-2 p-4">
         {(["today", "week", "month"] as TimeRange[]).map((range) => (
           <button
@@ -240,18 +351,17 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
             className={`btn btn-sm ${timeRange === range ? "btn-primary" : "btn-ghost"}`}
             onClick={() => setTimeRange(range)}
           >
-            {range === "today" ? "今日" : range === "week" ? "本周" : "本月"}
+            {range === "today" ? t("stats.today") : range === "week" ? t("stats.this_week") : t("stats.this_month")}
           </button>
         ))}
       </div>
 
-      {/* Habit Filter */}
       <div className="my-surface-panel flex gap-2 p-4 overflow-x-auto">
         <button
           className={`btn btn-sm ${selectedHabitId === null ? "btn-primary" : "btn-ghost"}`}
           onClick={() => setSelectedHabitId(null)}
         >
-          全部
+          {t("stats.all")}
         </button>
         {habits.map((h) => (
           <button
@@ -265,35 +375,33 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {/* Summary Cards */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
         <div className="grid grid-cols-2 gap-4">
           <div className="card my-surface-card">
             <div className="card-body p-4">
-              <h3 className="text-sm text-base-content/60">总专注时间</h3>
-              <p className="text-2xl font-bold text-primary">{formatDuration(totalSeconds)}</p>
+              <h3 className="text-sm text-base-content/60">{t("stats.total_focus_time")}</h3>
+              <p className="text-2xl font-bold text-primary">{formatDurationShort(totalSeconds)}</p>
             </div>
           </div>
           <div className="card my-surface-card">
             <div className="card-body p-4">
-              <h3 className="text-sm text-base-content/60">完成次数</h3>
+              <h3 className="text-sm text-base-content/60">{t("stats.completion_count")}</h3>
               <p className="text-2xl font-bold text-secondary">{totalSessions}</p>
             </div>
           </div>
         </div>
 
-        {/* Pie Chart */}
         {!selectedHabitId && (
           <div className="card my-surface-card">
             <div className="card-body p-4">
-              <h3 className="text-lg font-semibold mb-4">时间分布</h3>
+              <h3 className="text-lg font-semibold mb-4">{t("stats.time_distribution")}</h3>
               {isLoading ? (
                 <div className="h-[300px] flex items-center justify-center">
                   <span className="loading loading-spinner loading-lg"></span>
                 </div>
               ) : sessions.length === 0 ? (
                 <div className="h-[300px] flex items-center justify-center text-base-content/50">
-                  暂无数据
+                  {t("stats.no_data")}
                 </div>
               ) : (
                 <div ref={pieChartRef}></div>
@@ -301,6 +409,23 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
             </div>
           </div>
         )}
+
+        <div className="card my-surface-card">
+          <div className="card-body p-4">
+            <h3 className="text-lg font-semibold mb-4">{t("stats.daily_trend")}</h3>
+            {isLoading ? (
+              <div className="h-[300px] flex items-center justify-center">
+                <span className="loading loading-spinner loading-lg"></span>
+              </div>
+            ) : filteredSessions.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-base-content/50">
+                {t("stats.no_data")}
+              </div>
+            ) : (
+              <div ref={barChartRef} className="w-full"></div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

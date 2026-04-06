@@ -2,21 +2,16 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import type { FunctionalComponent } from "preact";
 import { Header } from "./components/Header";
 import { HabitModal } from "./components/HabitModal";
-import { APIClient } from "./utils/apiClient";
+import { getAPIClient } from "./utils/apiClientSingleton";
 import { logSuccess, logError } from "./utils/logger";
+import { formatDurationShort } from "./utils/formatters";
+import { t } from "./utils/i18n";
 import type { HabitSet, Habit, HabitWithProgress } from "./types/habit";
 
 interface HabitsPageProps {
     onStatsClick?: () => void;
     onSettingsClick?: () => void;
 }
-
-const formatDuration = (totalSeconds: number): string => {
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
-};
 
 export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
     onStatsClick,
@@ -37,7 +32,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
         name: string;
     } | null>(null);
 
-    const apiClientRef = useRef(new APIClient(window.location.origin));
+    const apiClientRef = useRef(getAPIClient());
 
     useEffect(() => {
         void loadData();
@@ -106,7 +101,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
     return (
         <div className="flex flex-col flex-1 bg-transparent overflow-hidden">
             <Header
-                title="习惯管理"
+                title={t("habit.management")}
                 showSettings={false}
                 showBack={true}
                 onBackClick={() => {
@@ -118,12 +113,12 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
 
             <div className="flex-1 overflow-y-auto p-4">
                 <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold">习惯集</h2>
+                    <h2 className="text-xl font-bold">{t("habit.sets")}</h2>
                     <button
                         className="btn btn-primary btn-sm"
                         onClick={() => setModalState({ isOpen: true, mode: "set" })}
                     >
-                        + 添加
+                        + {t("habit.add")}
                     </button>
                 </div>
 
@@ -148,7 +143,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                                 <p className="text-sm text-base-content/60">{set.description}</p>
                                             )}
                                             <p className="text-xs text-base-content/50">
-                                                {setHabits.length} 个习惯
+                                                {setHabits.length} {t("habit.habits_count")}
                                             </p>
                                         </div>
                                     </div>
@@ -180,7 +175,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                     <div className="border-t border-white/10 p-3 space-y-2">
                                         {setHabits.length === 0 ? (
                                             <p className="text-center text-base-content/50 py-2">
-                                                暂无习惯，点击下方添加
+                                                {t("habit.no_habits")}
                                             </p>
                                         ) : (
                                             setHabits.map((habit) => (
@@ -197,7 +192,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                                         <div>
                                                             <p className="font-medium">{habit.name}</p>
                                                             <p className="text-xs">
-                                                                目标: {formatDuration(habit.goal_seconds)}
+                                                                {t("timer.goal")}: {formatDurationShort(habit.goal_seconds)}
                                                             </p>
                                                         </div>
                                                     </div>
@@ -235,7 +230,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                                 setId: set.id,
                                             })}
                                         >
-                                            + 添加习惯
+                                            + {t("habit.add_habit")}
                                         </button>
                                     </div>
                                 )}
@@ -246,8 +241,8 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
 
                 {habitSets.length === 0 && (
                     <div className="text-center py-12 text-base-content/50">
-                        <p>暂无习惯集</p>
-                        <p>点击上方"添加"创建第一个习惯集</p>
+                        <p>{t("habit.no_sets")}</p>
+                        <p>{t("habit.no_sets_desc")}</p>
                     </div>
                 )}
             </div>
@@ -268,24 +263,26 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                 <div className="fixed inset-0 z-50 flex items-center justify-center">
                     <div className="absolute inset-0 bg-black/50" onClick={() => setDeleteConfirm(null)} />
                     <div className="relative bg-base-100 rounded-lg p-6 w-full max-w-sm mx-4 shadow-xl">
-                        <h3 className="text-lg font-bold mb-4">确认删除</h3>
+                        <h3 className="text-lg font-bold mb-4">{t("habit.confirm_delete")}</h3>
                         <p className="mb-4">
-                            确定要删除"{deleteConfirm.name}"
-                            {deleteConfirm.type === "set" ? "及其所有习惯" : ""}吗？
+                            {deleteConfirm.type === "set" 
+                                ? t("habit.delete_set_confirm", { name: deleteConfirm.name })
+                                : t("habit.delete_habit_confirm", { name: deleteConfirm.name })
+                            }
                         </p>
-                        <p className="text-sm text-error mb-4">此操作不可撤销</p>
+                        <p className="text-sm text-error mb-4">{t("habit.delete_warning")}</p>
                         <div className="flex gap-2">
                             <button
                                 className="btn btn-ghost flex-1"
                                 onClick={() => setDeleteConfirm(null)}
                             >
-                                取消
+                                {t("button.cancel")}
                             </button>
                             <button
                                 className="btn btn-error flex-1"
                                 onClick={() => void handleDelete()}
                             >
-                                删除
+                                {t("button.delete")}
                             </button>
                         </div>
                     </div>

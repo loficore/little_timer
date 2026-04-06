@@ -10,13 +10,15 @@ import { memo } from "preact/compat";
 import { logInfo, logSuccess, logError } from "./utils/logger";
 import { Mode } from "./utils/share";
 import { t } from "./utils/i18n";
+import { formatDuration, getToday } from "./utils/formatters";
+import { getAPIClient, type APIClient, type TimerState } from "./utils/apiClientSingleton";
+import { SSEClient } from "./utils/sseClient";
+import type { HabitSet, Habit, HabitWithProgress } from "./types/habit.ts";
+import { audioEngine, loadAudioPreferences } from "./utils/audio";
 import { Header } from "./components/Header";
 import { TimeDisplay } from "./components/TimeDisplay";
 import { ControlPanel } from "./components/ControlPanel";
 import { HabitModal } from "./components/HabitModal";
-import { APIClient, type TimerState } from "./utils/apiClient";
-import { SSEClient } from "./utils/sseClient";
-import type { HabitSet, Habit, HabitWithProgress } from "./types/habit.ts";
 
 interface HomePageProps {
   onStatsClick?: () => void;
@@ -26,20 +28,6 @@ interface HomePageProps {
   onSetClick?: (setId: number) => void;
   onHabitClick?: (habit: Habit) => void;
 }
-
-// 倒计时/秒表用：格式化持续时间（秒）
-const formatDuration = (totalSeconds: number): string => {
-  const hours = Math.floor(totalSeconds / 3600)
-    .toString()
-    .padStart(2, "0");
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = Math.floor(totalSeconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${hours}:${minutes}:${seconds}`;
-};
 
 interface HomeState {
   time: string;
@@ -138,22 +126,7 @@ const HomePage = memo((props: HomePageProps) => {
 
     if (timerState.is_finished && !prevFinishedRef.current) {
       try {
-        const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtxClass) {
-          const ctx = new AudioCtxClass();
-          const o = ctx.createOscillator();
-          const g = ctx.createGain();
-          o.type = "sine";
-          o.frequency.value = 880;
-          g.gain.value = 0.06;
-          o.connect(g);
-          g.connect(ctx.destination);
-          o.start();
-          setTimeout(() => {
-            o.stop();
-            void ctx.close();
-          }, 300);
-        }
+        audioEngine.playFinish();
       } catch {
         // 忽略音频相关错误
       }
@@ -179,12 +152,12 @@ const HomePage = memo((props: HomePageProps) => {
       const elapsed = timerState.elapsed ?? 0;
       if (habitId && elapsed > 0 && !sessionRecordedRef.current) {
         sessionRecordedRef.current = true;
-        const today = new Date().toISOString().split("T")[0];
-        const client = new APIClient(window.location.origin);
+        const today = getToday();
+        const client = getAPIClient();
         void client.createSession(habitId, elapsed, 1, today).then(() => {
           logSuccess("✓ Session 已自动记录");
         }).catch((e) => {
-          logError(`❌ 记录 session 失败: ${e}`);
+          logError(`记录 session 失败: ${e}`);
         });
       }
     }
@@ -193,19 +166,20 @@ const HomePage = memo((props: HomePageProps) => {
 
   useEffect(() => {
     const baseUrl = window.location.origin;
-    apiClientRef.current = new APIClient(baseUrl);
+    apiClientRef.current = getAPIClient();
     sseClientRef.current = new SSEClient(baseUrl);
+    audioEngine.setPreferences(loadAudioPreferences());
 
     const initApp = async () => {
-      logSuccess("✅ React 应用已加载，准备就绪");
+      logSuccess("React 应用已加载，准备就绪");
 
       try {
         const initialState = await apiClientRef.current!.getState();
         updateStateFromTimerState(initialState);
-        logSuccess("✅ 初始状态已获取");
+        logSuccess("初始状态已获取");
       } catch (e) {
         const errorMsg = e instanceof Error ? e.message : String(e);
-        logError(`❌ 获取初始状态失败: ${errorMsg}`);
+        logError(`获取初始状态失败: ${errorMsg}`);
       }
 
       sseClientRef.current!.connect(
@@ -218,10 +192,10 @@ const HomePage = memo((props: HomePageProps) => {
           isConnectedRef.current = false;
           setIsConnected(false);
           const errorMsg = error instanceof Error ? error.message : String(error);
-          logError(`❌ SSE 连接错误: ${errorMsg}`);
+          logError(`SSE 连接错误: ${errorMsg}`);
         }
       );
-      logInfo("📡 SSE 连接已建立");
+      logInfo("SSE 连接已建立");
     };
 
     void initApp();
@@ -244,8 +218,7 @@ const HomePage = memo((props: HomePageProps) => {
   // 加载习惯集
   useEffect(() => {
     if (!apiClientRef.current) {
-      const baseUrl = window.location.origin;
-      apiClientRef.current = new APIClient(baseUrl);
+      apiClientRef.current = getAPIClient();
     }
     
     const loadHabitSets = async () => {
@@ -253,7 +226,7 @@ const HomePage = memo((props: HomePageProps) => {
         const sets = await apiClientRef.current!.getHabitSets();
         setHabitSets(Array.isArray(sets) ? sets : []);
       } catch (e) {
-        logError(`❌ 获取习惯集失败: ${e}`);
+        logError(`获取习惯集失败: ${e}`);
       }
     };
     
@@ -281,7 +254,7 @@ const HomePage = memo((props: HomePageProps) => {
           }));
         setHabits(filtered);
       } catch (e) {
-        logError(`❌ 获取习惯失败: ${e}`);
+        logError(`获取习惯失败: ${e}`);
       } finally {
         setIsLoadingHabits(false);
       }
@@ -309,9 +282,9 @@ const HomePage = memo((props: HomePageProps) => {
   }, [state.mode, state.timezone]);
 
   const handleStart = useCallback(() => {
-    logInfo('🚀 "开始"按钮被点击');
+    logInfo('"开始"按钮被点击');
     if (!apiClientRef.current) {
-      logError("❌ API 客户端未初始化");
+      logError("API 客户端未初始化");
       return;
     }
     // 重置 session 记录标记
@@ -323,16 +296,16 @@ const HomePage = memo((props: HomePageProps) => {
       logSuccess('✓ startTimer() 调用成功');
     }).catch((e) => {
       const errorMsg = e instanceof Error ? e.message : String(e);
-      logError(`❌ 调用 startTimer 时发生错误: ${errorMsg}`);
+      logError(`调用 startTimer 时发生错误: ${errorMsg}`);
       // 回滚状态
       setState(prev => ({ ...prev, isRunning: false }));
     });
   }, [selectedHabit]);
 
   const handlePause = useCallback(() => {
-    logInfo('⏸️ "暂停"按钮被点击');
+    logInfo('"暂停"按钮被点击');
     if (!apiClientRef.current) {
-      logError("❌ API 客户端未初始化");
+      logError("API 客户端未初始化");
       return;
     }
     // 乐观更新：立即更新本地状态
@@ -341,16 +314,16 @@ const HomePage = memo((props: HomePageProps) => {
       logSuccess('✓ pauseTimer() 调用成功');
     }).catch((e) => {
       const errorMsg = e instanceof Error ? e.message : String(e);
-      logError(`❌ 调用 pauseTimer 时发生错误: ${errorMsg}`);
+      logError(`调用 pauseTimer 时发生错误: ${errorMsg}`);
       // 回滚状态
       setState(prev => ({ ...prev, isRunning: true }));
     });
   }, []);
 
   const handleReset = useCallback(() => {
-    logInfo('🔄 "重置"按钮被点击');
+    logInfo('"重置"按钮被点击');
     if (!apiClientRef.current) {
-      logError("❌ API 客户端未初始化");
+      logError("API 客户端未初始化");
       return;
     }
     // 乐观更新：立即重置本地状态
@@ -367,7 +340,7 @@ const HomePage = memo((props: HomePageProps) => {
       logSuccess('✓ resetTimer() 调用成功');
     }).catch((e) => {
       const errorMsg = e instanceof Error ? e.message : String(e);
-      logError(`❌ 调用 resetTimer 时发生错误: ${errorMsg}`);
+      logError(`调用 resetTimer 时发生错误: ${errorMsg}`);
     });
   }, []);
 
@@ -395,7 +368,7 @@ const HomePage = memo((props: HomePageProps) => {
             {selectedHabit.name}
           </div>
           <div className="text-sm text-white/50 mb-8">
-            目标: {Math.floor(selectedHabit.goal_seconds / 60)} 分钟
+            {t("timer.goal")}: {Math.floor(selectedHabit.goal_seconds / 60)} {t("common.minutes")}
           </div>
           
           <TimeDisplay time={statusMemo.time} isRunning={statusMemo.isRunning} />
@@ -416,7 +389,7 @@ const HomePage = memo((props: HomePageProps) => {
                 }
               }}
             >
-              休息 5 分钟
+              {t("modal.rest_5min")}
             </button>
           </div>
         </div>
@@ -433,7 +406,7 @@ const HomePage = memo((props: HomePageProps) => {
             </div>
           ) : habits.length === 0 ? (
             <div className="text-center py-8 text-white/40">
-              暂无习惯，点击下方添加
+              {t("habit.no_habits")}
             </div>
           ) : (
             habits.map((habit) => (
@@ -451,11 +424,21 @@ const HomePage = memo((props: HomePageProps) => {
                     <div>
                       <div className="font-medium">{habit.name}</div>
                       <div className="text-xs text-base-content/60">
-                        目标 {Math.floor(habit.goal_seconds / 60)} 分钟
+                        {t("timer.goal")} {Math.floor(habit.goal_seconds / 60)} {t("common.minutes")}
                       </div>
                     </div>
                   </div>
-                  <div className="text-base-content/30">▶</div>
+                  <div className="text-base-content/30">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
                 </div>
               </div>
             ))
@@ -469,7 +452,7 @@ const HomePage = memo((props: HomePageProps) => {
               }
             }}
           >
-            + 添加习惯
+            + {t("habit.add_habit")}
           </button>
         </div>
       );
@@ -480,7 +463,7 @@ const HomePage = memo((props: HomePageProps) => {
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {habitSets.length === 0 ? (
           <div className="text-center py-8 text-white/40">
-            暂无习惯集，点击下方创建
+            {t("habit.no_sets")}
           </div>
         ) : (
           habitSets.map((set) => (
@@ -511,7 +494,7 @@ const HomePage = memo((props: HomePageProps) => {
           className="btn btn-primary btn-block mt-4 bg-primary/80 hover:bg-primary"
           onClick={() => setModalState({ isOpen: true, mode: "set" })}
         >
-          + 创建习惯集
+          + {t("habit.create_set")}
         </button>
       </div>
     );
@@ -521,7 +504,7 @@ const HomePage = memo((props: HomePageProps) => {
     if (selectedHabit) return selectedHabit.name;
     if (selectedSetId) {
       const set = habitSets.find(s => s.id === selectedSetId);
-      return set?.name || "习惯列表";
+      return set?.name || t("habit.habit_list");
     }
     return t("common.app_name");
   };
@@ -543,7 +526,7 @@ const HomePage = memo((props: HomePageProps) => {
       {/* 连接状态指示器 */}
       {!isConnected && (
         <div className="bg-error text-white text-center py-1 text-sm font-medium animate-pulse">
-          ⚠️ 连接中断 - 正在重连...
+          {t("connection.disconnected")}
         </div>
       )}
 
@@ -559,14 +542,14 @@ const HomePage = memo((props: HomePageProps) => {
           // 刷新数据
           if (modalState.mode === "set") {
             const loadSets = async () => {
-              const client = new APIClient(window.location.origin);
+              const client = getAPIClient();
               const sets = await client.getHabitSets();
               setHabitSets(Array.isArray(sets) ? sets : []);
             };
             void loadSets();
           } else {
             const loadHabits = async () => {
-              const client = new APIClient(window.location.origin);
+              const client = getAPIClient();
               const all = await client.getHabits();
               const filtered = (Array.isArray(all) ? all : [])
                 .filter((h: any) => h.set_id === selectedSetId)

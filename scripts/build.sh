@@ -1,6 +1,6 @@
 #!/bin/bash
 # 构建脚本 - Linux/macOS
-# 用法: ./scripts/build.sh [--release]
+# 用法: ./scripts/build.sh [--debug|--release] [--embed-html|--no-embed-html]
 
 set -e
 
@@ -16,19 +16,35 @@ for arg in "$@"; do
     case $arg in
         --release)
             OPTIMIZE="Release"
-            EMBED_UI="true"
             ;;
         --debug)
             OPTIMIZE="Debug"
+            ;;
+        --embed-html|--embed-ui)
+            EMBED_UI="true"
+            ;;
+        --no-embed-html|--no-embed-ui)
             EMBED_UI="false"
             ;;
         --help|-h)
             echo "用法: $0 [选项]"
             echo "选项:"
-            echo "  --release  发布构建（内嵌 UI）"
-            echo "  --debug    调试构建"
+            echo "  --release         发布构建（仅设置优化级别）"
+            echo "  --debug           调试构建（仅设置优化级别）"
+            echo "  --embed-html      内嵌前端 HTML 到后端二进制"
+            echo "  --no-embed-html   不内嵌前端 HTML（默认）"
             echo "  --help     显示此帮助"
+            echo ""
+            echo "示例:"
+            echo "  $0 --release --embed-html"
+            echo "  $0 --debug --embed-html"
+            echo "  $0 --debug --no-embed-html"
             exit 0
+            ;;
+        *)
+            echo "错误: 未知参数 '$arg'"
+            echo "使用 --help 查看可用选项"
+            exit 1
             ;;
     esac
 done

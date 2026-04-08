@@ -1,7 +1,8 @@
 #!/bin/bash
 # 开发模式脚本 - Linux/macOS
-# 前端 dev server + 后端并行运行
-# 用法: ./scripts/dev.sh
+# 支持两种模式：
+#   ./scripts/dev.sh         普通模式 (无 WebView 窗口)
+#   ./scripts/dev.sh --webview WebView 模式 (打开 WebView 窗口)
 
 set -e
 
@@ -9,6 +10,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
+
+# 解析参数
+MODE="http"
+for arg in "$@"; do
+    case $arg in
+        --webview)
+            MODE="webview"
+            ;;
+        --help|-h)
+            echo "用法: $0 [选项]"
+            echo "选项:"
+            echo "  --webview  启动 WebView 窗口模式"
+            echo "  --help     显示此帮助"
+            exit 0
+            ;;
+    esac
+done
 
 cleanup() {
     echo ""
@@ -36,8 +54,13 @@ sleep 3
 
 echo "=== 启动后端 ==="
 if command -v zig &> /dev/null; then
-    zig build -Dembed_ui=true -Doptimize=Debug run &
-    ZIG_PID=$!
+    if [ "$MODE" = "webview" ]; then
+        zig build -Dembed_ui=false -Doptimize=Debug run -- --webview &
+        ZIG_PID=$!
+    else
+        zig build -Dembed_ui=false -Doptimize=Debug run &
+        ZIG_PID=$!
+    fi
 else
     echo "错误: 未找到 zig"
     exit 1
@@ -47,6 +70,9 @@ echo ""
 echo "=== 服务已启动 ==="
 echo "前端: http://localhost:5173"
 echo "后端: http://localhost:8080"
+if [ "$MODE" = "webview" ]; then
+    echo "WebView: 已打开窗口指向前端"
+fi
 echo ""
 echo "按 Ctrl+C 停止所有服务"
 

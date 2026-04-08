@@ -1,34 +1,22 @@
 @echo off
-REM 构建脚本 - Windows
-REM 用法: scripts\build.bat [release]
+REM 构建脚本 - Windows（兼容入口，转发到 PowerShell 脚本）
+REM 用法: scripts\build.bat [--debug|--release] [--embed-html|--no-embed-html]
 
-setlocal enabledelayedexpansion
+setlocal
 
 set "SCRIPT_DIR=%~dp0"
-set "PROJECT_ROOT=%SCRIPT_DIR%.."
+set "PS_SCRIPT=%SCRIPT_DIR%build.ps1"
 
-cd /d "%PROJECT_ROOT%"
-
-set "EMBED_UI=false"
-set "OPTIMIZE=Debug"
-
-if "%~1"=="release" (
-    set "OPTIMIZE=Release"
-    set "EMBED_UI=true"
+if not exist "%PS_SCRIPT%" (
+    echo 错误: 未找到脚本 "%PS_SCRIPT%"
+    exit /b 1
 )
 
-echo === 构建前端 ===
-cd assets
-call bun install
-call bun run build
-cd ..
-
-echo === 构建后端 (Optimize=%OPTIMIZE%, EmbedUI=%EMBED_UI%) ===
-if "%EMBED_UI%"=="true" (
-    zig build -Doptimize=%OPTIMIZE% -Dembed_ui=true
+where pwsh >nul 2>nul
+if %ERRORLEVEL%==0 (
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
 ) else (
-    zig build -Doptimize=%OPTIMIZE%
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
 )
 
-echo === 构建完成 ===
-echo 运行: zig-out\bin\little_timer.exe
+exit /b %ERRORLEVEL%

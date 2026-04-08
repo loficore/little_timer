@@ -172,7 +172,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                 </div>
 
                                 {isExpanded && (
-                                    <div className="border-t border-white/10 p-3 space-y-2">
+                                    <div className="border-t border-[color:color-mix(in_oklab,var(--my-outline)_28%,transparent)] p-3 space-y-2">
                                         {setHabits.length === 0 ? (
                                             <p className="text-center text-base-content/50 py-2">
                                                 {t("habit.no_habits")}
@@ -181,7 +181,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                             setHabits.map((habit) => (
                                                 <div
                                                     key={habit.id}
-                                                    className="p-3 rounded-lg flex items-center justify-between cursor-pointer hover:bg-white/10 transition-colors overflow-hidden"
+                                                    className="my-field-surface p-3 rounded-lg flex items-center justify-between cursor-pointer transition-colors overflow-hidden"
                                                     style={getCardBackgroundStyle(habit)}
                                                 >
                                                     <div className="flex items-center gap-3">
@@ -261,8 +261,8 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
 
             {deleteConfirm && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center">
-                    <div className="absolute inset-0 bg-black/50" onClick={() => setDeleteConfirm(null)} />
-                    <div className="relative bg-base-100 rounded-lg p-6 w-full max-w-sm mx-4 shadow-xl">
+                    <div className="my-overlay-backdrop absolute inset-0" onClick={() => setDeleteConfirm(null)} />
+                    <div className="relative my-surface-modal rounded-xl p-6 w-full max-w-sm mx-4 shadow-xl">
                         <h3 className="text-lg font-bold mb-4">{t("habit.confirm_delete")}</h3>
                         <p className="mb-4">
                             {deleteConfirm.type === "set" 

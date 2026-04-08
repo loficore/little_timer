@@ -7,6 +7,7 @@ import { StatsPage } from "./Stats.tsx";
 import { ErrorNotification } from "./components/ErrorNotification.tsx";
 import { getAPIClient } from "./utils/apiClientSingleton";
 import { WALLPAPER_FALLBACK_GRADIENT, STORAGE_KEYS } from "./utils/constants";
+import { getFrontendLogLevel, isPerfDebugEnabled, logError, logLifecycle, logPerf } from "./utils/logger";
 
 type Page = "timer" | "habits" | "stats" | "settings";
 const WALLPAPER_STORAGE_KEY = STORAGE_KEYS.WALLPAPER;
@@ -33,7 +34,6 @@ const logWallpaperDebug = (event: string, payload?: Record<string, unknown>) => 
   if (!isWallpaperDebugEnabled()) return;
 
   const time = new Date().toISOString();
-  // eslint-disable-next-line no-console
   console.info("[wallpaper-debug]", time, event, payload || {});
 };
 
@@ -43,6 +43,25 @@ const readCachedWallpaper = (): string => {
   } catch {
     return "";
   }
+};
+
+const isWebViewRuntime = (): boolean => {
+  if (typeof window === "undefined") return false;
+  return !!window.webui;
+};
+
+const formatUnknownError = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return `${value}`;
+  if (value instanceof Error) return value.message;
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "[无法序列化的错误对象]";
+    }
+  }
+  return "未知错误";
 };
 
 export const App = () => {
@@ -113,8 +132,34 @@ export const App = () => {
     }
 
     // 兜底：除渐变和纯色外，统一按图片 URL/路径处理（支持 https/data/blob/相对路径）
-    return { type: "image" as const, value: wp };
+    return { type: "image" as const, value: wp     };
   };
+
+  // 全局错误捕获
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    logLifecycle("应用初始化");
+    logLifecycle(`日志配置: level=${getFrontendLogLevel()} perf=${isPerfDebugEnabled() ? "on" : "off"}`);
+    logPerf("App.perfDebug.status", {
+      enabled: isPerfDebugEnabled(),
+      hint: "URL 参数 debugPerf=1&logLevel=debug 或 localStorage 键 lt_debug_perf=1, lt_log_level=debug",
+    });
+
+    window.onerror = (message, _source, _lineno, _colno, error) => {
+      const text = formatUnknownError(message);
+      logError(`全局错误: ${text}`, error);
+      return false;
+    };
+
+    window.onunhandledrejection = (event) => {
+      const reasonText = formatUnknownError(event.reason);
+      const reasonError = event.reason instanceof Error ? event.reason : undefined;
+      logError(`未处理的 Promise 拒绝: ${reasonText}`, reasonError);
+    };
+
+    logLifecycle("WebView 已渲染完成");
+  }, []);
 
   useEffect(() => {
     // 首次加载设置前不改动背景，避免刷新时出现黑屏闪回
@@ -156,7 +201,7 @@ export const App = () => {
       } else if (wallpaperInfo.type === "color") {
         html.style.background = wallpaperInfo.value;
       }
-      html.style.backgroundAttachment = "fixed";
+      html.style.backgroundAttachment = isWebViewRuntime() ? "scroll" : "fixed";
     }
 
     logWallpaperDebug("applyWallpaper:end", {

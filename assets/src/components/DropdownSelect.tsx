@@ -58,21 +58,13 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
     >
       {/* 选择器按钮 */}
       <button
-        className={`timer-option-control dropdown-select-btn flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl transition-all duration-200 ${
+        className={`my-field-surface dropdown-select-btn flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl transition-all duration-200 ${
           disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
         }`}
         style={{
-          background: isOpen
-            ? "color-mix(in oklab, var(--my-surface) 70%, transparent)"
-            : "color-mix(in oklab, var(--my-surface) 60%, transparent)",
-          border: `1px solid ${
-            isOpen
-              ? "var(--accent-color)"
-              : "color-mix(in oklab, var(--my-outline) 50%, transparent)"
-          }`,
           color: "var(--my-on-surface)",
           boxShadow: isOpen
-            ? `0 0 0 2px color-mix(in oklab, var(--accent-color) 25%, transparent)`
+            ? `inset 0 1px 0 var(--my-glass-highlight-strong), 0 0 0 2px color-mix(in oklab, var(--accent-color) 25%, transparent)`
             : "none",
         }}
         onClick={() => !disabled && setIsOpen(!isOpen)}
@@ -102,12 +94,8 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
       {/* 下拉菜单 */}
       {isOpen && (
         <div
-          className="absolute top-full left-0 right-0 mt-2 bg-base-100 rounded-xl border shadow-lg z-50 overflow-hidden transition-all duration-200"
+          className="absolute top-full left-0 right-0 mt-2 my-surface-modal rounded-xl z-50 overflow-hidden transition-all duration-200"
           style={{
-            background: "color-mix(in oklab, var(--my-surface) 85%, transparent)",
-            border: `1px solid color-mix(in oklab, var(--my-outline) 60%, transparent)`,
-            backdropFilter: "blur(8px) saturate(110%)",
-            WebkitBackdropFilter: "blur(8px) saturate(110%)",
             boxShadow: `0 8px 24px 0 rgba(0, 0, 0, 0.2)`,
             minWidth: minWidth,
           }}
@@ -118,7 +106,7 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
               className={`w-full px-3.5 py-3 text-left text-sm transition-colors duration-150 border-b border-transparent ${
                 value === option.value
                   ? "bg-primary/20"
-                  : "hover:bg-base-200/50"
+                  : "hover:bg-[color:color-mix(in_oklab,var(--my-primary-container)_42%,transparent)]"
               }`}
               style={
                 value === option.value

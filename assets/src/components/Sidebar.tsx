@@ -53,7 +53,7 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
     return (
         <aside className="my-sidebar flex flex-col w-60 h-full shrink-0">
             {/* Logo */}
-            <div className="p-4 border-b border-white/10">
+            <div className="p-4 shadow-[inset_0_-1px_0_color-mix(in_oklab,var(--my-outline)_22%,transparent)]">
                 <h1 className="text-xl font-bold flex items-center gap-2 text-white/90">
                     <StarIconComponent />
                     <span className="text-white">Little Timer</span>
@@ -75,7 +75,7 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
             </nav>
 
             {/* Footer */}
-            <div className="p-4 border-t border-white/10 text-center text-sm text-white/60">
+            <div className="p-4 text-center text-sm text-white/60 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--my-outline)_18%,transparent)]">
                 <p>v1.0.0</p>
             </div>
         </aside>

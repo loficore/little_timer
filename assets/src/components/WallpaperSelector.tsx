@@ -106,7 +106,7 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
               className={`h-12 rounded-lg border-2 transition-all ${
                 (value === g.value || (!value && !g.value))
                   ? "border-primary ring-2 ring-primary/30"
-                  : "border-base-300 hover:border-base-content/30"
+                  : "border-[color:color-mix(in_oklab,var(--my-outline)_56%,transparent)] hover:border-[color:color-mix(in_oklab,var(--my-outline)_78%,transparent)]"
               }`}
               style={g.value ? { background: g.value } : { background: "#2a2a2a" }}
               onClick={() => handleGradientSelect(g.value)}
@@ -129,7 +129,7 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
               className={`w-10 h-10 rounded-full border-2 transition-all ${
                 value === c
                   ? "border-primary ring-2 ring-primary/30"
-                  : "border-base-300 hover:scale-110"
+                  : "border-[color:color-mix(in_oklab,var(--my-outline)_56%,transparent)] hover:scale-110"
               }`}
               style={{ backgroundColor: c }}
               onClick={() => handleColorSelect(c)}
@@ -154,7 +154,7 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
             onInput={(e) => handleImageUrlChange((e.target as HTMLInputElement).value)}
           />
           {imageUrl && (
-            <div className="h-20 rounded-lg overflow-hidden bg-base-200">
+            <div className="h-20 rounded-lg overflow-hidden bg-[color:color-mix(in_oklab,var(--my-surface-strong)_86%,transparent)] border border-[color:color-mix(in_oklab,var(--my-outline)_42%,transparent)]">
               <img
                 src={imageUrl}
                 alt={t("modal.preview")}

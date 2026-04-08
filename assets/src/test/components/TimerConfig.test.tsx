@@ -65,7 +65,7 @@ describe("TimerConfig", () => {
     expect(inputs[1].value).toBe("5");
   });
 
-  it("轮次为空时应该显示 placeholder", () => {
+  it("轮次为空时应该显示无穷大标识", () => {
     const { container } = render(
       <TimerConfig
         config={{ ...defaultConfig, loopCount: 0 }}
@@ -76,7 +76,7 @@ describe("TimerConfig", () => {
     );
 
     const inputs = container.querySelectorAll("input");
-    expect(inputs[2].placeholder).toBe("∞");
+    expect(inputs[2].value).toBe("0");
   });
 
   it("倒计时模式且未运行时应该包含配置项", () => {

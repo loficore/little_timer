@@ -120,8 +120,8 @@ export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
 
       <SettingItem label={t("settings.basic.sound_enabled")}>
         <div className="space-y-3">
-          <label className="label cursor-pointer rounded-lg px-3 py-2 border border-base-300 bg-base-200/50">
-            <span className="label-text">{t("settings.basic.sound_finish")}</span>
+          <label className="label cursor-pointer rounded-lg px-3 py-2 bg-[var(--my-surface-strong)]/50 border border-[var(--my-outline)]/50">
+            <span className="text-[var(--my-on-surface)]">{t("settings.basic.sound_finish")}</span>
             <input
               type="checkbox"
               className="toggle toggle-primary"
@@ -136,8 +136,8 @@ export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
             />
           </label>
 
-          <label className="label cursor-pointer rounded-lg px-3 py-2 border border-base-300 bg-base-200/50">
-            <span className="label-text">{t("settings.basic.sound_tick")}</span>
+          <label className="label cursor-pointer rounded-lg px-3 py-2 bg-[var(--my-surface-strong)]/50 border border-[var(--my-outline)]/50">
+            <span className="text-[var(--my-on-surface)]">{t("settings.basic.sound_tick")}</span>
             <input
               type="checkbox"
               className="toggle toggle-secondary"
@@ -152,8 +152,8 @@ export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
             />
           </label>
 
-          <label className="label cursor-pointer rounded-lg px-3 py-2 border border-base-300 bg-base-200/50">
-            <span className="label-text font-medium">{t("settings.basic.sound_master_switch")}</span>
+          <label className="label cursor-pointer rounded-lg px-3 py-2 bg-[var(--my-surface-strong)]/50 border border-[var(--my-outline)]/50">
+            <span className="text-[var(--my-on-surface)] font-medium">{t("settings.basic.sound_master_switch")}</span>
             <input
               type="checkbox"
               className="toggle toggle-accent"
@@ -167,10 +167,10 @@ export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
             />
           </label>
 
-          <div className="rounded-lg px-3 py-3 border border-base-300 bg-base-200/30">
+          <div className="rounded-lg px-3 py-3 bg-[var(--my-surface-strong)]/30 border border-[var(--my-outline)]/30">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span>{t("settings.basic.sound_volume")}</span>
-              <span className="font-medium">{config.sound_volume}%</span>
+              <span className="text-[var(--my-on-surface)]">{t("settings.basic.sound_volume")}</span>
+              <span className="text-[var(--my-on-surface)] font-medium">{config.sound_volume}%</span>
             </div>
             <input
               type="range"

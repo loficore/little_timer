@@ -178,74 +178,81 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)' }}>
+    <div className="my-overlay-backdrop fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative my-surface-card rounded-xl p-6 w-full max-w-sm mx-4">
-        <h3 className="text-lg font-bold mb-4">{getTitle()}</h3>
+      <div className="relative my-surface-modal rounded-2xl p-6 sm:p-7 w-full max-w-lg mx-4">
+        <h3 className="text-lg sm:text-xl font-bold mb-5 sm:mb-6">{getTitle()}</h3>
         
-        <form onSubmit={(e) => { void handleSubmit(e); }}>
-          <div className="form-control mb-4">
-            <label className="label">
-              <span className="label-text">{t("modal.name")}</span>
-            </label>
-            <input
-              type="text"
-              className="my-input"
-              placeholder={mode === "set" ? t("modal.name_placeholder_set") : t("modal.name_placeholder_habit")}
-              value={name}
-              onInput={(e) => setName((e.target as HTMLInputElement).value)}
-              required
-            />
-          </div>
-
-          {mode === "set" && (
-            <div className="form-control mb-4">
-              <label className="label">
-                <span className="label-text">{t("modal.description")}</span>
-              </label>
-              <textarea
-                className="my-input min-h-[80px] resize-none"
-                placeholder={t("modal.description_placeholder")}
-                value={description}
-                onInput={(e) => setDescription((e.target as HTMLTextAreaElement).value)}
+        <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-6 sm:space-y-7">
+          <section className="my-surface-panel rounded-2xl p-4 sm:p-5 space-y-6">
+            <div className="space-y-3 sm:space-y-3.5">
+              <div className="text-sm font-medium text-[var(--my-on-surface)] leading-none">
+                {t("modal.name")}
+              </div>
+              <input
+                type="text"
+                className="my-input mt-0"
+                placeholder={mode === "set" ? t("modal.name_placeholder_set") : t("modal.name_placeholder_habit")}
+                value={name}
+                onInput={(e) => setName((e.target as HTMLInputElement).value)}
+                required
               />
             </div>
-          )}
 
-          {mode === "habit" && (
-            <div className="form-control mb-4">
-              <label className="label">
-                <span className="label-text">{t("modal.goal_duration")}</span>
-              </label>
-              <div className="flex gap-3 items-center">
-                <PickerNumberInput
-                  value={goalHours}
-                  min={0}
-                  max={9999}
-                  onChange={setGoalHours}
+            {mode === "set" && (
+              <div className="space-y-3 sm:space-y-3.5">
+                <div className="text-sm font-medium text-[var(--my-on-surface)] leading-none">
+                  {t("modal.description")}
+                </div>
+                <textarea
+                  className="my-input min-h-[120px] resize-none mt-0"
+                  placeholder={t("modal.description_placeholder")}
+                  value={description}
+                  onInput={(e) => setDescription((e.target as HTMLTextAreaElement).value)}
                 />
-                <span className="text-sm">{t("modal.hours")}</span>
-                <PickerNumberInput
-                  value={goalMinutes}
-                  min={0}
-                  max={59}
-                  onChange={setGoalMinutes}
-                />
-                <span className="text-sm">{t("modal.minutes")}</span>
               </div>
-              <label className="label">
-                <span className="label-text-alt text-error">
-                  {(goalHours * 60 + goalMinutes) === 0 ? t("modal.goal_error") : t("modal.goal_summary", { hours: goalHours, minutes: goalMinutes, total: (goalHours * 60 + goalMinutes) })}
-                </span>
-              </label>
-            </div>
-          )}
+            )}
 
-          <div className="form-control mb-6">
-            <label className="label">
-              <span className="label-text">{t("modal.color")}</span>
-            </label>
-            <div className="flex gap-2 flex-wrap mb-3">
+            {mode === "habit" && (
+              <div className="space-y-3 sm:space-y-3.5">
+                <div className="text-sm font-medium text-[var(--my-on-surface)] leading-none">
+                  {t("modal.goal_duration")}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="my-surface-panel rounded-xl px-3 py-2.5">
+                    <PickerNumberInput
+                      value={goalHours}
+                      min={0}
+                      max={9999}
+                      onChange={setGoalHours}
+                      label={t("modal.hours")}
+                    />
+                  </div>
+                  <div className="my-surface-panel rounded-xl px-3 py-2.5">
+                    <PickerNumberInput
+                      value={goalMinutes}
+                      min={0}
+                      max={59}
+                      onChange={setGoalMinutes}
+                      label={t("modal.minutes")}
+                    />
+                  </div>
+                </div>
+                <label className="label">
+                  <span className="label-text-alt text-error">
+                    {(goalHours * 60 + goalMinutes) === 0 ? t("modal.goal_error") : t("modal.goal_summary", { hours: goalHours, minutes: goalMinutes, total: (goalHours * 60 + goalMinutes) })}
+                  </span>
+                </label>
+              </div>
+            )}
+          </section>
+
+          <section className="my-surface-panel rounded-2xl p-4 sm:p-5 space-y-5">
+            <div className="form-control">
+              <div className="text-sm font-medium text-[var(--my-on-surface)] leading-none mb-3">
+                {t("modal.color")}
+              </div>
+              <div className="flex gap-2 flex-wrap mb-3">
               {COLORS.map((c) => (
                 <button
                   key={c}
@@ -253,43 +260,44 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
                   className={`w-9 h-9 rounded-full border-2 transition-all ${
                     color.toLowerCase() === c.toLowerCase()
                       ? "border-primary ring-2 ring-primary/30"
-                      : "border-base-300 hover:border-base-content/40 hover:scale-105"
+                      : "border-[color:color-mix(in_oklab,var(--my-outline)_56%,transparent)] hover:border-[color:color-mix(in_oklab,var(--my-outline)_82%,transparent)] hover:scale-105"
                   }`}
                   style={{ backgroundColor: c }}
                   onClick={() => handleColorSelect(c)}
                 />
               ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  className="my-input flex-1"
+                  value={colorInput}
+                  placeholder="#6366f1 或 rgb(99,102,241)"
+                  onInput={(e) => {
+                    setColorInput((e.target as HTMLInputElement).value);
+                    if (colorInputError) setColorInputError("");
+                  }}
+                  onBlur={handleColorInputBlur}
+                />
+                <input
+                  type="color"
+                  className="w-10 h-10 rounded-lg cursor-pointer border border-[color:color-mix(in_oklab,var(--my-outline)_56%,transparent)] bg-transparent"
+                  value={normalize_hex(color) ?? COLORS[0]}
+                  onChange={(e) => handleColorSelect((e.target as HTMLInputElement).value)}
+                  title={t("modal.select_color")}
+                />
+              </div>
+              {colorInputError && (
+                <label className="label">
+                  <span className="label-text-alt text-error">{colorInputError}</span>
+                </label>
+              )}
             </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                className="my-input flex-1"
-                value={colorInput}
-                placeholder="#6366f1 或 rgb(99,102,241)"
-                onInput={(e) => {
-                  setColorInput((e.target as HTMLInputElement).value);
-                  if (colorInputError) setColorInputError("");
-                }}
-                onBlur={handleColorInputBlur}
-              />
-              <input
-                type="color"
-                className="w-10 h-10 rounded-lg cursor-pointer border border-base-300 bg-transparent"
-                value={normalize_hex(color) ?? COLORS[0]}
-                onChange={(e) => handleColorSelect((e.target as HTMLInputElement).value)}
-                title={t("modal.select_color")}
-              />
-            </div>
-            {colorInputError && (
-              <label className="label">
-                <span className="label-text-alt text-error">{colorInputError}</span>
-              </label>
-            )}
-          </div>
 
-          <WallpaperSelector value={wallpaper} onChange={setWallpaper} />
+            <WallpaperSelector value={wallpaper} onChange={setWallpaper} />
+          </section>
 
-          <div className="flex gap-2">
+          <div className="flex gap-3 pt-1">
             <button
               type="button"
               className="btn btn-ghost flex-1"

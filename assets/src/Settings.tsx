@@ -14,6 +14,7 @@ import {
   normalizeAudioPreferences,
   saveAudioPreferences,
 } from "./utils/audio";
+import { isPerfDebugEnabled, logPerf } from "./utils/logger";
 
 interface SettingsPageProps {
   onBackClick?: () => void;
@@ -120,6 +121,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   };
 
   const loadSettings = async () => {
+    const startAt = performance.now();
     if (!apiClientRef.current) {
       setSaveMessage(t("errors.offline.message"));
       return;
@@ -168,9 +170,17 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       };
       
       setConfig(loadedConfig);
+      logPerf("Settings.load.success", {
+        durationMs: Math.round(performance.now() - startAt),
+        defaultMode: loadedConfig.basic.default_mode,
+        language: loadedConfig.basic.language,
+      });
     } catch (error) {
       console.error("加载设置失败:", error);
       setSaveMessage(t("errors.offline.message"));
+      logPerf("Settings.load.error", {
+        durationMs: Math.round(performance.now() - startAt),
+      });
     }
   };
 
@@ -179,13 +189,23 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   }, []);
 
   useEffect(() => {
+    const startAt = performance.now();
     applyTheme(config.basic.theme_mode || "dark");
+    logPerf("Settings.theme.applied", {
+      themeMode: config.basic.theme_mode || "dark",
+      durationMs: Math.round(performance.now() - startAt),
+    });
   }, [config.basic.theme_mode]);
 
   useEffect(() => {
+    const startAt = performance.now();
     setLanguage(config.basic.language).catch((err) =>
       console.error("加载语言失败", err),
     );
+    logPerf("Settings.language.changed", {
+      language: config.basic.language,
+      scheduleMs: Math.round(performance.now() - startAt),
+    });
   }, [config.basic.language]);
 
   useEffect(() => {
@@ -193,6 +213,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   }, [config.basic.wallpaper, onWallpaperChange]);
 
   const handleSave = () => {
+    const startAt = performance.now();
     setIsSaving(true);
     setSaveMessage("");
 
@@ -235,10 +256,17 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         .then(() => {
           setSaveMessage(t("common.save_success"));
           setTimeout(() => setSaveMessage(""), 3000);
+          logPerf("Settings.save.success", {
+            durationMs: Math.round(performance.now() - startAt),
+          });
         })
         .catch((error) => {
           const errorMessage = error instanceof Error ? error.message : "未知错误";
           setSaveMessage(t("validation.save_error", { error: errorMessage }));
+          logPerf("Settings.save.error", {
+            durationMs: Math.round(performance.now() - startAt),
+            error: errorMessage,
+          });
         })
         .finally(() => {
           setIsSaving(false);
@@ -248,13 +276,25 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
 
   const handleReset = () => {
     if (confirm(t("common.reset_confirm"))) {
+      const startAt = performance.now();
       setConfig(DEFAULT_CONFIG);
       saveAudioPreferences(DEFAULT_AUDIO_PREFERENCES);
       localStorage.setItem("layout_density", "normal");
       localStorage.setItem("time_display_style", "classic");
       setSaveMessage(t("common.save_hint"));
+      logPerf("Settings.reset", {
+        durationMs: Math.round(performance.now() - startAt),
+      });
     }
   };
+
+  useEffect(() => {
+    if (!isPerfDebugEnabled()) return;
+    logPerf("Settings.tab.changed", {
+      activeTab,
+      defaultMode: config.basic.default_mode,
+    });
+  }, [activeTab, config.basic.default_mode]);
 
   return (
     <div className="flex flex-col flex-1 text-base-content transition-colors duration-300 animate-fadeIn overflow-hidden bg-transparent">

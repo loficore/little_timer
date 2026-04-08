@@ -1,0 +1,171 @@
+@layer components {
+  .container-responsive {
+    @apply px-4 sm:px-6 md:px-8;
+  }
+
+  .grid-responsive {
+    @apply grid gap-3 sm:gap-4 md:gap-6;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+
+  .my-topbar {
+    position: relative;
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface-strong) 96%, transparent) 0%, color-mix(in oklab, var(--my-surface) 90%, transparent) 100%);
+    border: none;
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 80%, transparent), inset 0 -1px 0 color-mix(in oklab, var(--my-glass-shadow) 60%, transparent), 0 10px 26px color-mix(in oklab, var(--my-glass-shadow) 86%, transparent);
+    backdrop-filter: blur(22px) saturate(136%);
+    -webkit-backdrop-filter: blur(22px) saturate(136%);
+    color: var(--my-on-surface);
+    background-clip: padding-box;
+    isolation: isolate;
+  }
+
+  .my-topbar::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-bottom: 1px solid color-mix(in oklab, var(--my-outline) 34%, transparent);
+  }
+
+  .my-topbar-title {
+    color: var(--my-on-surface);
+    letter-spacing: 0.01em;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.14);
+  }
+
+  .my-sidebar {
+    position: relative;
+    background: linear-gradient(170deg, color-mix(in oklab, var(--my-surface-strong) 96%, transparent) 0%, color-mix(in oklab, var(--my-surface) 88%, transparent) 72%);
+    border-right: none;
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 76%, transparent), 10px 0 26px color-mix(in oklab, var(--my-glass-shadow) 80%, transparent);
+    backdrop-filter: blur(24px) saturate(136%);
+    -webkit-backdrop-filter: blur(24px) saturate(136%);
+    background-clip: padding-box;
+    isolation: isolate;
+  }
+
+  .my-sidebar::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 14px;
+    height: 100%;
+    pointer-events: none;
+    background: linear-gradient(90deg, color-mix(in oklab, var(--my-outline) 18%, transparent) 0%, transparent 100%);
+  }
+
+  .my-sidebar-nav-btn {
+    @apply w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-left;
+    color: var(--my-on-surface-variant);
+    transition: transform 140ms ease-out, background-color 140ms ease-out, color 140ms ease-out, box-shadow 140ms ease-out;
+  }
+
+  .my-sidebar-nav-btn:hover {
+    transform: translateY(-1px);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 58%, transparent) 0%, color-mix(in oklab, var(--my-surface) 86%, transparent) 100%);
+    color: var(--my-on-surface);
+  }
+
+  .my-sidebar-nav-btn.is-active {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 84%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 94%, transparent) 100%);
+    color: var(--my-on-primary-container);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight), inset 0 0 0 1px color-mix(in oklab, var(--my-outline) 70%, transparent), 0 8px 16px rgba(0, 0, 0, 0.14);
+  }
+
+  .my-clock-glass {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.875rem;
+    border: 1px solid color-mix(in oklab, var(--my-outline) 54%, transparent);
+    background: linear-gradient(160deg, rgba(6, 10, 16, 0.84) 0%, rgba(18, 24, 34, 0.74) 100%);
+    backdrop-filter: blur(18px) saturate(124%);
+    -webkit-backdrop-filter: blur(18px) saturate(124%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.12), 0 10px 22px rgba(0, 0, 0, 0.18);
+    min-height: 80px;
+    width: 92vw;
+    max-width: 560px;
+    padding: 0.5rem 1.5rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .my-clock-glass > div {
+    margin: 0 !important;
+    padding-top: 0.15em;
+  }
+
+  .my-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem;
+    padding: 0.35rem max(0.5rem, env(safe-area-inset-right)) calc(0.35rem + env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--my-surface) 90%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 96%, transparent) 100%);
+    border-top: 1px solid color-mix(in oklab, var(--my-outline) 72%, transparent);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight), 0 -8px 24px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(22px) saturate(128%);
+    -webkit-backdrop-filter: blur(22px) saturate(128%);
+  }
+
+  .my-bottom-nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-height: 3.25rem;
+    width: 100%;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--my-on-surface-variant);
+    border-radius: 0.9rem;
+    margin: 0;
+    padding: 0.25rem 0.1rem;
+    transition: background-color 140ms ease-out, color 140ms ease-out, transform 140ms ease-out;
+  }
+
+  .my-bottom-nav-item svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    flex-shrink: 0;
+  }
+
+  .my-bottom-nav-item .btm-nav-label {
+    font-size: 0.7rem;
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+
+  .my-bottom-nav-item:hover {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 62%, transparent) 0%, color-mix(in oklab, var(--my-surface) 86%, transparent) 100%);
+    color: var(--my-on-surface);
+  }
+
+  .my-bottom-nav-item.active {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 84%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 94%, transparent) 100%);
+    color: var(--my-on-primary-container);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight), inset 0 0 0 1px color-mix(in oklab, var(--my-outline) 65%, transparent);
+  }
+
+  html.light-mode .my-clock-glass {
+    border: 1px solid color-mix(in oklab, var(--my-outline) 46%, transparent);
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.94) 0%, rgba(230, 234, 240, 0.84) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48), inset 0 -1px 0 rgba(0, 0, 0, 0.04), 0 10px 22px rgba(0, 0, 0, 0.08);
+    min-height: 80px;
+    width: 92vw;
+    max-width: 560px;
+    padding: 0.5rem 1.5rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  html.light-mode .my-clock-glass > div {
+    margin: 0 !important;
+    padding-top: 0.15em;
+  }
+}

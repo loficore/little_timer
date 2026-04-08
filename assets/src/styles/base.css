@@ -1,0 +1,159 @@
+@layer base {
+  :root {
+    --bg-primary: #121212;
+    --bg-secondary: #1f1f1f;
+    --bg-tertiary: #2a2a2a;
+    --text-primary: #ffffff;
+    --text-secondary: #9CA3AF;
+    --border-color: #2a2a2a;
+    --accent-color: #515BD4;
+    --spacing-xs: 0.5rem;
+    --spacing-sm: 0.75rem;
+    --spacing-md: 1rem;
+    --spacing-lg: 1.5rem;
+    --spacing-xl: 2rem;
+    --font-size-time: 3rem;
+    --font-size-label: 0.875rem;
+    --touch-target-min: 44px;
+    --layout-px: 1.25rem;
+    --layout-py: 2rem;
+    --layout-control-mb: 1.5rem;
+    --layout-control-gap: 0.75rem;
+    --my-surface: rgba(24, 24, 28, 0.9);
+    --my-surface-strong: rgba(32, 32, 38, 0.96);
+    --my-outline: rgba(255, 255, 255, 0.18);
+    --my-on-surface: rgba(255, 255, 255, 0.92);
+    --my-on-surface-variant: rgba(255, 255, 255, 0.7);
+    --my-primary-container: rgba(81, 91, 212, 0.25);
+    --my-on-primary-container: #dce1ff;
+    --my-field-bg: #1b1f2a;
+    --my-field-bg-hover: #232837;
+    --my-field-bg-focus: #2a3042;
+    --my-glass-highlight: rgba(255, 255, 255, 0.22);
+    --my-glass-highlight-strong: rgba(255, 255, 255, 0.34);
+    --my-glass-shadow: rgba(0, 0, 0, 0.18);
+  }
+
+  @media (max-width: 480px) {
+    :root {
+      --spacing-xs: 0.25rem;
+      --spacing-sm: 0.5rem;
+      --spacing-md: 0.75rem;
+      --spacing-lg: 1rem;
+      --spacing-xl: 1.5rem;
+      --font-size-time: 2rem;
+      --font-size-label: 0.75rem;
+    }
+  }
+
+  @media (min-width: 768px) {
+    :root {
+      --spacing-xs: 0.75rem;
+      --spacing-sm: 1rem;
+      --spacing-md: 1.5rem;
+      --spacing-lg: 2rem;
+      --spacing-xl: 2.5rem;
+      --font-size-time: 5rem;
+      --font-size-label: 1rem;
+    }
+  }
+
+  html.light-mode {
+    --bg-primary: #e9ecef;
+    --bg-secondary: #dee1e6;
+    --bg-tertiary: #d3d8dd;
+    --text-primary: #1a1a1a;
+    --text-secondary: #666666;
+    --border-color: #ced4da;
+    --accent-color: #007AFF;
+    --my-surface: rgba(255, 255, 255, 0.995);
+    --my-surface-strong: rgba(255, 255, 255, 1);
+    --my-outline: rgba(0, 0, 0, 0.08);
+    --my-on-surface: rgba(26, 26, 26, 0.92);
+    --my-on-surface-variant: rgba(102, 102, 102, 0.8);
+    --my-primary-container: rgba(0, 122, 255, 0.1);
+    --my-on-primary-container: #0a2f66;
+    --my-field-bg: #f8f9fa;
+    --my-field-bg-hover: #e9ecef;
+    --my-field-bg-focus: #dee1e6;
+    --my-glass-highlight: rgba(255, 255, 255, 0.72);
+    --my-glass-highlight-strong: rgba(255, 255, 255, 0.84);
+    --my-glass-shadow: rgba(0, 0, 0, 0.08);
+    background: #f5f5f5;
+  }
+
+  html {
+    background: linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 50%, #0d0d0d 100%);
+    background-size: 140% 140%;
+    animation: ambientFlowDark 9s ease-in-out infinite;
+    background-attachment: fixed;
+    color: var(--text-primary);
+    transition: background-color 0.3s, color 0.3s;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+      Helvetica, Arial, "Microsoft YaHei", "微软雅黑", sans-serif;
+    background: transparent;
+    color: var(--text-primary);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    position: relative;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -15%;
+    pointer-events: none;
+    z-index: 0;
+    backdrop-filter: blur(26px) saturate(120%);
+    -webkit-backdrop-filter: blur(26px) saturate(120%);
+    background:
+      radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.16) 0 2px, transparent 2px 100%),
+      radial-gradient(circle at 78% 28%, rgba(255, 255, 255, 0.12) 0 1.5px, transparent 1.5px 100%),
+      radial-gradient(circle at 34% 76%, rgba(255, 255, 255, 0.1) 0 1.25px, transparent 1.25px 100%),
+      linear-gradient(115deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.06) 42%, rgba(255, 255, 255, 0.12) 58%, rgba(255, 255, 255, 0.05) 100%),
+      radial-gradient(42% 38% at 18% 22%, rgba(74, 158, 255, 0.18) 0%, rgba(74, 158, 255, 0.02) 70%),
+      radial-gradient(35% 32% at 80% 76%, rgba(255, 179, 71, 0.14) 0%, rgba(255, 179, 71, 0.02) 72%);
+    background-color: rgba(10, 12, 18, 0.36);
+    animation: ambientPulse 7.5s ease-in-out infinite;
+  }
+
+  html.light-mode body::before {
+    backdrop-filter: blur(26px) saturate(120%);
+    -webkit-backdrop-filter: blur(26px) saturate(120%);
+    background:
+      radial-gradient(42% 38% at 18% 22%, rgba(13, 74, 124, 0.12) 0%, rgba(13, 74, 124, 0.01) 70%),
+      radial-gradient(35% 32% at 80% 76%, rgba(21, 101, 57, 0.1) 0%, rgba(21, 101, 57, 0.01) 72%);
+    background-color: rgba(255, 255, 255, 0.34);
+  }
+
+  button, input[type="button"], input[type="checkbox"], input[type="radio"] {
+    min-height: var(--touch-target-min);
+    min-width: var(--touch-target-min);
+  }
+
+  input, select, textarea {
+    font-size: 16px;
+  }
+
+  a, button {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@keyframes ambientFlowDark {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes ambientPulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}

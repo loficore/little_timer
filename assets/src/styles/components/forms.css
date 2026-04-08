@@ -1,0 +1,193 @@
+@layer components {
+  .form-input, .form-select, .form-textarea {
+    @apply min-h-[44px] px-3 sm:px-4 py-2 sm:py-3;
+    font-size: 16px;
+  }
+
+  .my-field-surface {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg) 96%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-focus) 90%, transparent) 100%);
+    border: 1px solid color-mix(in oklab, var(--my-outline) 65%, transparent);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight), inset 0 -1px 0 color-mix(in oklab, var(--my-glass-shadow) 70%, transparent);
+    transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+    backdrop-filter: blur(30px) saturate(136%);
+    -webkit-backdrop-filter: blur(30px) saturate(136%);
+    background-clip: padding-box;
+  }
+
+  .my-field-surface:hover {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg-hover) 96%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-focus) 90%, transparent) 100%);
+    border-color: color-mix(in oklab, var(--my-outline) 90%, transparent);
+  }
+
+  .my-field-surface:focus-within {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg-focus) 98%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-hover) 88%, transparent) 100%);
+    border-color: var(--accent-color);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight-strong), 0 0 0 2px color-mix(in oklab, var(--accent-color) 25%, transparent);
+  }
+
+  .my-input {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg) 96%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-focus) 90%, transparent) 100%);
+    border: 1px solid color-mix(in oklab, var(--my-outline) 50%, transparent);
+    border-radius: 0.75rem;
+    color: var(--my-on-surface);
+    padding: 0.625rem 0.875rem;
+    font-size: 0.9375rem;
+    backdrop-filter: blur(30px) saturate(136%);
+    -webkit-backdrop-filter: blur(30px) saturate(136%);
+    transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+    min-height: var(--touch-target-min);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight), inset 0 -1px 0 color-mix(in oklab, var(--my-glass-shadow) 72%, transparent);
+    background-clip: padding-box;
+  }
+
+  .my-input:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--my-outline) 80%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg-hover) 96%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-focus) 90%, transparent) 100%);
+  }
+
+  .my-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight-strong), 0 0 0 2px color-mix(in oklab, var(--accent-color) 25%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg-focus) 99%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-hover) 90%, transparent) 100%);
+  }
+
+  .my-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .my-input::placeholder {
+    color: var(--my-on-surface-variant);
+  }
+
+  .label-text {
+    color: var(--my-on-surface);
+  }
+
+  .label-text-alt {
+    color: var(--my-on-surface-variant);
+  }
+
+  .my-select {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg) 96%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-focus) 90%, transparent) 100%);
+    border: 1px solid color-mix(in oklab, var(--my-outline) 50%, transparent);
+    border-radius: 0.75rem;
+    color: var(--my-on-surface);
+    padding: 0.625rem 0.875rem;
+    font-size: 0.9375rem;
+    backdrop-filter: blur(30px) saturate(136%);
+    -webkit-backdrop-filter: blur(30px) saturate(136%);
+    transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+    min-height: var(--touch-target-min);
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23ffffff99' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2.25rem;
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight), inset 0 -1px 0 color-mix(in oklab, var(--my-glass-shadow) 72%, transparent);
+    background-clip: padding-box;
+  }
+
+  .my-select:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--my-outline) 80%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg-hover) 96%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-focus) 90%, transparent) 100%);
+  }
+
+  .my-select:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight-strong), 0 0 0 2px color-mix(in oklab, var(--accent-color) 25%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg-focus) 99%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-hover) 90%, transparent) 100%);
+  }
+
+  .my-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .my-checkbox {
+    appearance: none;
+    width: 1.25rem;
+    height: 1.25rem;
+    border: 2px solid color-mix(in oklab, var(--my-outline) 60%, transparent);
+    border-radius: 0.25rem;
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    transition: border-color 150ms ease, background-color 150ms ease;
+    flex-shrink: 0;
+  }
+
+  .my-checkbox:hover {
+    border-color: color-mix(in oklab, var(--my-outline) 85%, transparent);
+  }
+
+  .my-checkbox:checked {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+  }
+
+  .my-checkbox:checked::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 5px;
+    height: 9px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  .my-checkbox:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-color) 25%, transparent);
+  }
+
+  .my-checkbox:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  html.light-mode .my-input {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg) 98%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-focus) 94%, transparent) 100%);
+    border-color: color-mix(in oklab, var(--my-outline) 50%, transparent);
+    color: var(--my-on-surface);
+  }
+
+  html.light-mode .my-input:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--my-outline) 80%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-field-bg-hover) 98%, transparent) 0%, color-mix(in oklab, var(--my-field-bg-focus) 94%, transparent) 100%);
+  }
+
+  html.light-mode .my-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66), 0 0 0 2px color-mix(in oklab, var(--accent-color) 25%, transparent);
+  }
+
+  html.light-mode .my-input::placeholder {
+    color: var(--my-on-surface-variant);
+  }
+
+  html.light-mode .my-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23666666' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+  }
+
+  html.light-mode .label-text {
+    color: var(--my-on-surface);
+  }
+
+  html.light-mode .label-text-alt {
+    color: var(--my-on-surface-variant);
+  }
+
+  html.light-mode .my-checkbox {
+    border-color: color-mix(in oklab, var(--my-outline) 60%, transparent);
+  }
+
+  html.light-mode .my-checkbox:checked::after {
+    border-color: white;
+  }
+}

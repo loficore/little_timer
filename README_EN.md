@@ -65,6 +65,36 @@ Lint:
 pnpm lint
 ```
 
+## Scripted Build & Packaging
+
+Build on Linux / macOS:
+
+```bash
+./scripts/build.sh --release --embed-html
+./scripts/build.sh --debug --embed-html
+./scripts/build.sh --debug --no-embed-html
+```
+
+Build on Windows (PowerShell recommended):
+
+```powershell
+./scripts/build.ps1 --release --embed-html
+./scripts/build.ps1 --debug --embed-html
+./scripts/build.ps1 --debug --no-embed-html
+```
+
+`scripts/build.bat` is still available, but it is now a compatibility wrapper that forwards to `build.ps1`.
+
+Packaging scripts:
+
+```bash
+./scripts/package_linux.sh --release --embed-html
+./scripts/package_linux.sh --debug --no-embed-html
+
+./scripts/package_mingw64.sh --release --embed-html
+./scripts/package_mingw64.sh --debug --no-embed-html
+```
+
 ## Configuration
 
 Runtime configuration files:
@@ -75,21 +105,21 @@ Runtime configuration files:
 Common fields (excerpt):
 
 - **[basic]**
-	- `timezone`: Timezone (range -12 ~ 14)
-	- `language`: Language code (e.g. "ZH", "EN")
-	- `default_mode`: Default mode (countdown / stopwatch / world_clock)
-	- `theme_mode`: Theme (dark / light / auto)
+  - `timezone`: Timezone (range -12 ~ 14)
+  - `language`: Language code (e.g. "ZH", "EN")
+  - `default_mode`: Default mode (countdown / stopwatch / world_clock)
+  - `theme_mode`: Theme (dark / light / auto)
 - **[clock_defaults.countdown]**
-	- `duration_seconds`: Countdown total seconds
-	- `loop`: Enable loop
-	- `loop_count`: Loop count (0 means infinite)
-	- `loop_interval_seconds`: Rest interval in seconds between loops
+  - `duration_seconds`: Countdown total seconds
+  - `loop`: Enable loop
+  - `loop_count`: Loop count (0 means infinite)
+  - `loop_interval_seconds`: Rest interval in seconds between loops
 - **[clock_defaults.stopwatch]**
-	- `max_seconds`: Stopwatch upper limit in seconds
+  - `max_seconds`: Stopwatch upper limit in seconds
 - **[logging]**
-	- `level`: Log level (DEBUG/INFO/WARN/ERROR)
-	- `enable_timestamp`: Enable timestamps in logs
-	- `tick_interval_ms`: Tick interval (100 ~ 5000ms)
+  - `level`: Log level (DEBUG/INFO/WARN/ERROR)
+  - `enable_timestamp`: Enable timestamps in logs
+  - `tick_interval_ms`: Tick interval (100 ~ 5000ms)
 
 For full defaults, see [settings.toml](settings.toml).
 
@@ -103,4 +133,3 @@ A: The first compilation builds the C source code of webui. Subsequent builds wi
 
 **Q: I want to know more technical details?**  
 A: See [ARCHITECTURE.md](./ARCHITECTURE.md) and [ANDROID_BUILD.md](./ANDROID_BUILD.md).
-

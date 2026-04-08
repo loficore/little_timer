@@ -65,6 +65,36 @@ bun run build
 bun run lint
 ```
 
+## 脚本构建与打包
+
+Linux / macOS 构建：
+
+```bash
+./scripts/build.sh --release --embed-html
+./scripts/build.sh --debug --embed-html
+./scripts/build.sh --debug --no-embed-html
+```
+
+Windows 构建（推荐 PowerShell）：
+
+```powershell
+./scripts/build.ps1 --release --embed-html
+./scripts/build.ps1 --debug --embed-html
+./scripts/build.ps1 --debug --no-embed-html
+```
+
+`scripts/build.bat` 仍可用，但仅作为兼容入口并转发到 `build.ps1`。
+
+打包脚本：
+
+```bash
+./scripts/package_linux.sh --release --embed-html
+./scripts/package_linux.sh --debug --no-embed-html
+
+./scripts/package_mingw64.sh --release --embed-html
+./scripts/package_mingw64.sh --debug --no-embed-html
+```
+
 ## 配置说明
 
 运行时配置文件：

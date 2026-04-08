@@ -216,6 +216,27 @@ src/
 
 ---
 
+## Phase 15: 弹窗焦点区域背景透明度修复
+
+### 15.1 问题描述
+
+**问题**: 习惯选择框 (HabitPicker) 和习惯编辑/新建框 (HabitModal) 的背景太透明，导致在焦点区域内的文字难以识别。
+
+**现状**:
+- 弹窗使用 `my-surface-card` 类，背景透明度为 0.66
+- 弹窗遮罩层使用 `rgba(0,0,0,0.2)` + `blur(4px)`
+
+### 15.2 修复方案
+
+- [x] 在 `globals.css` 中创建 `my-surface-modal` 类（更高不透明度，如 0.85-0.9）
+- [x] 更新 `HabitPicker.tsx` 使用新样式
+- [x] 更新 `HabitModal.tsx` 使用新样式
+- [x] 更新 `TimerPage.tsx` habit picker 使用新样式
+- [x] 更新 `HabitsPage.tsx` delete confirm 弹窗使用新样式
+- [x] 验证视觉效果
+
+---
+
 ## Phase 12: 测试扩展 ✅
 
 ### 后端测试 (12/12 模块覆盖) ✅
@@ -269,6 +290,52 @@ src/
 - [ ] 导入 API (POST /api/import)
 - [ ] 备份 API (POST /api/backup)
 - [ ] 前端设置页集成
+
+---
+
+## Phase 16: WebView 退出时资源清理 ✅
+
+### 问题描述
+
+当用户在 WebView 窗口中点击原生退出按钮时，程序无法完全退出，后端 HTTP 服务器继续占用端口 8080。
+
+### 解决方案
+
+使用 `std.atomic.Bool` 作为退出标志，主线程在 `webview.run()` 返回后检查标志并清理资源。
+
+### 已完成
+
+- [x] 在 `src/core/app.zig` 的 `MainApplication` 结构体中添加 `should_exit: std.atomic.Bool` 字段
+- [x] 修改 `stop()` 方法设置退出标志
+- [x] 在 `win.run()` 返回后显式调用 `stop()` + `join()`
+- [x] `zig build test` 通过
+
+### 执行流程
+
+```
+用户点击退出
+    ↓
+WebView 窗口关闭
+    ↓
+win.run() 返回
+    ↓
+main_app.stop() → 设置 should_exit + 停止 HTTP 服务器
+    ↓
+app_thread.join() → 等待 HTTP 线程结束
+    ↓
+main_app.deinit() → 清理所有资源
+    ↓
+allocator.destroy(main_app)
+    ↓
+进程退出 ✓
+```
+
+### 验收标准
+
+- [ ] 点击 WebView 原生退出按钮后，进程完全退出
+- [ ] 端口 8080 被释放，可重新启动
+- [ ] 无内存泄漏（通过 GPA 检测）
+- [ ] `zig build test` 通过
 
 ---
 

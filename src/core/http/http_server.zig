@@ -36,12 +36,64 @@ fn handleRoot(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respons
     }
 }
 
+/// 处理前端日志接收请求
+fn handleFrontendLog(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    const body = request.body() orelse "";
+    if (body.len == 0) {
+        response.header("content-type", "application/json");
+        try response.chunk("{\"success\":false,\"error\":\"empty body\"}");
+        return;
+    }
+
+    const parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch null;
+    defer if (parsed) |p| p.deinit();
+
+    if (parsed == null) {
+        response.header("content-type", "application/json");
+        try response.chunk("{\"success\":false,\"error\":\"invalid json\"}");
+        return;
+    }
+
+    const value = parsed.?.value;
+    if (value != .object) {
+        response.header("content-type", "application/json");
+        try response.chunk("{\"success\":false,\"error\":\"not an object\"}");
+        return;
+    }
+
+    const obj = value.object;
+    const category = obj.get("category") orelse .null;
+    const level = obj.get("level") orelse .null;
+    const message = obj.get("message") orelse .null;
+
+    const cat_str = if (category == .string) category.string else "unknown";
+    const level_str = if (level == .string) level.string else "info";
+    const msg_str = if (message == .string) message.string else "";
+
+    const actual_level = logger.LogLevel.fromString(level_str) orelse .INFO;
+    const level_int = @intFromEnum(actual_level);
+
+    if (level_int >= @intFromEnum(logger.LogLevel.ERROR)) {
+        logger.global_logger.err("[前端:{s}] {s}", .{ cat_str, msg_str });
+    } else if (level_int >= @intFromEnum(logger.LogLevel.WARN)) {
+        logger.global_logger.warn("[前端:{s}] {s}", .{ cat_str, msg_str });
+    } else if (level_int >= @intFromEnum(logger.LogLevel.INFO)) {
+        logger.global_logger.info("[前端:{s}] {s}", .{ cat_str, msg_str });
+    } else {
+        logger.global_logger.debug("[前端:{s}] {s}", .{ cat_str, msg_str });
+    }
+
+    response.header("content-type", "application/json");
+    try response.chunk("{\"success\":true}");
+}
+
 /// 处理获取计时器状态的请求，返回当前时间、模式、运行状态等信息
 /// 参数：
 /// - **h** : HTTP 处理器上下文，包含应用状态和配置
 /// - **request** : HTTP 请求对象，包含客户端请求信息
 fn handleGetState(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
     _ = request;
+    logger.global_logger.debug("[API] GET /api/state", .{});
 
     const display_data = h.app.clock_manager.update();
     const mode_key = switch (display_data.getMode()) {
@@ -69,6 +121,7 @@ inline fn triggerSSEPush(h: *HttpHandler) void {
 }
 
 fn handleStart(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    logger.global_logger.info("[API] POST /api/start", .{});
     const body = request.body() orelse "";
 
     var habit_id: ?i64 = null;
@@ -208,6 +261,7 @@ fn handleStartRest(h: *HttpHandler, request: *httpz.Request, response: *httpz.Re
 }
 
 fn handlePause(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    logger.global_logger.info("[API] POST /api/pause", .{});
     _ = request;
     h.app.clock_manager.handleEvent(.user_pause_timer);
     h.app.saveTimerProgress();
@@ -216,6 +270,7 @@ fn handlePause(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respon
 }
 
 fn handleReset(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    logger.global_logger.info("[API] POST /api/reset", .{});
     _ = request;
     h.app.resetTimerSession();
     h.app.current_habit_id = null;
@@ -225,6 +280,7 @@ fn handleReset(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respon
 }
 
 fn handleFinish(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    logger.global_logger.info("[API] POST /api/finish", .{});
     _ = request;
 
     const habit_id = h.app.current_habit_id;
@@ -298,6 +354,7 @@ fn handleGetProgress(h: *HttpHandler, request: *httpz.Request, response: *httpz.
 }
 
 fn handleModeChange(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    logger.global_logger.info("[API] POST /api/mode", .{});
     const body = request.body() orelse "";
     const mode_str = std.mem.trim(u8, body, " \n\r\t");
 
@@ -316,6 +373,7 @@ fn handleModeChange(h: *HttpHandler, request: *httpz.Request, response: *httpz.R
 }
 
 fn handleGetSettings(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+    logger.global_logger.debug("[API] GET /api/settings", .{});
     _ = request;
     const config = h.app.settings_manager.getConfig();
     try response.json(config, .{});
@@ -421,11 +479,13 @@ fn handleSSE(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response
 // === 习惯集 API ===
 
 fn handleGetHabitSets(h: *HttpHandler, _: *httpz.Request, response: *httpz.Response) !void {
-    const habit_sets = h.app.settings_manager.sqlite_db.?.*.habit_manager.getAllHabitSets() catch |err| {
+    const habit_manager = &h.app.settings_manager.sqlite_db.?.*.habit_manager;
+    const habit_sets = habit_manager.getAllHabitSets() catch |err| {
         logger.global_logger.err("获取习惯集失败: {any}", .{err});
         try response.json(.{ .err = "Failed to get habit sets" }, .{});
         return;
     };
+    defer habit_manager.freeHabitSets(habit_sets);
     try response.json(habit_sets, .{});
 }
 
@@ -553,10 +613,12 @@ fn handleDeleteHabitSet(h: *HttpHandler, request: *httpz.Request, response: *htt
 // === 习惯 API ===
 
 fn handleGetHabits(h: *HttpHandler, _: *httpz.Request, response: *httpz.Response) !void {
-    const habits = h.app.settings_manager.sqlite_db.?.*.habit_manager.getAllHabits() catch {
+    const habit_manager = &h.app.settings_manager.sqlite_db.?.*.habit_manager;
+    const habits = habit_manager.getAllHabits() catch {
         try response.json(.{ .err = "Failed to get habits" }, .{});
         return;
     };
+    defer habit_manager.freeHabits(habits);
     try response.json(habits, .{});
 }
 
@@ -842,15 +904,19 @@ fn handleGetHabitDetail(h: *HttpHandler, request: *httpz.Request, response: *htt
 
 pub const HttpServerManager = struct {
     server: httpz.Server(*HttpHandler),
-    handler: HttpHandler,
+    handler: *HttpHandler,
+    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, port: u16, app: *MainApplication) !HttpServerManager {
         logger.global_logger.info("初始化 HTTP 服务器，端口: {}", .{port});
 
-        var handler = HttpHandler{ .app = app, .allocator = allocator, .sse_pending = false };
+        const handler = try allocator.create(HttpHandler);
+        errdefer allocator.destroy(handler);
+        handler.* = HttpHandler{ .app = app, .allocator = allocator, .sse_pending = false };
+
         var server = try httpz.Server(*HttpHandler).init(allocator, .{
             .address = .localhost(port),
-        }, &handler);
+        }, handler);
 
         var router = try server.router(.{});
         router.get("/", handleRoot, .{});
@@ -862,6 +928,7 @@ pub const HttpServerManager = struct {
         router.get("/api/settings", handleGetSettings, .{});
         router.post("/api/settings", handleUpdateSettings, .{});
         router.get("/api/events", handleSSE, .{});
+        router.post("/api/log", handleFrontendLog, .{});
 
         // 习惯集 API
         router.get("/api/habit-sets", handleGetHabitSets, .{});
@@ -891,6 +958,7 @@ pub const HttpServerManager = struct {
         return HttpServerManager{
             .server = server,
             .handler = handler,
+            .allocator = allocator,
         };
     }
 
@@ -907,5 +975,6 @@ pub const HttpServerManager = struct {
     pub fn deinit(self: *HttpServerManager) void {
         logger.global_logger.info("HTTP 服务器释放资源...", .{});
         self.server.deinit();
+        self.allocator.destroy(self.handler);
     }
 };

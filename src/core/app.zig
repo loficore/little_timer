@@ -102,6 +102,10 @@ pub const MainApplication = struct {
     current_timer_session_pause_started_at: ?i64 = null,
     /// 上次保存进度的时间（用于节流）
     last_save_time: i64 = 0,
+    /// 退出标志 - 用于通知 HTTP 服务器线程退出
+    should_exit: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// 停止标志 - 防止重复调用 stop()
+    stopped: bool = false,
 
     /// 初始化应用程序（在指针上原地初始化）
     ///
@@ -199,6 +203,17 @@ pub const MainApplication = struct {
     /// 运行应用程序主循环
     pub fn run(self: *MainApplication) !void {
         return self.http_server.start();
+    }
+
+    /// 停止应用程序主循环
+    pub fn stop(self: *MainApplication) !void {
+        // 防止重复调用
+        if (self.stopped) return;
+        self.stopped = true;
+
+        // 设置退出标志，通知 HTTP 服务器线程退出
+        self.should_exit.store(true, .release);
+        return self.http_server.stop();
     }
 
     /// 应用程序 tick - 更新逻辑并刷新显示
@@ -513,7 +528,10 @@ pub const MainApplication = struct {
         logger.global_logger.info("MainApplication.deinit() 开始清理...", .{});
 
         // 1. 停止并释放 HTTP 服务器
-        self.http_server.stop();
+        // stop() 可能已在主流程中调用，这里通过 MainApplication.stop() 的幂等保护避免重复 stop。
+        self.stop() catch |err| {
+            logger.global_logger.warn("deinit 阶段 stop 失败（继续释放资源）: {any}", .{err});
+        };
         self.http_server.deinit();
 
         // 2. 释放设置管理器
@@ -528,5 +546,8 @@ pub const MainApplication = struct {
         global_app = null;
 
         logger.global_logger.info("MainApplication.deinit() 完成", .{});
+
+        // 5. 关闭全局日志文件，释放日志路径内存
+        logger.global_logger.closeLogFile();
     }
 };

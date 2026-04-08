@@ -67,18 +67,18 @@ pub const LogConfig = struct {
     pub fn getDefaultLogDir(allocator: std.mem.Allocator) ![]const u8 {
         if (builtin.os.tag == .windows) {
             const dir = try std.fs.getAppDataDir(allocator, "LittleTimer");
-            errdefer allocator.free(dir);
+            defer allocator.free(dir);
             return try std.fs.path.join(allocator, &[_][]const u8{ dir, "logs" });
         } else if (builtin.target.abi == .android) {
             return try allocator.dupe(u8, "/data/local/tmp/little_timer/logs");
         } else if (builtin.os.tag == .macos) {
             const dir = try std.fs.getAppDataDir(allocator, "LittleTimer");
-            errdefer allocator.free(dir);
+            defer allocator.free(dir);
             return try std.fs.path.join(allocator, &[_][]const u8{ dir, "logs" });
         } else {
             // Linux 和其他 Unix-like 系统
             const dir = try std.fs.getAppDataDir(allocator, "little_timer");
-            errdefer allocator.free(dir);
+            defer allocator.free(dir);
             return try std.fs.path.join(allocator, &[_][]const u8{ dir, "logs" });
         }
     }
@@ -109,14 +109,20 @@ pub const Logger = struct {
 
     /// 打开日志文件
     pub fn openLogFile(self: *Logger) !void {
+        var owned_log_dir: ?[]const u8 = null;
+        defer if (owned_log_dir) |dir| self.allocator.?.free(dir);
+
         // 获取日志目录
         const log_dir = if (self.config.log_dir.len > 0)
             self.config.log_dir
-        else
-            try LogConfig.getDefaultLogDir(self.allocator.?);
+        else blk: {
+            const dir = try LogConfig.getDefaultLogDir(self.allocator.?);
+            owned_log_dir = dir;
+            break :blk dir;
+        };
 
         // 确保日志目录存在
-        try std.fs.makeDirAbsolute(log_dir);
+        try std.fs.cwd().makePath(log_dir);
 
         // 构建日志文件完整路径
         var full_path: []u8 = undefined;
@@ -140,8 +146,11 @@ pub const Logger = struct {
         self.log_file_path = full_path;
         errdefer self.allocator.?.free(full_path);
 
-        // 打开或创建日志文件
-        self.log_file = try std.fs.createFileAbsolute(full_path, .{});
+        // 打开或创建日志文件（追加模式，避免每次启动覆写）
+        self.log_file = std.fs.openFileAbsolute(full_path, .{ .mode = .read_write }) catch |open_err| switch (open_err) {
+            error.FileNotFound => try std.fs.createFileAbsolute(full_path, .{ .truncate = false }),
+            else => return open_err,
+        };
         errdefer {
             if (self.log_file) |*f| f.close();
             self.log_file = null;
@@ -248,11 +257,17 @@ pub const Logger = struct {
         }
         self.last_compress_ts = now;
 
+        var owned_log_dir: ?[]const u8 = null;
+        defer if (owned_log_dir) |dir| self.allocator.?.free(dir);
+
         // 获取日志目录
         const log_dir = if (self.config.log_dir.len > 0)
             self.config.log_dir
-        else
-            try LogConfig.getDefaultLogDir(self.allocator.?);
+        else blk: {
+            const dir = try LogConfig.getDefaultLogDir(self.allocator.?);
+            owned_log_dir = dir;
+            break :blk dir;
+        };
 
         var dir = try std.fs.openDirAbsolute(log_dir, .{});
         defer dir.close();
@@ -371,17 +386,7 @@ pub const Logger = struct {
             const stat = file.stat() catch return;
             if (stat.size >= self.config.max_file_size) {
                 self.closeLogFile();
-                const log_dir = if (self.config.log_dir.len > 0)
-                    self.config.log_dir
-                else
-                    LogConfig.getDefaultLogDir(self.allocator.?) catch return;
-                const full_path = std.fmt.allocPrint(
-                    self.allocator.?,
-                    "{s}/{s}.log",
-                    .{ log_dir, self.config.log_filename },
-                ) catch return;
-                self.rotateLogFile(full_path) catch return;
-                self.log_file = std.fs.createFileAbsolute(full_path, .{}) catch return;
+                self.openLogFile() catch return;
             }
         }
 

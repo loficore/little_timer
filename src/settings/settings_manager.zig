@@ -642,6 +642,7 @@ pub const SettingsManager = struct {
 
         // 释放堆上分配的 sqlite_db
         if (self.sqlite_db != null) {
+            self.sqlite_db.?.deinit();
             self.allocator.destroy(self.sqlite_db.?);
         }
     }

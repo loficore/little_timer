@@ -1,5 +1,76 @@
 const std = @import("std");
 
+fn pkgConfigModuleExists(allocator: std.mem.Allocator, module: []const u8) bool {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "pkg-config", "--exists", module },
+    }) catch return false;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    return switch (result.term) {
+        .Exited => |code| code == 0,
+        else => false,
+    };
+}
+
+fn linkWebviewDesktopDeps(b: *std.Build, exe: *std.Build.Step.Compile, target: std.Build.ResolvedTarget) void {
+    exe.addIncludePath(b.path("third_party/webview/core/include"));
+    exe.addCSourceFile(.{
+        .file = b.path("third_party/webview/core/src/webview.cc"),
+        .flags = &.{ "-std=c++17", "-DWEBVIEW_STATIC" },
+    });
+    exe.linkLibCpp();
+
+    switch (target.result.os.tag) {
+        .linux => {
+            const Candidate = struct { gtk: []const u8, webkit: []const u8 };
+            const candidates = [_]Candidate{
+                .{ .gtk = "gtk4", .webkit = "webkitgtk-6.0" },
+                .{ .gtk = "gtk+-3.0", .webkit = "webkit2gtk-4.1" },
+                .{ .gtk = "gtk+-3.0", .webkit = "webkit2gtk-4.0" },
+            };
+
+            var selected: ?Candidate = null;
+            for (candidates) |candidate| {
+                if (pkgConfigModuleExists(b.allocator, candidate.gtk) and pkgConfigModuleExists(b.allocator, candidate.webkit)) {
+                    selected = candidate;
+                    break;
+                }
+            }
+
+            if (selected) |s| {
+                exe.root_module.linkSystemLibrary(s.gtk, .{ .use_pkg_config = .force });
+                exe.root_module.linkSystemLibrary(s.webkit, .{ .use_pkg_config = .force });
+            } else {
+                std.debug.print(
+                    "❌ 未检测到可用 GTK/WebKit 组合。请安装任一组合：\n" ++
+                        "  1) gtk4 + webkitgtk-6.0\n" ++
+                        "  2) gtk+-3.0 + webkit2gtk-4.1\n" ++
+                        "  3) gtk+-3.0 + webkit2gtk-4.0\n",
+                    .{},
+                );
+                @panic("missing Linux webview dependencies");
+            }
+
+            exe.root_module.linkSystemLibrary("dl", .{ .use_pkg_config = .no });
+        },
+        .macos => {
+            exe.root_module.linkFramework("WebKit", .{});
+            exe.root_module.linkSystemLibrary("dl", .{ .use_pkg_config = .no });
+        },
+        .windows => {
+            exe.root_module.linkSystemLibrary("advapi32", .{ .use_pkg_config = .no });
+            exe.root_module.linkSystemLibrary("ole32", .{ .use_pkg_config = .no });
+            exe.root_module.linkSystemLibrary("shell32", .{ .use_pkg_config = .no });
+            exe.root_module.linkSystemLibrary("shlwapi", .{ .use_pkg_config = .no });
+            exe.root_module.linkSystemLibrary("user32", .{ .use_pkg_config = .no });
+            exe.root_module.linkSystemLibrary("version", .{ .use_pkg_config = .no });
+        },
+        else => {},
+    }
+}
+
 pub fn build(b: *std.Build) void {
     const root_target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -11,9 +82,10 @@ pub fn build(b: *std.Build) void {
     // 当内嵌 UI 时，把 HTML 内容注入到 build_options 中
     // 这样避免 @embedFile 访问包外路径的问题
     if (embed_ui) {
-        const html = std.fs.cwd().readFileAlloc(b.allocator, "assets/dist/index.html", 1024 * 1024) catch |err| {
+        const html_path = b.pathFromRoot("assets/dist/index.html");
+        const html = std.fs.cwd().readFileAlloc(b.allocator, html_path, 16 * 1024 * 1024) catch |err| {
             std.debug.print("❌ 无法读取 assets/dist/index.html: {any}\n", .{err});
-            @panic("missing assets/dist/index.html, please run assets build first");
+            @panic("missing or too-large assets/dist/index.html, please run assets build first");
         };
         build_options.addOption([]const u8, "embedded_html", html);
     } else {
@@ -50,6 +122,8 @@ pub fn build(b: *std.Build) void {
             .name = "little_timer",
             .root_module = app_module,
         });
+
+        linkWebviewDesktopDeps(b, exe, root_target);
 
         exe.linkLibC();
         b.installArtifact(exe);

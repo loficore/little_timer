@@ -48,7 +48,10 @@ dist-ssr
 *.db
 
 .vscode/
-.github/
+# 保留 .github 下多数文件为私有，但允许跟踪 CI workflows
+.github/*
+!.github/workflows/
+!.github/workflows/**
 cliff.toml
 
 AGENTS.md

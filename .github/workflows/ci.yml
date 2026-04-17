@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # 前端检查：lint、build、test
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: assets
+        run: bun install
+
+      - name: Lint
+        working-directory: assets
+        run: bun run lint
+
+      - name: Build
+        working-directory: assets
+        run: bun run build
+
+      - name: Test
+        working-directory: assets
+        run: bun run test
+
+  # 后端检查：lint、build、test
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2
+
+      - name: Build
+        run: zig build
+
+      - name: Test
+        run: zig build test

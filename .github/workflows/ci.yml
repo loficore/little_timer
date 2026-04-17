@@ -37,19 +37,23 @@ jobs:
         working-directory: assets
         run: bun run test
 
-  # 后端检查：lint、build、test
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # 建议开启此环境变量以消除 Node.js 20 弃用警告
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Zig
-        uses: mlugg/setup-zig@v1
+        # 升级到 v2 版本，它拥有更可靠的镜像下载逻辑
+        uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          # 使用 'latest' 自动匹配最新的 0.16.0，或者保留 '0.15.2'
+          version: latest
 
       - name: Build
         run: zig build

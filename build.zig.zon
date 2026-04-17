@@ -32,10 +32,6 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        .toml = .{
-            .url = "https://github.com/sam701/zig-toml/archive/cf50bd59c6276fb2b6d34b8d71d35486eecc719c.tar.gz",
-            .hash = "toml-0.3.0-bV14Bd-EAQBKoXhpYft303BtA2vgLNlxntUCIWgRUl46",
-        },
         .zqlite = .{
             .url = "https://github.com/karlseguin/zqlite.zig/archive/b44ed5cdc64859b08446c246f307e65ebe2b2d9c.tar.gz",
             .hash = "zqlite-0.0.0-RWLaY_y_mADh2LdbDrG_2HT2dBAcsAR8Jig_7-dOJd0B",
@@ -43,6 +39,10 @@
         .httpz = .{
             .url = "git+https://github.com/karlseguin/http.zig?ref=master#5d160ba8675aeed9dd5071fdb307fab66702ca28",
             .hash = "httpz-0.0.0-PNVzrH5LBwA1XI4tiije77J8S9DkfNZXSkx2H93VwJl9",
+        },
+        .httpx = .{
+            .url = "https://github.com/muhammad-fiaz/httpx.zig/archive/refs/tags/0.0.7.tar.gz",
+            .hash = "httpx-0.0.7-8qj2evX4CQDJRRmwgwJtbWrABhBbhWoXprzRM7Xqir5z",
         },
     },
     .paths = .{

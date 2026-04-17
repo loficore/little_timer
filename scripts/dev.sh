@@ -13,16 +13,21 @@ cd "$PROJECT_ROOT"
 
 # 解析参数
 MODE="http"
+USE_STD_HTTP="true"
 for arg in "$@"; do
     case $arg in
         --webview)
             MODE="webview"
             ;;
+        --no-std-http)
+            USE_STD_HTTP="false"
+            ;;
         --help|-h)
             echo "用法: $0 [选项]"
             echo "选项:"
-            echo "  --webview  启动 WebView 窗口模式"
-            echo "  --help     显示此帮助"
+            echo "  --webview       启动 WebView 窗口模式"
+            echo "  --no-std-http   使用 httpx 而非 std.http.Server"
+            echo "  --help          显示此帮助"
             exit 0
             ;;
     esac
@@ -52,13 +57,13 @@ cd ..
 echo "等待前端服务启动..."
 sleep 3
 
-echo "=== 启动后端 ==="
+echo "=== 启动后端 (use_std_http=$USE_STD_HTTP) ==="
 if command -v zig &> /dev/null; then
     if [ "$MODE" = "webview" ]; then
-        zig build -Dembed_ui=false -Doptimize=Debug run -- --webview &
+        zig build -Dembed_ui=false -Doptimize=Debug -Duse_std_http=$USE_STD_HTTP run -- --webview &
         ZIG_PID=$!
     else
-        zig build -Dembed_ui=false -Doptimize=Debug run &
+        zig build -Dembed_ui=false -Doptimize=Debug -Duse_std_http=$USE_STD_HTTP run &
         ZIG_PID=$!
     fi
 else
@@ -73,6 +78,7 @@ echo "后端: http://localhost:8080"
 if [ "$MODE" = "webview" ]; then
     echo "WebView: 已打开窗口指向前端"
 fi
+echo "HTTP Server: $(if [ "$USE_STD_HTTP" = "true" ]; then echo "std.http.Server"; else echo "httpx"; fi)"
 echo ""
 echo "按 Ctrl+C 停止所有服务"
 

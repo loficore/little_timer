@@ -11,7 +11,7 @@ TAR_NAME="${APP_NAME}_${VERSION}_windows_x64.tar.gz"
 
 ZIG_CMD="${ZIG_CMD:-zig}"
 PKG_CMD="${PKG_CMD:-bun}"
-EMBED_UI="${EMBED_UI:-false}"
+EMBED_UI="${EMBED_UI:-true}"
 OPTIMIZE_MODE="${OPTIMIZE_MODE:-ReleaseFast}"
 TARGET_TRIPLE="${TARGET_TRIPLE:-x86_64-windows-gnu}"
 
@@ -32,8 +32,8 @@ show_help() {
   echo "  --release         发布构建（优化级别设为 ReleaseFast）"
   echo "  --debug           调试构建（仅设置优化级别）"
   echo "  --target <triple> 目标三元组（默认: $TARGET_TRIPLE）"
-  echo "  --embed-html      内嵌前端 HTML 到后端二进制"
-  echo "  --no-embed-html   不内嵌前端 HTML（默认）"
+  echo "  --embed-html      内嵌前端 HTML 到后端二进制（默认）"
+  echo "  --no-embed-html   不内嵌前端 HTML"
   echo "  --help, -h        显示此帮助"
   echo ""
   echo "示例:"
@@ -102,11 +102,29 @@ if [[ ! -f "$BIN_PATH" ]]; then
   exit 1
 fi
 
+CLI_BIN_PATH="$ROOT_DIR/zig-out/bin/little_timer_cli.exe"
+if [[ ! -f "$CLI_BIN_PATH" ]]; then
+  echo "❌ 未找到可执行文件: $CLI_BIN_PATH" >&2
+  exit 1
+fi
+
 # 4) 打包
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp -f "$BIN_PATH" "$STAGE_DIR/"
-cp -f "$ROOT_DIR/settings.toml" "$STAGE_DIR/"
+cp -f "$CLI_BIN_PATH" "$STAGE_DIR/"
+
+cat >"$STAGE_DIR/start_gui.bat" <<'EOF'
+@echo off
+setlocal
+start "Little Timer" "%~dp0little_timer.exe"
+EOF
+
+cat >"$STAGE_DIR/start_cli.bat" <<'EOF'
+@echo off
+setlocal
+"%~dp0little_timer_cli.exe" %*
+EOF
 
 mkdir -p "$DIST_DIR"
 tar -czf "$DIST_DIR/$TAR_NAME" -C "$STAGE_DIR" .

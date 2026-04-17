@@ -95,7 +95,6 @@ fi
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp -f "$BIN_PATH" "$STAGE_DIR/"
-cp -f "$ROOT_DIR/settings.toml" "$STAGE_DIR/"
 
 mkdir -p "$DIST_DIR"
 tar -czf "$DIST_DIR/$TAR_NAME" -C "$STAGE_DIR" .

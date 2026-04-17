@@ -29,15 +29,19 @@ const RunState = struct {
 };
 
 fn parseArgs() enum { http_only, webview } {
-    var args = std.process.argsWithAllocator(std.heap.page_allocator) catch return .http_only;
+    const default_mode = if (builtin.os.tag == .windows) .webview else .http_only;
+    var args = std.process.argsWithAllocator(std.heap.page_allocator) catch return default_mode;
     defer args.deinit();
     _ = args.next();
     while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--http-only")) {
+            return .http_only;
+        }
         if (std.mem.eql(u8, arg, "--webview")) {
             return .webview;
         }
     }
-    return .http_only;
+    return default_mode;
 }
 
 // 测试文件导入（仅在测试构建时编译）

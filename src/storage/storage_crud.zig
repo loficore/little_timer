@@ -54,6 +54,7 @@ pub const CrudManager = struct {
     /// - !void: 如果保存失败则返回错误
     pub fn saveSettings(self: *CrudManager, config: interface.SettingsConfig) !void {
         if (self.db == null) {
+            logger.global_logger.err("❌ saveSettings: db is null", .{});
             return CrudError.DatabaseOpenFailed;
         }
 
@@ -62,6 +63,8 @@ pub const CrudManager = struct {
             .countdown => "countdown",
             .stopwatch => "stopwatch",
         };
+
+        logger.global_logger.debug("保存设置到数据库...", .{});
 
         // 使用 UPSERT 操作（INSERT OR REPLACE）
         self.db.?.exec(
@@ -98,13 +101,19 @@ pub const CrudManager = struct {
     /// - !interface.SettingsConfig: 加载的设置配置
     pub fn loadSettings(self: *CrudManager, allocator: std.mem.Allocator) !interface.SettingsConfig {
         if (self.db == null) {
+            logger.global_logger.err("loadSettings: db is null", .{});
             return CrudError.DatabaseOpenFailed;
         }
 
-        var rows = try self.db.?.rows(
+        logger.global_logger.debug("从数据库加载设置...", .{});
+
+        var rows = self.db.?.rows(
             "SELECT timezone, language, default_mode, theme_mode, COALESCE(wallpaper, ''), duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval FROM settings WHERE id = 1;",
             .{},
-        );
+        ) catch |err| {
+            logger.global_logger.err("加载设置查询失败: {any}", .{err});
+            return CrudError.QueryFailed;
+        };
         defer rows.deinit();
 
         const row = rows.next() orelse {

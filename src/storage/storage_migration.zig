@@ -6,7 +6,7 @@ const interface = @import("../core/interface.zig");
 const logger = @import("../core/logger.zig");
 
 /// 数据库模式版本常量
-pub const CURRENT_SCHEMA_VERSION = 5;
+pub const CURRENT_SCHEMA_VERSION = 6;
 
 /// SQLite 错误类型
 pub const MigrationError = error{
@@ -58,6 +58,150 @@ pub const MigrationManager = struct {
         }
 
         logger.global_logger.info("✓ 数据库模式检查完成，版本: {}", .{try self.getSchemaVersion()});
+
+        // 验证关键表是否存在
+        try self.verifyTablesExist();
+    }
+
+    /// 验证关键表是否存在，缺失时自动重建
+    fn verifyTablesExist(self: *MigrationManager) !void {
+        const required_tables = [_][]const u8{
+            "habit_sets",
+            "habits",
+            "sessions",
+            "timer_sessions",
+            "settings",
+            "schema_version",
+        };
+
+        var missing_count: u32 = 0;
+
+        for (required_tables) |table_name| {
+            // 使用更可靠的方式检查表是否存在 - 直接尝试查询
+            const check_sql = try std.fmt.allocPrint(self.allocator, "SELECT 1 FROM {s} LIMIT 1;", .{table_name});
+            defer self.allocator.free(check_sql);
+
+            self.db.?.exec(check_sql, .{}) catch |err| {
+                // 表不存在或查询失败，尝试重建
+                logger.global_logger.warn("⚠️ 表 {s} 查询失败: {any}，尝试重建", .{ table_name, err });
+                missing_count += 1;
+                try self.recreateSingleTable(table_name);
+                continue;
+            };
+            logger.global_logger.debug("✓ 表 {s} 存在", .{table_name});
+        }
+
+        if (missing_count > 0) {
+            logger.global_logger.warn("⚠️ 发现 {d} 个缺失的表，已尝试重建", .{missing_count});
+        } else {
+            logger.global_logger.info("✓ 所有关键表验证通过", .{});
+        }
+    }
+
+    /// 重建单个表
+    fn recreateSingleTable(self: *MigrationManager, table_name: []const u8) !void {
+        logger.global_logger.info("重建表: {s}", .{table_name});
+
+        if (std.mem.eql(u8, table_name, "habit_sets")) {
+            self.db.?.exec(
+                \\CREATE TABLE IF NOT EXISTS habit_sets (
+                \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                \\    name TEXT NOT NULL,
+                \\    description TEXT DEFAULT '',
+                \\    color TEXT NOT NULL DEFAULT '#6366f1',
+                \\    wallpaper TEXT DEFAULT '',
+                \\    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                \\);
+            , .{}) catch |err| {
+                logger.global_logger.err("❌ 重建 habit_sets 失败: {any}", .{err});
+            };
+        } else if (std.mem.eql(u8, table_name, "habits")) {
+            self.db.?.exec(
+                \\CREATE TABLE IF NOT EXISTS habits (
+                \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                \\    set_id INTEGER NOT NULL,
+                \\    name TEXT NOT NULL,
+                \\    goal_seconds INTEGER NOT NULL DEFAULT 1500,
+                \\    color TEXT NOT NULL DEFAULT '#6366f1',
+                \\    wallpaper TEXT DEFAULT '',
+                \\    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                \\    FOREIGN KEY (set_id) REFERENCES habit_sets(id) ON DELETE CASCADE
+                \\);
+            , .{}) catch |err| {
+                logger.global_logger.err("❌ 重建 habits 失败: {any}", .{err});
+            };
+        } else if (std.mem.eql(u8, table_name, "sessions")) {
+            self.db.?.exec(
+                \\CREATE TABLE IF NOT EXISTS sessions (
+                \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                \\    habit_id INTEGER NOT NULL,
+                \\    duration_seconds INTEGER NOT NULL DEFAULT 0,
+                \\    count INTEGER NOT NULL DEFAULT 0,
+                \\    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                \\    date TEXT NOT NULL,
+                \\    FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE
+                \\);
+            , .{}) catch |err| {
+                logger.global_logger.err("❌ 重建 sessions 失败: {any}", .{err});
+            };
+        } else if (std.mem.eql(u8, table_name, "timer_sessions")) {
+            self.db.?.exec(
+                \\CREATE TABLE IF NOT EXISTS timer_sessions (
+                \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                \\    habit_id INTEGER,
+                \\    mode TEXT NOT NULL,
+                \\    started_at INTEGER NOT NULL,
+                \\    updated_at INTEGER NOT NULL,
+                \\    is_running INTEGER NOT NULL DEFAULT 0,
+                \\    is_finished INTEGER NOT NULL DEFAULT 0,
+                \\    is_paused INTEGER NOT NULL DEFAULT 0,
+                \\    elapsed_seconds INTEGER NOT NULL DEFAULT 0,
+                \\    paused_total_seconds INTEGER NOT NULL DEFAULT 0,
+                \\    pause_started_at INTEGER,
+                \\    last_synced_at INTEGER,
+                \\    remaining_seconds INTEGER,
+                \\    work_duration INTEGER NOT NULL DEFAULT 0,
+                \\    rest_duration INTEGER NOT NULL DEFAULT 0,
+                \\    loop_count INTEGER NOT NULL DEFAULT 0,
+                \\    current_round INTEGER NOT NULL DEFAULT 0,
+                \\    in_rest INTEGER NOT NULL DEFAULT 0
+                \\);
+            , .{}) catch |err| {
+                logger.global_logger.err("❌ 重建 timer_sessions 失败: {any}", .{err});
+            };
+        } else if (std.mem.eql(u8, table_name, "settings")) {
+            self.db.?.exec(
+                \\CREATE TABLE IF NOT EXISTS settings (
+                \\    id INTEGER PRIMARY KEY CHECK (id = 1),
+                \\    timezone INTEGER NOT NULL DEFAULT 8,
+                \\    language TEXT NOT NULL DEFAULT 'ZH',
+                \\    default_mode TEXT NOT NULL DEFAULT 'countdown',
+                \\    theme_mode TEXT NOT NULL DEFAULT 'dark',
+                \\    wallpaper TEXT DEFAULT '',
+                \\    duration_seconds INTEGER NOT NULL DEFAULT 1500,
+                \\    countdown_loop BOOLEAN NOT NULL DEFAULT 0,
+                \\    countdown_loop_count INTEGER NOT NULL DEFAULT 0,
+                \\    countdown_loop_interval INTEGER NOT NULL DEFAULT 0,
+                \\    stopwatch_max_seconds INTEGER NOT NULL DEFAULT 86400,
+                \\    log_level TEXT NOT NULL DEFAULT 'INFO',
+                \\    log_enable_timestamp BOOLEAN NOT NULL DEFAULT 1,
+                \\    log_tick_interval INTEGER NOT NULL DEFAULT 1000,
+                \\    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                \\);
+            , .{}) catch |err| {
+                logger.global_logger.err("❌ 重建 settings 失败: {any}", .{err});
+            };
+        } else if (std.mem.eql(u8, table_name, "schema_version")) {
+            self.db.?.exec(
+                \\CREATE TABLE IF NOT EXISTS schema_version (
+                \\    version INTEGER PRIMARY KEY,
+                \\    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                \\    description TEXT
+                \\);
+            , .{}) catch |err| {
+                logger.global_logger.err("❌ 重建 schema_version 失败: {any}", .{err});
+            };
+        }
     }
 
     /// 创建版本管理表
@@ -124,10 +268,26 @@ pub const MigrationManager = struct {
             try self.migrateToV5();
             try self.setSchemaVersion(to_version);
             logger.global_logger.info("✓ 数据库迁移完成 (4 -> 5)", .{});
+        } else if (from_version == 5 and to_version == 6) {
+            // 迁移到版本 6：补齐 wallpaper 列
+            try self.migrateToV6();
+            try self.setSchemaVersion(to_version);
+            logger.global_logger.info("✓ 数据库迁移完成 (5 -> 6)", .{});
         } else {
             logger.global_logger.err("❌ 不支持的迁移路径: {} -> {}", .{ from_version, to_version });
             return MigrationError.MigrationFailed;
         }
+    }
+
+    /// 迁移到版本 6：补齐 wallpaper 字段
+    fn migrateToV6(self: *MigrationManager) !void {
+        const db = self.db orelse return;
+
+        db.exec("ALTER TABLE habit_sets ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
+        db.exec("ALTER TABLE habits ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
+        db.exec("ALTER TABLE settings ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
+
+        logger.global_logger.info("已迁移到版本 6(wallpaper backfill)", .{});
     }
 
     /// 迁移到版本 5：添加暂停记账字段
@@ -211,6 +371,7 @@ pub const MigrationManager = struct {
             \\    name TEXT NOT NULL CHECK(length(name) > 0 AND length(name) <= 100),
             \\    description TEXT DEFAULT '',
             \\    color TEXT NOT NULL DEFAULT '#6366f1',
+            \\    wallpaper TEXT DEFAULT '',
             \\    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             \\);
         ;
@@ -224,6 +385,7 @@ pub const MigrationManager = struct {
             \\    goal_seconds INTEGER NOT NULL DEFAULT 0 CHECK(goal_seconds >= 0),
             \\    goal_count INTEGER NOT NULL DEFAULT 0 CHECK(goal_count >= 0),
             \\    color TEXT NOT NULL DEFAULT '#6366f1',
+            \\    wallpaper TEXT DEFAULT '',
             \\    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             \\    FOREIGN KEY (set_id) REFERENCES habit_sets(id) ON DELETE CASCADE
             \\);
@@ -273,6 +435,7 @@ pub const MigrationManager = struct {
             " language TEXT NOT NULL CHECK(length(language) >= 1 AND length(language) <= 10)," ++
             " default_mode TEXT NOT NULL CHECK(default_mode IN ('countdown', 'stopwatch', 'world_clock'))," ++
             " theme_mode TEXT NOT NULL CHECK(length(theme_mode) <= 20)," ++
+            " wallpaper TEXT DEFAULT ''," ++
             " duration_seconds INTEGER NOT NULL CHECK(duration_seconds >= 1 AND duration_seconds <= 86400)," ++
             " countdown_loop BOOLEAN NOT NULL DEFAULT 0," ++
             " countdown_loop_count INTEGER NOT NULL DEFAULT 0 CHECK(countdown_loop_count >= 0 AND countdown_loop_count <= 1000)," ++

@@ -1,6 +1,6 @@
 #!/bin/bash
 # 构建脚本 - Linux/macOS
-# 用法: ./scripts/build.sh [--debug|--release] [--embed-html|--no-embed-html]
+# 用法: ./scripts/build.sh [--debug|--release] [--embed-html|--no-embed-html] [--std-http|--no-std-http]
 
 set -e
 
@@ -12,6 +12,7 @@ cd "$PROJECT_ROOT"
 # 解析参数
 EMBED_UI="false"
 OPTIMIZE="Release"
+USE_STD_HTTP="true"
 for arg in "$@"; do
     case $arg in
         --release)
@@ -26,6 +27,12 @@ for arg in "$@"; do
         --no-embed-html|--no-embed-ui)
             EMBED_UI="false"
             ;;
+        --std-http)
+            USE_STD_HTTP="true"
+            ;;
+        --no-std-http)
+            USE_STD_HTTP="false"
+            ;;
         --help|-h)
             echo "用法: $0 [选项]"
             echo "选项:"
@@ -33,12 +40,15 @@ for arg in "$@"; do
             echo "  --debug           调试构建（仅设置优化级别）"
             echo "  --embed-html      内嵌前端 HTML 到后端二进制"
             echo "  --no-embed-html   不内嵌前端 HTML（默认）"
-            echo "  --help     显示此帮助"
+            echo "  --std-http        使用 std.http.Server（默认）"
+            echo "  --no-std-http     使用 httpx"
+            echo "  --help            显示此帮助"
             echo ""
             echo "示例:"
             echo "  $0 --release --embed-html"
             echo "  $0 --debug --embed-html"
             echo "  $0 --debug --no-embed-html"
+            echo "  $0 --debug --no-embed-html --no-std-http"
             exit 0
             ;;
         *)
@@ -60,12 +70,12 @@ else
 fi
 cd ..
 
-echo "=== 构建后端 (Optimize=$OPTIMIZE, EmbedUI=$EMBED_UI) ==="
+echo "=== 构建后端 (Optimize=$OPTIMIZE, EmbedUI=$EMBED_UI, UseStdHttp=$USE_STD_HTTP) ==="
 if command -v zig &> /dev/null; then
     if [ "$EMBED_UI" = "true" ]; then
-        zig build -Doptimize=$OPTIMIZE -Dembed_ui=true
+        zig build -Doptimize=$OPTIMIZE -Dembed_ui=true -Duse_std_http=$USE_STD_HTTP
     else
-        zig build -Doptimize=$OPTIMIZE
+        zig build -Doptimize=$OPTIMIZE -Duse_std_http=$USE_STD_HTTP
     fi
 else
     echo "错误: 未找到 zig"

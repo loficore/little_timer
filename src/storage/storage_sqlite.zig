@@ -109,13 +109,25 @@ pub const SqliteManager = struct {
         self.habit_manager.db = self.db;
 
         // 检查并执行数据库迁移
-        try self.migration_manager.checkAndMigrate();
+        logger.global_logger.info("开始数据库迁移检查...", .{});
+        self.migration_manager.checkAndMigrate() catch |err| {
+            logger.global_logger.err("❌ 数据库迁移失败: {any}", .{err});
+            // 继续尝试健康检查
+        };
 
         // 初始化健康检查
-        try self.health_manager.initialize();
+        logger.global_logger.debug("初始化健康检查...", .{});
+        self.health_manager.initialize() catch |err| {
+            logger.global_logger.err("❌ 初始化健康检查失败: {any}", .{err});
+        };
 
         // 执行数据库健康检查
-        try self.health_manager.performCheck();
+        logger.global_logger.debug("执行健康检查...", .{});
+        self.health_manager.performCheck() catch |err| {
+            logger.global_logger.err("❌ 健康检查失败: {any}", .{err});
+        };
+
+        logger.global_logger.info("✓ 数据库初始化完成", .{});
     }
 
     /// 关闭数据库

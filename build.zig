@@ -77,8 +77,10 @@ pub fn build(b: *std.Build) void {
 
     // 构建选项：是否将前端 HTML 内嵌到可执行文件
     const embed_ui = b.option(bool, "embed_ui", "Embed UI HTML into binary") orelse false;
+    const use_std_http = b.option(bool, "use_std_http", "Use std.http.Server instead of httpx") orelse false;
     const build_options = b.addOptions();
     build_options.addOption(bool, "embed_ui", embed_ui);
+    build_options.addOption(bool, "use_std_http", use_std_http);
     // 当内嵌 UI 时，把 HTML 内容注入到 build_options 中
     // 这样避免 @embedFile 访问包外路径的问题
     if (embed_ui) {
@@ -97,11 +99,11 @@ pub fn build(b: *std.Build) void {
         .target = root_target,
     });
 
-    const httpz_dep = b.dependency("httpz", .{
+    const httpx_dep = b.dependency("httpx", .{
         .target = root_target,
         .optimize = optimize,
     });
-    mod.addImport("httpz", httpz_dep.module("httpz"));
+    mod.addImport("httpx", httpx_dep.module("httpx"));
 
     // 添加 build_options 到模块（供 HTTP Server 使用）
     mod.addOptions("build_options", build_options);
@@ -118,22 +120,49 @@ pub fn build(b: *std.Build) void {
         const app_module = mod;
 
         // 构建桌面可执行文件
-        const exe = b.addExecutable(.{
-            .name = "little_timer",
-            .root_module = app_module,
-        });
-
-        linkWebviewDesktopDeps(b, exe, root_target);
-
-        exe.linkLibC();
-        b.installArtifact(exe);
-
-        // 添加 run 步骤
         const run_step = b.step("run", "Run the app");
-        const run_cmd = b.addRunArtifact(exe);
-        run_step.dependOn(&run_cmd.step);
-        if (b.args) |args| {
-            run_cmd.addArgs(args);
+
+        if (root_target.result.os.tag == .windows) {
+            // GUI 版：双击启动，不弹控制台窗口。
+            const exe_gui = b.addExecutable(.{
+                .name = "little_timer",
+                .root_module = app_module,
+            });
+            linkWebviewDesktopDeps(b, exe_gui, root_target);
+            exe_gui.linkLibC();
+            exe_gui.subsystem = .Windows;
+            b.installArtifact(exe_gui);
+
+            // CLI 版：保留命令行实时日志，便于诊断。
+            const exe_cli = b.addExecutable(.{
+                .name = "little_timer_cli",
+                .root_module = app_module,
+            });
+            linkWebviewDesktopDeps(b, exe_cli, root_target);
+            exe_cli.linkLibC();
+            b.installArtifact(exe_cli);
+
+            const run_cmd = b.addRunArtifact(exe_cli);
+            run_step.dependOn(&run_cmd.step);
+            if (b.args) |args| {
+                run_cmd.addArgs(args);
+            }
+        } else {
+            const exe = b.addExecutable(.{
+                .name = "little_timer",
+                .root_module = app_module,
+            });
+
+            linkWebviewDesktopDeps(b, exe, root_target);
+
+            exe.linkLibC();
+            b.installArtifact(exe);
+
+            const run_cmd = b.addRunArtifact(exe);
+            run_step.dependOn(&run_cmd.step);
+            if (b.args) |args| {
+                run_cmd.addArgs(args);
+            }
         }
 
         // 添加测试步骤

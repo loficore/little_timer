@@ -1,6 +1,7 @@
 //! 习惯追踪 CRUD 操作模块
 const std = @import("std");
 const zqlite = @import("zqlite");
+const logger = @import("../core/logger.zig");
 
 pub const HabitError = error{
     InsertFailed,
@@ -104,8 +105,14 @@ pub const HabitCrudManager = struct {
     /// 错误：
     /// - **HabitError.QueryFailed**：如果数据库查询失败
     pub fn getAllHabitSets(self: *HabitCrudManager) ![]HabitSetRow {
-        const db = self.db orelse return HabitError.QueryFailed;
-        var rows = try db.rows("SELECT id, name, description, color, COALESCE(wallpaper, '') FROM habit_sets ORDER BY created_at DESC;", .{});
+        const db = self.db orelse {
+            logger.global_logger.err("❌ getAllHabitSets: db is null", .{});
+            return HabitError.QueryFailed;
+        };
+        var rows = db.rows("SELECT id, name, description, color, COALESCE(wallpaper, '') FROM habit_sets ORDER BY created_at DESC;", .{}) catch |err| {
+            logger.global_logger.err("❌ getAllHabitSets 查询失败: {any}", .{err});
+            return HabitError.QueryFailed;
+        };
         defer rows.deinit();
 
         var list = std.ArrayList(HabitSetRow){};
@@ -265,13 +272,20 @@ pub const HabitCrudManager = struct {
         defer rows.deinit();
 
         if (rows.next()) |row| {
+            const name = try self.allocator.dupe(u8, row.get([]const u8, 2));
+            errdefer self.allocator.free(name);
+            const color = try self.allocator.dupe(u8, row.get([]const u8, 4));
+            errdefer self.allocator.free(color);
+            const wallpaper = try self.allocator.dupe(u8, row.get([]const u8, 5));
+            errdefer self.allocator.free(wallpaper);
+
             return .{
                 .id = row.get(i64, 0),
                 .set_id = row.get(i64, 1),
-                .name = try self.allocator.dupe(u8, row.get([]const u8, 2)),
+                .name = name,
                 .goal_seconds = row.get(i64, 3),
-                .color = try self.allocator.dupe(u8, row.get([]const u8, 4)),
-                .wallpaper = try self.allocator.dupe(u8, row.get([]const u8, 5)),
+                .color = color,
+                .wallpaper = wallpaper,
             };
         }
         return null;
@@ -313,16 +327,27 @@ pub const HabitCrudManager = struct {
         defer rows.deinit();
 
         var list = std.ArrayList(SessionRow){};
-        errdefer list.deinit(self.allocator);
+        errdefer {
+            for (list.items) |s| {
+                self.allocator.free(s.started_at);
+                self.allocator.free(s.date);
+            }
+            list.deinit(self.allocator);
+        }
 
         while (rows.next()) |row| {
+            const started_at = try self.allocator.dupe(u8, row.get([]const u8, 4));
+            errdefer self.allocator.free(started_at);
+            const row_date = try self.allocator.dupe(u8, row.get([]const u8, 5));
+            errdefer self.allocator.free(row_date);
+
             try list.append(self.allocator, .{
                 .id = row.get(i64, 0),
                 .habit_id = row.get(i64, 1),
                 .duration_seconds = row.get(i64, 2),
                 .count = row.get(i64, 3),
-                .started_at = try self.allocator.dupe(u8, row.get([]const u8, 4)),
-                .date = try self.allocator.dupe(u8, row.get([]const u8, 5)),
+                .started_at = started_at,
+                .date = row_date,
             });
         }
         return list.toOwnedSlice(self.allocator);
@@ -342,16 +367,27 @@ pub const HabitCrudManager = struct {
         defer rows.deinit();
 
         var list = std.ArrayList(SessionRow){};
-        errdefer list.deinit(self.allocator);
+        errdefer {
+            for (list.items) |s| {
+                self.allocator.free(s.started_at);
+                self.allocator.free(s.date);
+            }
+            list.deinit(self.allocator);
+        }
 
         while (rows.next()) |row| {
+            const started_at = try self.allocator.dupe(u8, row.get([]const u8, 4));
+            errdefer self.allocator.free(started_at);
+            const row_date = try self.allocator.dupe(u8, row.get([]const u8, 5));
+            errdefer self.allocator.free(row_date);
+
             try list.append(self.allocator, .{
                 .id = row.get(i64, 0),
                 .habit_id = row.get(i64, 1),
                 .duration_seconds = row.get(i64, 2),
                 .count = row.get(i64, 3),
-                .started_at = try self.allocator.dupe(u8, row.get([]const u8, 4)),
-                .date = try self.allocator.dupe(u8, row.get([]const u8, 5)),
+                .started_at = started_at,
+                .date = row_date,
             });
         }
         return list.toOwnedSlice(self.allocator);
@@ -621,6 +657,17 @@ pub const HabitCrudManager = struct {
             self.allocator.free(h.wallpaper);
         }
         self.allocator.free(habits);
+    }
+
+    /// 释放单个习惯信息占用的内存
+    /// 参数：
+    /// - **habit**：要释放的习惯信息
+    /// 返回：
+    /// - **void**：无返回值
+    pub fn freeHabit(self: *HabitCrudManager, habit: HabitRow) void {
+        self.allocator.free(habit.name);
+        self.allocator.free(habit.color);
+        self.allocator.free(habit.wallpaper);
     }
 
     /// 释放记录信息占用的内存

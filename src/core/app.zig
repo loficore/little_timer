@@ -3,7 +3,8 @@ const app = @import("app.zig");
 const logger = @import("logger.zig");
 const builtin = @import("builtin");
 
-const http_server = @import("http/http_server.zig");
+const build_options = @import("build_options");
+const http_server = if (build_options.use_std_http) @import("http/std_server.zig") else @import("http/http_server.zig");
 const clock = @import("clock.zig");
 const settings = @import("../settings/settings_manager.zig");
 const interface = @import("interface.zig");

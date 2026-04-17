@@ -21,6 +21,25 @@ pub const BasicConfig = struct {
 };
 const default_db_path = "little_timer.db"; // 统一使用一个数据库文件
 
+/// 获取默认数据库路径（跨平台）
+fn getDefaultDatabasePath(allocator: std.mem.Allocator) ![]const u8 {
+    const builtin = @import("builtin");
+    if (builtin.os.tag == .windows) {
+        const dir = try std.fs.getAppDataDir(allocator, "LittleTimer");
+        errdefer allocator.free(dir);
+        return try std.fs.path.join(allocator, &[_][]const u8{ dir, default_db_path });
+    } else if (builtin.os.tag == .macos) {
+        const dir = try std.fs.getAppDataDir(allocator, "LittleTimer");
+        errdefer allocator.free(dir);
+        return try std.fs.path.join(allocator, &[_][]const u8{ dir, default_db_path });
+    } else {
+        // Linux 和其他 Unix-like 系统
+        const dir = try std.fs.getAppDataDir(allocator, "little_timer");
+        errdefer allocator.free(dir);
+        return try std.fs.path.join(allocator, &[_][]const u8{ dir, default_db_path });
+    }
+}
+
 pub const SettingsManager = struct {
     config: SettingsConfig,
     allocator: std.mem.Allocator,
@@ -40,21 +59,29 @@ pub const SettingsManager = struct {
     ///
     /// 参数:
     /// - **allocator**: 内存分配器
-    /// - **db_path**: 数据库文件路径（可选，默认使用"little_timer.db"）
+    /// - **db_path**: 数据库文件路径（可选，默认使用跨平台 AppData 路径）
     ///
     /// 返回:
     /// - !SettingsManager: 如果初始化失败则返回错误
     pub fn init(allocator: std.mem.Allocator, db_path: []const u8) !SettingsManager {
-        const db_path_str = if (db_path.len > 0) db_path else default_db_path;
+        // 如果未提供路径，使用跨平台默认路径
+        const db_path_str = if (db_path.len > 0) db_path else try getDefaultDatabasePath(allocator);
+        logger.global_logger.debug("数据库路径: {s}", .{db_path_str});
+
         const db_path_len = db_path_str.len;
         const db_path_z_slice = try allocator.alloc(u8, db_path_len + 1);
         @memcpy(db_path_z_slice[0..db_path_len], db_path_str);
         db_path_z_slice[db_path_len] = 0;
         const db_path_full: [:0]const u8 = @ptrCast(db_path_z_slice[0..db_path_len :0]);
 
+        logger.global_logger.info("初始化 SQLite: {s}", .{db_path_full});
+
         var sqlite_db_ptr = try allocator.create(settings_sqlite.SqliteManager);
         sqlite_db_ptr.* = try settings_sqlite.SqliteManager.init(allocator, db_path_full, "");
-        try sqlite_db_ptr.open();
+        sqlite_db_ptr.open() catch |err| {
+            logger.global_logger.err("❌ SQLite 打开失败: {any}", .{err});
+            return error.DatabaseOpenFailed;
+        };
 
         const settings_manager = SettingsManager{
             .allocator = allocator,
@@ -112,6 +139,7 @@ pub const SettingsManager = struct {
 
         const new_config = self.sqlite_db.?.*.loadSettings(self.allocator) catch |err| {
             logger.global_logger.err("从 SQLite 加载设置失败: {any}", .{err});
+            // 尝试保存默认设置
             try self.initializeDefaultSettings();
             return;
         };
@@ -171,9 +199,10 @@ pub const SettingsManager = struct {
 
     /// 保存设置到 SQLite
     fn saveSettingsToSqlite(self: *SettingsManager) !void {
+        logger.global_logger.debug("保存设置到 SQLite...", .{});
         self.sqlite_db.?.*.saveSettings(self.config) catch |err| {
-            logger.global_logger.err("保存设置到 SQLite 失败: {any}", .{err});
-            return;
+            logger.global_logger.err("❌ 保存设置到 SQLite 失败: {any}", .{err});
+            return err;
         };
         logger.global_logger.info("✓ 设置已保存到 SQLite", .{});
     }

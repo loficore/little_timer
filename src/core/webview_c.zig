@@ -7,9 +7,9 @@ pub const c = @cImport({
 });
 
 pub const app_url: [:0]const u8 = if (build_options.embed_ui)
-    "http://127.0.0.1:8080"
+    "http://127.0.0.1:8080/?runtime=webview"
 else
-    "http://localhost:5173";
+    "http://localhost:5173/?runtime=webview";
 
 pub const WebviewError = error{
     CreateFailed,

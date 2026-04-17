@@ -1,6 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const json = std.json;
-const httpz = @import("httpz");
+const httpx = @import("httpx");
 const logger = @import("../logger.zig");
 const clock = @import("../clock.zig");
 const settings = @import("../../settings/mod.zig");
@@ -11,99 +12,155 @@ const build_options = @import("build_options");
 const ClockState = clock.ClockState;
 const ModeEnumT = clock.ModeEnumT;
 
-/// HTTP 处理器上下文，包含应用状态和配置
-pub const HttpHandler = struct {
-    app: *MainApplication,
+var global_app: ?*MainApplication = null;
+var global_allocator: ?std.mem.Allocator = null;
+
+pub const HttpServerManager = struct {
+    server: httpx.Server,
     allocator: std.mem.Allocator,
-    sse_pending: bool,
+
+    pub fn init(allocator: std.mem.Allocator, port: u16, app: *MainApplication) !HttpServerManager {
+        global_app = app;
+        global_allocator = allocator;
+
+        logger.global_logger.info("初始化 HTTP 服务器，端口: {}", .{port});
+
+        var server = httpx.Server.initWithConfig(allocator, .{
+            .host = "127.0.0.1",
+            .port = port,
+        });
+        errdefer server.deinit();
+
+        try server.get("/", handleRoot);
+        try server.get("/api/state", handleGetState);
+        try server.post("/api/start", handleStart);
+        try server.post("/api/pause", handlePause);
+        try server.post("/api/reset", handleReset);
+        try server.post("/api/mode", handleModeChange);
+        try server.get("/api/settings", handleGetSettings);
+        try server.post("/api/settings", handleUpdateSettings);
+        try server.post("/api/log", handleFrontendLog);
+
+        try server.get("/api/habit-sets", handleGetHabitSets);
+        try server.post("/api/habit-sets", handleCreateHabitSet);
+        try server.put("/api/habit-sets/:id", handleUpdateHabitSet);
+        try server.delete("/api/habit-sets/:id", handleDeleteHabitSet);
+
+        try server.get("/api/habits", handleGetHabits);
+        try server.post("/api/habits", handleCreateHabit);
+        try server.put("/api/habits/:id", handleUpdateHabit);
+        try server.delete("/api/habits/:id", handleDeleteHabit);
+
+        try server.post("/api/sessions", handleCreateSession);
+        try server.get("/api/sessions", handleGetSessions);
+        try server.get("/api/habits/:id/streak", handleGetHabitStreak);
+        try server.get("/api/habits/:id/detail", handleGetHabitDetail);
+
+        try server.post("/api/timer/rest", handleStartRest);
+        try server.post("/api/timer/finish", handleFinish);
+        try server.get("/api/timer/progress", handleGetProgress);
+
+        logger.global_logger.info("HTTP 服务器路由注册完成", .{});
+
+        return HttpServerManager{
+            .server = server,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn start(self: *HttpServerManager) !void {
+        logger.global_logger.info("HTTP 服务器开始监听...", .{});
+        try self.server.listen();
+    }
+
+    pub fn stop(self: *HttpServerManager) void {
+        logger.global_logger.info("HTTP 服务器停止中...", .{});
+        self.server.stop();
+    }
+
+    pub fn deinit(self: *HttpServerManager) void {
+        logger.global_logger.info("HTTP 服务器释放资源...", .{});
+        global_app = null;
+        global_allocator = null;
+        self.server.deinit();
+    }
 };
 
-/// 处理根路径请求，返回前端界面或提示信息
-/// 参数：
-/// - **h** : HTTP 处理器上下文，包含应用状态和配置
-/// - **request** : HTTP 请求对象，包含客户端请求信息
-/// - **response** : HTTP 响应对象，用于发送 HTML 内容
-fn handleRoot(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    _ = h;
-    _ = request;
+fn getApp() *MainApplication {
+    return global_app orelse @panic("global_app not set");
+}
 
+fn getAllocator() std.mem.Allocator {
+    return global_allocator orelse @panic("global_allocator not set");
+}
+
+fn handleRoot(ctx: *httpx.Context) !httpx.Response {
     if (build_options.embed_ui) {
-        response.header("content-type", "text/html; charset=utf-8");
-        try response.chunk(build_options.embedded_html);
+        return ctx.status(200).html(build_options.embedded_html);
     } else {
-        response.header("content-type", "text/html; charset=utf-8");
-        try response.chunk("<html><body><h1>Little Timer</h1><p>请先构建前端: cd assets && bun run build</p></body></html>");
+        return ctx.status(200).html("<html><body><h1>Little Timer</h1><p>请先构建前端: cd assets && bun run build</p></body></html>");
     }
 }
 
-/// 处理前端日志接收请求
-fn handleFrontendLog(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const body = request.body() orelse "";
+fn handleFrontendLog(ctx: *httpx.Context) !httpx.Response {
+    const body = ctx.request.body orelse "";
     if (body.len == 0) {
-        response.header("content-type", "application/json");
-        try response.chunk("{\"success\":false,\"error\":\"empty body\"}");
-        return;
+        return ctx.json(.{ .success = false, .err = "empty body" });
     }
 
-    const parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch null;
+    const allocator = getAllocator();
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch null;
     defer if (parsed) |p| p.deinit();
 
     if (parsed == null) {
-        response.header("content-type", "application/json");
-        try response.chunk("{\"success\":false,\"error\":\"invalid json\"}");
-        return;
+        return ctx.json(.{ .success = false, .err = "invalid json" });
     }
 
     const value = parsed.?.value;
     if (value != .object) {
-        response.header("content-type", "application/json");
-        try response.chunk("{\"success\":false,\"error\":\"not an object\"}");
-        return;
+        return ctx.json(.{ .success = false, .err = "not an object" });
     }
 
     const obj = value.object;
     const category = obj.get("category") orelse .null;
     const level = obj.get("level") orelse .null;
     const message = obj.get("message") orelse .null;
+    const runtime = obj.get("runtime") orelse .null;
 
     const cat_str = if (category == .string) category.string else "unknown";
     const level_str = if (level == .string) level.string else "info";
     const msg_str = if (message == .string) message.string else "";
+    const runtime_str = if (runtime == .string) runtime.string else "unknown";
 
     const actual_level = logger.LogLevel.fromString(level_str) orelse .INFO;
     const level_int = @intFromEnum(actual_level);
 
     if (level_int >= @intFromEnum(logger.LogLevel.ERROR)) {
-        logger.global_logger.err("[前端:{s}] {s}", .{ cat_str, msg_str });
+        logger.global_logger.err("[前端:{s}][{s}] {s}", .{ cat_str, runtime_str, msg_str });
     } else if (level_int >= @intFromEnum(logger.LogLevel.WARN)) {
-        logger.global_logger.warn("[前端:{s}] {s}", .{ cat_str, msg_str });
+        logger.global_logger.warn("[前端:{s}][{s}] {s}", .{ cat_str, runtime_str, msg_str });
     } else if (level_int >= @intFromEnum(logger.LogLevel.INFO)) {
-        logger.global_logger.info("[前端:{s}] {s}", .{ cat_str, msg_str });
+        logger.global_logger.info("[前端:{s}][{s}] {s}", .{ cat_str, runtime_str, msg_str });
     } else {
-        logger.global_logger.debug("[前端:{s}] {s}", .{ cat_str, msg_str });
+        logger.global_logger.debug("[前端:{s}][{s}] {s}", .{ cat_str, runtime_str, msg_str });
     }
 
-    response.header("content-type", "application/json");
-    try response.chunk("{\"success\":true}");
+    return ctx.json(.{ .success = true });
 }
 
-/// 处理获取计时器状态的请求，返回当前时间、模式、运行状态等信息
-/// 参数：
-/// - **h** : HTTP 处理器上下文，包含应用状态和配置
-/// - **request** : HTTP 请求对象，包含客户端请求信息
-fn handleGetState(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    _ = request;
+fn handleGetState(ctx: *httpx.Context) !httpx.Response {
     logger.global_logger.debug("[API] GET /api/state", .{});
 
-    const display_data = h.app.clock_manager.update();
+    const app = getApp();
+    const display_data = app.clock_manager.update();
     const mode_key = switch (display_data.getMode()) {
         .COUNTDOWN_MODE => "countdown",
         .STOPWATCH_MODE => "stopwatch",
     };
 
-    const timezone: i8 = h.app.settings_manager.config.basic.timezone;
+    const timezone: i8 = app.settings_manager.config.basic.timezone;
 
-    try response.json(.{
+    return ctx.json(.{
         .time = display_data.getTimeInfo(),
         .mode = mode_key,
         .is_running = !display_data.isPaused(),
@@ -113,16 +170,14 @@ fn handleGetState(h: *HttpHandler, request: *httpz.Request, response: *httpz.Res
         .loop_total = display_data.getLoopTotal(),
         .rest_remaining = display_data.getRestRemainingTime(),
         .timezone = timezone,
-    }, .{});
+    });
 }
 
-inline fn triggerSSEPush(h: *HttpHandler) void {
-    h.sse_pending = true;
-}
-
-fn handleStart(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+fn handleStart(ctx: *httpx.Context) !httpx.Response {
     logger.global_logger.info("[API] POST /api/start", .{});
-    const body = request.body() orelse "";
+    const body = ctx.request.body orelse "";
+    const allocator = getAllocator();
+    const app = getApp();
 
     var habit_id: ?i64 = null;
     var mode: []const u8 = "stopwatch";
@@ -131,7 +186,7 @@ fn handleStart(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respon
     var loop_count: i64 = 0;
 
     if (body.len > 0) {
-        const parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch null;
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch null;
         defer if (parsed) |p| p.deinit();
         if (parsed) |p| {
             if (p.value.object.get("habit_id")) |hid| {
@@ -166,26 +221,21 @@ fn handleStart(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respon
         }
     }
 
-    const db = h.app.settings_manager.sqlite_db orelse {
-        try response.json(.{ .err = "Database not open" }, .{});
-        return;
+    const db = app.settings_manager.sqlite_db orelse {
+        return ctx.json(.{ .err = "Database not open" });
     };
 
-    // 如果当前已有暂停中的会话，则视为恢复同一会话，而不是创建新会话
-    if (h.app.current_timer_session_id) |session_id| {
+    if (app.current_timer_session_id) |session_id| {
         const session = db.habit_manager.getTimerSessionById(session_id) catch null;
         if (session) |s| {
-            defer h.allocator.free(s.mode);
+            defer allocator.free(s.mode);
 
-            // 幂等保护：已有运行中的会话时，重复 start 请求不再创建新会话。
             if (s.is_running and !s.is_finished and !s.is_paused) {
-                h.app.current_habit_id = habit_id orelse s.habit_id;
-                triggerSSEPush(h);
-                try response.json(.{ .status = "already_running", .habit_id = h.app.current_habit_id, .session_id = session_id }, .{});
-                return;
+                app.current_habit_id = habit_id orelse s.habit_id;
+                return ctx.json(.{ .status = "already_running", .habit_id = app.current_habit_id, .session_id = session_id });
             }
 
-            const current_clock = h.app.clock_manager.update();
+            const current_clock = app.clock_manager.update();
             if ((current_clock.isPaused() and !current_clock.isFinished()) or s.is_paused) {
                 var paused_total_seconds = s.paused_total_seconds;
                 const now_ts: i64 = @intCast(std.time.timestamp());
@@ -195,7 +245,7 @@ fn handleStart(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respon
                     }
                 }
 
-                h.app.clock_manager.handleEvent(.user_start_timer);
+                app.clock_manager.handleEvent(.user_start_timer);
                 _ = db.habit_manager.updateTimerSession(
                     session_id,
                     s.elapsed_seconds,
@@ -210,40 +260,31 @@ fn handleStart(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respon
                     s.in_rest,
                 ) catch {};
 
-                h.app.current_habit_id = habit_id orelse s.habit_id;
-                triggerSSEPush(h);
-                try response.json(.{ .status = "started", .habit_id = h.app.current_habit_id, .session_id = session_id }, .{});
-                return;
+                app.current_habit_id = habit_id orelse s.habit_id;
+                return ctx.json(.{ .status = "started", .habit_id = app.current_habit_id, .session_id = session_id });
             }
         }
 
-        h.app.resetTimerSession();
+        app.resetTimerSession();
     }
 
-    // 创建新的计时会话
-    const session_id = h.app.createTimerSession(habit_id, mode, work_duration, rest_duration, loop_count) catch {
-        // 如果创建失败，回退到旧行为
-        h.app.current_habit_id = habit_id;
-        h.app.clock_manager.handleEvent(.user_start_timer);
-        triggerSSEPush(h);
-        try response.json(.{ .status = "started", .habit_id = habit_id }, .{});
-        return;
+    const session_id = app.createTimerSession(habit_id, mode, work_duration, rest_duration, loop_count) catch {
+        app.current_habit_id = habit_id;
+        app.clock_manager.handleEvent(.user_start_timer);
+        return ctx.json(.{ .status = "started", .habit_id = habit_id });
     };
 
-    h.app.current_habit_id = habit_id;
-    h.app.clock_manager.handleEvent(.user_start_timer);
-    triggerSSEPush(h);
-    try response.json(.{ .status = "started", .habit_id = habit_id, .session_id = session_id }, .{});
+    app.current_habit_id = habit_id;
+    app.clock_manager.handleEvent(.user_start_timer);
+    return ctx.json(.{ .status = "started", .habit_id = habit_id, .session_id = session_id });
 }
 
-fn handleStartRest(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    _ = request;
+fn handleStartRest(ctx: *httpx.Context) !httpx.Response {
+    const app = getApp();
 
-    // 获取休息时长（默认5分钟）
     const rest_seconds: i64 = 5 * 60;
 
-    // 切换到倒计时模式并设置休息时间
-    h.app.clock_manager.handleEvent(.{ .user_change_config = .{
+    app.clock_manager.handleEvent(.{ .user_change_config = .{
         .default_mode = .COUNTDOWN_MODE,
         .countdown = .{
             .duration_seconds = @intCast(rest_seconds),
@@ -254,52 +295,42 @@ fn handleStartRest(h: *HttpHandler, request: *httpz.Request, response: *httpz.Re
         .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
     } });
 
-    // 开始倒计时
-    h.app.clock_manager.handleEvent(.user_start_timer);
-    triggerSSEPush(h);
-    try response.json(.{ .status = "rest_started", .rest_seconds = rest_seconds }, .{});
+    app.clock_manager.handleEvent(.user_start_timer);
+    return ctx.json(.{ .status = "rest_started", .rest_seconds = rest_seconds });
 }
 
-fn handlePause(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+fn handlePause(ctx: *httpx.Context) !httpx.Response {
     logger.global_logger.info("[API] POST /api/pause", .{});
-    _ = request;
-    h.app.clock_manager.handleEvent(.user_pause_timer);
-    h.app.saveTimerProgress();
-    triggerSSEPush(h);
-    try response.json(.{ .status = "paused" }, .{});
+    const app = getApp();
+    app.clock_manager.handleEvent(.user_pause_timer);
+    app.saveTimerProgress();
+    return ctx.json(.{ .status = "paused" });
 }
 
-fn handleReset(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+fn handleReset(ctx: *httpx.Context) !httpx.Response {
     logger.global_logger.info("[API] POST /api/reset", .{});
-    _ = request;
-    h.app.resetTimerSession();
-    h.app.current_habit_id = null;
-    h.app.clock_manager.handleEvent(.user_reset_timer);
-    triggerSSEPush(h);
-    try response.json(.{ .status = "reset" }, .{});
+    const app = getApp();
+    app.resetTimerSession();
+    app.current_habit_id = null;
+    app.clock_manager.handleEvent(.user_reset_timer);
+    return ctx.json(.{ .status = "reset" });
 }
 
-fn handleFinish(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+fn handleFinish(ctx: *httpx.Context) !httpx.Response {
     logger.global_logger.info("[API] POST /api/finish", .{});
-    _ = request;
+    const app = getApp();
 
-    const habit_id = h.app.current_habit_id;
-    const session_id = h.app.current_timer_session_id;
+    const habit_id = app.current_habit_id;
+    const session_id = app.current_timer_session_id;
 
-    // 完成计时会话，获取用于统计的 elapsed
-    const elapsed = h.app.finishTimerSession() catch {
-        // 如果失败，回退到旧行为
-        h.app.clock_manager.handleEvent(.user_finish_timer);
-        const clock_state = h.app.clock_manager.update();
+    const elapsed = app.finishTimerSession() catch {
+        app.clock_manager.handleEvent(.user_finish_timer);
+        const clock_state = app.clock_manager.update();
         const elapsed_seconds = clock_state.getElapsedSeconds();
-        triggerSSEPush(h);
-        try response.json(.{ .status = "finished", .elapsed_seconds = elapsed_seconds }, .{});
-        return;
+        return ctx.json(.{ .status = "finished", .elapsed_seconds = elapsed_seconds });
     };
 
-    // 创建 session 记录（用于统计）
     if (habit_id != null and elapsed > 0) {
-        // 获取今天的日期字符串
         const timestamp: i64 = @intCast(std.time.timestamp());
         const es = std.time.epoch.EpochSeconds{ .secs = @as(u64, @intCast(timestamp)) };
         const yd = es.getEpochDay().calculateYearDay();
@@ -307,7 +338,7 @@ fn handleFinish(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respo
         var buffer: [10]u8 = undefined;
         const today = std.fmt.bufPrint(&buffer, "{d:0>4}-{d:0>2}-{d:0>2}", .{ yd.year, md.month.numeric(), md.day_index + 1 }) catch "";
 
-        _ = h.app.settings_manager.sqlite_db.?.habit_manager.createSession(
+        _ = app.settings_manager.sqlite_db.?.habit_manager.createSession(
             habit_id.?,
             elapsed,
             1,
@@ -317,30 +348,27 @@ fn handleFinish(h: *HttpHandler, request: *httpz.Request, response: *httpz.Respo
         };
     }
 
-    // 清理 session
-    h.app.resetTimerSession();
+    app.resetTimerSession();
 
-    triggerSSEPush(h);
-    try response.json(.{ .status = "finished", .elapsed_seconds = elapsed, .session_id = session_id }, .{});
+    return ctx.json(.{ .status = "finished", .elapsed_seconds = elapsed, .session_id = session_id });
 }
 
-fn handleGetProgress(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    _ = request;
+fn handleGetProgress(ctx: *httpx.Context) !httpx.Response {
+    const app = getApp();
 
-    // 仅在进程内尚未持有会话状态时才从数据库恢复，避免重复恢复覆盖当前运行态。
-    if (h.app.current_timer_session_id == null) {
-        h.app.loadTimerProgress();
+    if (app.current_timer_session_id == null) {
+        app.loadTimerProgress();
     }
 
-    const session_id = h.app.current_timer_session_id;
-    const habit_id = h.app.current_habit_id;
-    const clock_state = h.app.clock_manager.update();
+    const session_id = app.current_timer_session_id;
+    const habit_id = app.current_habit_id;
+    const clock_state = app.clock_manager.update();
     const mode_key = switch (clock_state.getMode()) {
         .COUNTDOWN_MODE => "countdown",
         .STOPWATCH_MODE => "stopwatch",
     };
 
-    try response.json(.{
+    return ctx.json(.{
         .session_id = session_id,
         .habit_id = habit_id,
         .mode = mode_key,
@@ -350,164 +378,75 @@ fn handleGetProgress(h: *HttpHandler, request: *httpz.Request, response: *httpz.
         .elapsed_seconds = clock_state.getElapsedSeconds(),
         .remaining_seconds = clock_state.getRemainingSeconds(),
         .in_rest = clock_state.inRest(),
-    }, .{});
+    });
 }
 
-fn handleModeChange(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+fn handleModeChange(ctx: *httpx.Context) !httpx.Response {
     logger.global_logger.info("[API] POST /api/mode", .{});
-    const body = request.body() orelse "";
+    const body = ctx.request.body orelse "";
     const mode_str = std.mem.trim(u8, body, " \n\r\t");
+    const app = getApp();
+    const allocator = getAllocator();
 
     const new_mode = if (std.mem.eql(u8, mode_str, "countdown"))
         ModeEnumT.COUNTDOWN_MODE
     else if (std.mem.eql(u8, mode_str, "stopwatch"))
         ModeEnumT.STOPWATCH_MODE
     else {
-        try response.json(std.json.Value{ .object = std.StringArrayHashMap(std.json.Value).init(h.allocator) }, .{});
-        return;
+        return ctx.json(std.json.Value{ .object = std.StringArrayHashMap(std.json.Value).init(allocator) });
     };
 
-    h.app.clock_manager.handleEvent(.{ .user_change_mode = new_mode });
-    triggerSSEPush(h);
-    try response.json(.{ .status = "mode_changed", .new_mode = mode_str }, .{});
+    app.clock_manager.handleEvent(.{ .user_change_mode = new_mode });
+    return ctx.json(.{ .status = "mode_changed", .new_mode = mode_str });
 }
 
-fn handleGetSettings(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
+fn handleGetSettings(ctx: *httpx.Context) !httpx.Response {
     logger.global_logger.debug("[API] GET /api/settings", .{});
-    _ = request;
-    const config = h.app.settings_manager.getConfig();
-    try response.json(config, .{});
+    const app = getApp();
+    const config = app.settings_manager.getConfig();
+    return ctx.json(config);
 }
 
-fn handleUpdateSettings(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const body = request.body() orelse "";
-    const body_copy: [:0]u8 = try h.allocator.allocSentinel(u8, body.len, 0);
+fn handleUpdateSettings(ctx: *httpx.Context) !httpx.Response {
+    const body = ctx.request.body orelse "";
+    const app = getApp();
+    const allocator = getAllocator();
+
+    const body_copy: [:0]u8 = try allocator.allocSentinel(u8, body.len, 0);
     @memcpy(body_copy[0..body.len], body);
-    try h.app.settings_manager.handleSettingsEvent(.{ .change_settings = body_copy });
-    try response.json(.{ .status = "settings_updated" }, .{});
+    try app.settings_manager.handleSettingsEvent(.{ .change_settings = body_copy });
+    return ctx.json(.{ .status = "settings_updated" });
 }
 
-fn buildStateJson(allocator: std.mem.Allocator, display_data: *const ClockState, timezone: i8, habit_id: ?i64) ![]u8 {
-    const mode_key = switch (display_data.getMode()) {
-        .COUNTDOWN_MODE => "countdown",
-        .STOPWATCH_MODE => "stopwatch",
-    };
-
-    const habit_id_json = if (habit_id) |hid| try std.fmt.allocPrint(allocator, ",\"habit_id\":{}", .{hid}) else "";
-    const elapsed_seconds = display_data.getElapsedSeconds();
-
-    return try std.fmt.allocPrint(allocator, "{{\"time\":{},\"elapsed\":{},\"mode\":\"{s}\",\"is_running\":{},\"is_finished\":{},\"in_rest\":{},\"loop_remaining\":{},\"loop_total\":{},\"rest_remaining\":{},\"timezone\":{}{s}}}", .{
-        display_data.getTimeInfo(),
-        elapsed_seconds,
-        mode_key,
-        !display_data.isPaused(),
-        display_data.isFinished(),
-        display_data.inRest(),
-        display_data.getLoopRemaining(),
-        display_data.getLoopTotal(),
-        display_data.getRestRemainingTime(),
-        timezone,
-        habit_id_json,
-    });
-}
-
-/// 处理 Server-Sent Events 连接，持续推送计时器状态更新
-/// 参数：
-/// - **h** : HTTP 处理器上下文，包含应用状态和配置
-/// - **request** : HTTP 请求对象，包含客户端请求信息
-/// - **response** : HTTP 响应对象，用于发送 SSE 数据流
-fn handleSSE(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    _ = request;
-
-    logger.global_logger.info("SSE 客户端连接建立", .{});
-
-    const stream = try response.startEventStreamSync();
-
-    var last_tick_ts = std.time.timestamp();
-    var last_state_json: ?[]const u8 = null;
-    var last_heartbeat_ts = std.time.timestamp();
-    var pending_push = false;
-
-    while (true) {
-        var sleep_ns: u64 = 1_000_000_000;
-        if (pending_push) {
-            sleep_ns = 0;
-            pending_push = false;
-        }
-
-        const now = std.time.timestamp();
-        const delta_s = now - last_tick_ts;
-        last_tick_ts = now;
-
-        if (delta_s > 0) {
-            h.app.clock_manager.handleEvent(.{ .tick = delta_s * 1000 });
-        }
-
-        const display_data = h.app.clock_manager.update();
-        const timezone: i8 = h.app.settings_manager.config.basic.timezone;
-        const habit_id = h.app.current_habit_id;
-
-        const buf = try buildStateJson(h.allocator, display_data, timezone, habit_id);
-        defer h.allocator.free(buf);
-
-        const has_change = if (last_state_json) |last| !std.mem.eql(u8, last, buf) else true;
-
-        if (has_change) {
-            if (last_state_json) |last| h.allocator.free(last);
-            last_state_json = try h.allocator.dupe(u8, buf);
-            last_heartbeat_ts = now;
-
-            try stream.writeAll("data: ");
-            try stream.writeAll(buf);
-            try stream.writeAll("\n\n");
-        } else {
-            if (now - last_heartbeat_ts >= 10) {
-                last_heartbeat_ts = now;
-                try stream.writeAll(": heartbeat\n\n");
-            }
-        }
-
-        std.Thread.sleep(sleep_ns);
-
-        if (h.sse_pending) {
-            h.sse_pending = false;
-            pending_push = true;
-        }
-    }
-}
-
-// === 习惯集 API ===
-
-fn handleGetHabitSets(h: *HttpHandler, _: *httpz.Request, response: *httpz.Response) !void {
-    const habit_manager = &h.app.settings_manager.sqlite_db.?.*.habit_manager;
+fn handleGetHabitSets(ctx: *httpx.Context) !httpx.Response {
+    const app = getApp();
+    const habit_manager = &app.settings_manager.sqlite_db.?.*.habit_manager;
     const habit_sets = habit_manager.getAllHabitSets() catch |err| {
         logger.global_logger.err("获取习惯集失败: {any}", .{err});
-        try response.json(.{ .err = "Failed to get habit sets" }, .{});
-        return;
+        return ctx.json(.{ .err = "Failed to get habit sets" });
     };
     defer habit_manager.freeHabitSets(habit_sets);
-    try response.json(habit_sets, .{});
+    return ctx.json(habit_sets);
 }
 
-fn handleCreateHabitSet(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const body = request.body() orelse "";
+fn handleCreateHabitSet(ctx: *httpx.Context) !httpx.Response {
+    const body = ctx.request.body orelse "";
+    const allocator = getAllocator();
+    const app = getApp();
 
-    var parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch |err| {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch |err| {
         logger.global_logger.err("解析习惯集创建请求失败: {any}", .{err});
-        try response.json(.{ .err = "Invalid JSON" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid JSON" });
     };
     defer parsed.deinit();
 
     const root = parsed.value.object;
     const name_val = root.get("name") orelse {
-        try response.json(.{ .err = "Missing name" }, .{});
-        return;
+        return ctx.json(.{ .err = "Missing name" });
     };
 
     if (name_val != .string or name_val.string.len == 0) {
-        try response.json(.{ .err = "Invalid name" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid name" });
     }
 
     var description_str: []const u8 = "";
@@ -520,34 +459,33 @@ fn handleCreateHabitSet(h: *HttpHandler, request: *httpz.Request, response: *htt
         if (val == .string) color_str = val.string;
     }
 
-    const id = h.app.settings_manager.sqlite_db.?.*.habit_manager.createHabitSet(
+    const id = app.settings_manager.sqlite_db.?.*.habit_manager.createHabitSet(
         name_val.string,
         description_str,
         color_str,
     ) catch |err| {
         logger.global_logger.err("创建习惯集失败: {any}", .{err});
-        try response.json(.{ .err = "Failed to create habit set" }, .{});
-        return;
+        return ctx.json(.{ .err = "Failed to create habit set" });
     };
 
-    try response.json(.{ .id = id, .name = name_val.string, .description = description_str, .color = color_str }, .{});
+    return ctx.json(.{ .id = id, .name = name_val.string, .description = description_str, .color = color_str });
 }
 
-fn handleUpdateHabitSet(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const id_str = request.params.get("id") orelse {
-        try response.json(.{ .err = "Missing id" }, .{});
-        return;
+fn handleUpdateHabitSet(ctx: *httpx.Context) !httpx.Response {
+    const id_str = ctx.param("id") orelse {
+        return ctx.json(.{ .err = "Missing id" });
     };
     const id = std.fmt.parseInt(i64, id_str, 10) catch {
-        try response.json(.{ .err = "Invalid id" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid id" });
     };
 
-    const body = request.body() orelse "";
-    var parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch |err| {
+    const body = ctx.request.body orelse "";
+    const allocator = getAllocator();
+    const app = getApp();
+
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch |err| {
         logger.global_logger.err("解析习惯集更新请求失败: {any}", .{err});
-        try response.json(.{ .err = "Invalid JSON" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid JSON" });
     };
     defer parsed.deinit();
 
@@ -574,77 +512,69 @@ fn handleUpdateHabitSet(h: *HttpHandler, request: *httpz.Request, response: *htt
     }
 
     if (name.len == 0) {
-        try response.json(.{ .err = "Missing name" }, .{});
-        return;
+        return ctx.json(.{ .err = "Missing name" });
     }
 
     if (description_str.len == 0) description_str = "";
     if (color_str.len == 0) color_str = "#6366f1";
     if (wallpaper.len == 0) wallpaper = "";
 
-    h.app.settings_manager.sqlite_db.?.*.habit_manager.updateHabitSet(id, name, description_str, color_str, wallpaper) catch |err| {
+    app.settings_manager.sqlite_db.?.*.habit_manager.updateHabitSet(id, name, description_str, color_str, wallpaper) catch |err| {
         logger.global_logger.err("更新习惯集失败: {any}", .{err});
-        try response.json(.{ .err = "Failed to update habit set" }, .{});
-        return;
+        return ctx.json(.{ .err = "Failed to update habit set" });
     };
 
-    try response.json(.{ .id = id, .name = name, .description = description_str, .color = color_str, .wallpaper = wallpaper }, .{});
+    return ctx.json(.{ .id = id, .name = name, .description = description_str, .color = color_str, .wallpaper = wallpaper });
 }
 
-fn handleDeleteHabitSet(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const id_str = request.params.get("id") orelse {
-        try response.json(.{ .err = "Missing id" }, .{});
-        return;
+fn handleDeleteHabitSet(ctx: *httpx.Context) !httpx.Response {
+    const id_str = ctx.param("id") orelse {
+        return ctx.json(.{ .err = "Missing id" });
     };
     const id = std.fmt.parseInt(i64, id_str, 10) catch {
-        try response.json(.{ .err = "Invalid id" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid id" });
     };
 
-    h.app.settings_manager.sqlite_db.?.*.habit_manager.deleteHabitSet(id) catch |err| {
+    const app = getApp();
+    app.settings_manager.sqlite_db.?.*.habit_manager.deleteHabitSet(id) catch |err| {
         logger.global_logger.err("删除习惯集失败: {any}", .{err});
-        try response.json(.{ .err = "Failed to delete habit set" }, .{});
-        return;
+        return ctx.json(.{ .err = "Failed to delete habit set" });
     };
 
-    try response.json(.{ .success = true }, .{});
+    return ctx.json(.{ .success = true });
 }
 
-// === 习惯 API ===
-
-fn handleGetHabits(h: *HttpHandler, _: *httpz.Request, response: *httpz.Response) !void {
-    const habit_manager = &h.app.settings_manager.sqlite_db.?.*.habit_manager;
+fn handleGetHabits(ctx: *httpx.Context) !httpx.Response {
+    const app = getApp();
+    const habit_manager = &app.settings_manager.sqlite_db.?.*.habit_manager;
     const habits = habit_manager.getAllHabits() catch {
-        try response.json(.{ .err = "Failed to get habits" }, .{});
-        return;
+        return ctx.json(.{ .err = "Failed to get habits" });
     };
     defer habit_manager.freeHabits(habits);
-    try response.json(habits, .{});
+    return ctx.json(habits);
 }
 
-fn handleCreateHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const body = request.body() orelse "";
+fn handleCreateHabit(ctx: *httpx.Context) !httpx.Response {
+    const body = ctx.request.body orelse "";
+    const allocator = getAllocator();
+    const app = getApp();
 
-    var parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch |err| {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch |err| {
         logger.global_logger.err("解析习惯创建请求失败: {any}", .{err});
-        try response.json(.{ .err = "Invalid JSON" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid JSON" });
     };
     defer parsed.deinit();
 
     const root = parsed.value.object;
     const set_id_val = root.get("set_id") orelse {
-        try response.json(.{ .err = "Missing set_id" }, .{});
-        return;
+        return ctx.json(.{ .err = "Missing set_id" });
     };
     const name_val = root.get("name") orelse {
-        try response.json(.{ .err = "Missing name" }, .{});
-        return;
+        return ctx.json(.{ .err = "Missing name" });
     };
 
     if (set_id_val != .integer or name_val != .string or name_val.string.len == 0) {
-        try response.json(.{ .err = "Invalid parameters" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid parameters" });
     }
 
     const set_id = set_id_val.integer;
@@ -655,54 +585,51 @@ fn handleCreateHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.
         if (val == .string) color_str = val.string;
     }
 
-    const id = h.app.settings_manager.sqlite_db.?.*.habit_manager.createHabit(
+    const id = app.settings_manager.sqlite_db.?.*.habit_manager.createHabit(
         set_id,
         name,
         goal_seconds,
         color_str,
     ) catch |err| {
         logger.global_logger.err("创建习惯失败: {any}", .{err});
-        try response.json(.{ .err = "Failed to create habit" }, .{});
-        return;
+        return ctx.json(.{ .err = "Failed to create habit" });
     };
 
-    try response.json(.{ .id = id, .set_id = set_id, .name = name, .goal_seconds = goal_seconds, .color = color_str }, .{});
+    return ctx.json(.{ .id = id, .set_id = set_id, .name = name, .goal_seconds = goal_seconds, .color = color_str });
 }
 
-fn handleDeleteHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const id_str = request.params.get("id") orelse {
-        try response.json(.{ .err = "Missing id" }, .{});
-        return;
+fn handleDeleteHabit(ctx: *httpx.Context) !httpx.Response {
+    const id_str = ctx.param("id") orelse {
+        return ctx.json(.{ .err = "Missing id" });
     };
     const id = std.fmt.parseInt(i64, id_str, 10) catch {
-        try response.json(.{ .err = "Invalid id" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid id" });
     };
 
-    h.app.settings_manager.sqlite_db.?.*.habit_manager.deleteHabit(id) catch |err| {
+    const app = getApp();
+    app.settings_manager.sqlite_db.?.*.habit_manager.deleteHabit(id) catch |err| {
         logger.global_logger.err("删除习惯失败: {any}", .{err});
-        try response.json(.{ .err = "Failed to delete habit" }, .{});
-        return;
+        return ctx.json(.{ .err = "Failed to delete habit" });
     };
 
-    try response.json(.{ .success = true }, .{});
+    return ctx.json(.{ .success = true });
 }
 
-fn handleUpdateHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const id_str = request.params.get("id") orelse {
-        try response.json(.{ .err = "Missing id" }, .{});
-        return;
+fn handleUpdateHabit(ctx: *httpx.Context) !httpx.Response {
+    const id_str = ctx.param("id") orelse {
+        return ctx.json(.{ .err = "Missing id" });
     };
     const id = std.fmt.parseInt(i64, id_str, 10) catch {
-        try response.json(.{ .err = "Invalid id" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid id" });
     };
 
-    const body = request.body() orelse "";
-    var parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch |err| {
+    const body = ctx.request.body orelse "";
+    const allocator = getAllocator();
+    const app = getApp();
+
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch |err| {
         logger.global_logger.err("解析习惯更新请求失败: {any}", .{err});
-        try response.json(.{ .err = "Invalid JSON" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid JSON" });
     };
     defer parsed.deinit();
 
@@ -729,49 +656,43 @@ fn handleUpdateHabit(h: *HttpHandler, request: *httpz.Request, response: *httpz.
     }
 
     if (name.len == 0) {
-        try response.json(.{ .err = "Missing name" }, .{});
-        return;
+        return ctx.json(.{ .err = "Missing name" });
     }
 
     if (goal_seconds == 0) goal_seconds = 1500;
     if (color_str.len == 0) color_str = "#6366f1";
     if (wallpaper.len == 0) wallpaper = "";
 
-    h.app.settings_manager.sqlite_db.?.*.habit_manager.updateHabit(id, name, goal_seconds, color_str, wallpaper) catch |err| {
+    app.settings_manager.sqlite_db.?.*.habit_manager.updateHabit(id, name, goal_seconds, color_str, wallpaper) catch |err| {
         logger.global_logger.err("更新习惯失败: {any}", .{err});
-        try response.json(.{ .err = "Failed to update habit" }, .{});
-        return;
+        return ctx.json(.{ .err = "Failed to update habit" });
     };
 
-    try response.json(.{ .id = id, .name = name, .goal_seconds = goal_seconds, .color = color_str, .wallpaper = wallpaper }, .{});
+    return ctx.json(.{ .id = id, .name = name, .goal_seconds = goal_seconds, .color = color_str, .wallpaper = wallpaper });
 }
 
-// === 记录 API ===
+fn handleCreateSession(ctx: *httpx.Context) !httpx.Response {
+    const body = ctx.request.body orelse "";
+    const allocator = getAllocator();
+    const app = getApp();
 
-fn handleCreateSession(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const body = request.body() orelse "";
-
-    var parsed = std.json.parseFromSlice(std.json.Value, h.allocator, body, .{}) catch |err| {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch |err| {
         logger.global_logger.err("解析记录创建请求失败: {any}", .{err});
-        try response.json(.{ .err = "Invalid JSON" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid JSON" });
     };
     defer parsed.deinit();
 
     const root = parsed.value.object;
 
     const habit_id_val = root.get("habit_id") orelse {
-        try response.json(.{ .err = "Missing habit_id" }, .{});
-        return;
+        return ctx.json(.{ .err = "Missing habit_id" });
     };
     const duration_val = root.get("duration_seconds") orelse {
-        try response.json(.{ .err = "Missing duration_seconds" }, .{});
-        return;
+        return ctx.json(.{ .err = "Missing duration_seconds" });
     };
 
     if (habit_id_val != .integer or duration_val != .integer) {
-        try response.json(.{ .err = "Invalid parameters" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid parameters" });
     }
 
     const habit_id = habit_id_val.integer;
@@ -785,40 +706,42 @@ fn handleCreateSession(h: *HttpHandler, request: *httpz.Request, response: *http
     var buffer: [10]u8 = undefined;
     const date_str = std.fmt.bufPrint(&buffer, "{d:0>4}-{d:0>2}-{d:0>2}", .{ yd.year, md.month.numeric(), md.day_index + 1 }) catch "";
 
-    const id = h.app.settings_manager.sqlite_db.?.*.habit_manager.createSession(
+    const id = app.settings_manager.sqlite_db.?.*.habit_manager.createSession(
         habit_id,
         duration_seconds,
         count,
         date_str,
     ) catch |err| {
         logger.global_logger.err("创建记录失败: {any}", .{err});
-        try response.json(.{ .err = "Failed to create session" }, .{});
-        return;
+        return ctx.json(.{ .err = "Failed to create session" });
     };
 
-    try response.json(.{ .id = id, .habit_id = habit_id, .duration_seconds = duration_seconds, .date = date_str }, .{});
+    return ctx.json(.{ .id = id, .habit_id = habit_id, .duration_seconds = duration_seconds, .date = date_str });
 }
 
-fn handleGetSessions(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const query = try request.query();
-    const date = query.get("date");
-    const start_date = query.get("start_date");
-    const end_date = query.get("end_date");
+fn handleGetSessions(ctx: *httpx.Context) !httpx.Response {
+    const date = ctx.query("date");
+    const start_date = ctx.query("start_date");
+    const end_date = ctx.query("end_date");
 
     std.debug.print("[handleGetSessions] date={s}, start_date={s}, end_date={s}\n", .{ date orelse "null", start_date orelse "null", end_date orelse "null" });
 
+    const app = getApp();
+
     var sessions: []habit_crud.SessionRow = &.{};
+    var owns_sessions = false;
+    defer if (owns_sessions) {
+        app.settings_manager.sqlite_db.?.*.habit_manager.freeSessions(sessions);
+    };
 
     if (start_date != null and end_date != null) {
         std.debug.print("[handleGetSessions] calling getSessionsByDateRange\n", .{});
-        sessions = h.app.settings_manager.sqlite_db.?.*.habit_manager.getSessionsByDateRange(start_date.?, end_date.?) catch {
-            try response.json(.{ .err = "Failed to get sessions" }, .{});
-            return;
+        sessions = app.settings_manager.sqlite_db.?.*.habit_manager.getSessionsByDateRange(start_date.?, end_date.?) catch {
+            return ctx.json(.{ .err = "Failed to get sessions" });
         };
     } else if (date != null) {
-        sessions = h.app.settings_manager.sqlite_db.?.*.habit_manager.getSessionsByDate(date.?) catch {
-            try response.json(.{ .err = "Failed to get sessions" }, .{});
-            return;
+        sessions = app.settings_manager.sqlite_db.?.*.habit_manager.getSessionsByDate(date.?) catch {
+            return ctx.json(.{ .err = "Failed to get sessions" });
         };
     } else {
         const timestamp: i64 = @intCast(std.time.timestamp());
@@ -827,71 +750,67 @@ fn handleGetSessions(h: *HttpHandler, request: *httpz.Request, response: *httpz.
         const md = yd.calculateMonthDay();
         var buffer: [10]u8 = undefined;
         const today = std.fmt.bufPrint(&buffer, "{d:0>4}-{d:0>2}-{d:0>2}", .{ yd.year, md.month.numeric(), md.day_index + 1 }) catch "";
-        sessions = h.app.settings_manager.sqlite_db.?.*.habit_manager.getSessionsByDate(today) catch {
-            try response.json(.{ .err = "Failed to get sessions" }, .{});
-            return;
+        sessions = app.settings_manager.sqlite_db.?.*.habit_manager.getSessionsByDate(today) catch {
+            return ctx.json(.{ .err = "Failed to get sessions" });
         };
     }
 
-    std.debug.print("[handleGetSessions] returning {} sessions\n", .{sessions.len});
-    for (sessions) |s| {
-        std.debug.print("  session: id={}, habit_id={}, duration={}, date={s}\n", .{ s.id, s.habit_id, s.duration_seconds, s.date });
-    }
+    owns_sessions = true;
 
-    try response.json(sessions, .{});
+    std.debug.print("[handleGetSessions] returning {} sessions\n", .{sessions.len});
+
+    return ctx.json(sessions);
 }
 
-fn handleGetHabitStreak(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const id_str = request.params.get("id") orelse {
-        try response.json(.{ .err = "Missing id" }, .{});
-        return;
+fn handleGetHabitStreak(ctx: *httpx.Context) !httpx.Response {
+    const id_str = ctx.param("id") orelse {
+        return ctx.json(.{ .err = "Missing id" });
     };
     const habit_id = std.fmt.parseInt(i64, id_str, 10) catch {
-        try response.json(.{ .err = "Invalid id" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid id" });
     };
 
-    const goal_seconds: i64 = if (request.params.get("goal_seconds")) |gs|
+    const goal_seconds: i64 = if (ctx.param("goal_seconds")) |gs|
         std.fmt.parseInt(i64, gs, 10) catch 1500
     else
         1500;
 
-    const streak = h.app.settings_manager.sqlite_db.?.*.habit_manager.getHabitStreak(habit_id, goal_seconds) catch {
-        try response.json(.{ .err = "Failed to get streak" }, .{});
-        return;
+    const app = getApp();
+    const streak = app.settings_manager.sqlite_db.?.*.habit_manager.getHabitStreak(habit_id, goal_seconds) catch {
+        return ctx.json(.{ .err = "Failed to get streak" });
     };
 
-    try response.json(.{ .habit_id = habit_id, .streak = streak }, .{});
+    return ctx.json(.{ .habit_id = habit_id, .streak = streak });
 }
 
-fn handleGetHabitDetail(h: *HttpHandler, request: *httpz.Request, response: *httpz.Response) !void {
-    const id_str = request.params.get("id") orelse {
-        try response.json(.{ .err = "Missing id" }, .{});
-        return;
+fn handleGetHabitDetail(ctx: *httpx.Context) !httpx.Response {
+    const id_str = ctx.param("id") orelse {
+        return ctx.json(.{ .err = "Missing id" });
     };
     const habit_id = std.fmt.parseInt(i64, id_str, 10) catch {
-        try response.json(.{ .err = "Invalid id" }, .{});
-        return;
+        return ctx.json(.{ .err = "Invalid id" });
     };
 
-    const date_param = request.params.get("date") orelse "2026-03-31";
+    const date_param = ctx.param("date") orelse "2026-03-31";
 
-    const habit = h.app.settings_manager.sqlite_db.?.*.habit_manager.getHabitById(habit_id) catch {
-        try response.json(.{ .err = "Failed to get habit" }, .{});
-        return;
+    const app = getApp();
+    const habit_manager = &app.settings_manager.sqlite_db.?.*.habit_manager;
+
+    const habit = habit_manager.getHabitById(habit_id) catch {
+        return ctx.json(.{ .err = "Failed to get habit" });
     };
 
     const h_row = habit orelse {
-        try response.json(.{ .err = "Habit not found" }, .{});
-        return;
+        return ctx.json(.{ .err = "Habit not found" });
     };
+    defer habit_manager.freeHabit(h_row);
 
-    const today_seconds = h.app.settings_manager.sqlite_db.?.*.habit_manager.getHabitTodaySeconds(habit_id, date_param) catch 0;
-    const streak = h.app.settings_manager.sqlite_db.?.*.habit_manager.getHabitStreak(habit_id, h_row.goal_seconds) catch 0;
+    const today_seconds = habit_manager.getHabitTodaySeconds(habit_id, date_param) catch 0;
+    const streak = habit_manager.getHabitStreak(habit_id, h_row.goal_seconds) catch 0;
 
     const progress_percent: i64 = if (h_row.goal_seconds > 0) @divTrunc(today_seconds * 100, h_row.goal_seconds) else 0;
 
-    try response.json(.{
+    return ctx.json(.{
         .id = h_row.id,
         .name = h_row.name,
         .goal_seconds = h_row.goal_seconds,
@@ -899,82 +818,5 @@ fn handleGetHabitDetail(h: *HttpHandler, request: *httpz.Request, response: *htt
         .today_seconds = today_seconds,
         .streak = streak,
         .progress_percent = progress_percent,
-    }, .{});
+    });
 }
-
-pub const HttpServerManager = struct {
-    server: httpz.Server(*HttpHandler),
-    handler: *HttpHandler,
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator, port: u16, app: *MainApplication) !HttpServerManager {
-        logger.global_logger.info("初始化 HTTP 服务器，端口: {}", .{port});
-
-        const handler = try allocator.create(HttpHandler);
-        errdefer allocator.destroy(handler);
-        handler.* = HttpHandler{ .app = app, .allocator = allocator, .sse_pending = false };
-
-        var server = try httpz.Server(*HttpHandler).init(allocator, .{
-            .address = .localhost(port),
-        }, handler);
-
-        var router = try server.router(.{});
-        router.get("/", handleRoot, .{});
-        router.get("/api/state", handleGetState, .{});
-        router.post("/api/start", handleStart, .{});
-        router.post("/api/pause", handlePause, .{});
-        router.post("/api/reset", handleReset, .{});
-        router.post("/api/mode", handleModeChange, .{});
-        router.get("/api/settings", handleGetSettings, .{});
-        router.post("/api/settings", handleUpdateSettings, .{});
-        router.get("/api/events", handleSSE, .{});
-        router.post("/api/log", handleFrontendLog, .{});
-
-        // 习惯集 API
-        router.get("/api/habit-sets", handleGetHabitSets, .{});
-        router.post("/api/habit-sets", handleCreateHabitSet, .{});
-        router.put("/api/habit-sets/:id", handleUpdateHabitSet, .{});
-        router.delete("/api/habit-sets/:id", handleDeleteHabitSet, .{});
-
-        // 习惯 API
-        router.get("/api/habits", handleGetHabits, .{});
-        router.post("/api/habits", handleCreateHabit, .{});
-        router.put("/api/habits/:id", handleUpdateHabit, .{});
-        router.delete("/api/habits/:id", handleDeleteHabit, .{});
-
-        // 记录 API
-        router.post("/api/sessions", handleCreateSession, .{});
-        router.get("/api/sessions", handleGetSessions, .{});
-        router.get("/api/habits/:id/streak", handleGetHabitStreak, .{});
-        router.get("/api/habits/:id/detail", handleGetHabitDetail, .{});
-
-        // 计时器 API
-        router.post("/api/timer/rest", handleStartRest, .{});
-        router.post("/api/timer/finish", handleFinish, .{});
-        router.get("/api/timer/progress", handleGetProgress, .{});
-
-        logger.global_logger.info("HTTP 服务器路由注册完成", .{});
-
-        return HttpServerManager{
-            .server = server,
-            .handler = handler,
-            .allocator = allocator,
-        };
-    }
-
-    pub fn start(self: *HttpServerManager) !void {
-        logger.global_logger.info("HTTP 服务器开始监听...", .{});
-        try self.server.listen();
-    }
-
-    pub fn stop(self: *HttpServerManager) void {
-        logger.global_logger.info("HTTP 服务器停止中...", .{});
-        self.server.stop();
-    }
-
-    pub fn deinit(self: *HttpServerManager) void {
-        logger.global_logger.info("HTTP 服务器释放资源...", .{});
-        self.server.deinit();
-        self.allocator.destroy(self.handler);
-    }
-};

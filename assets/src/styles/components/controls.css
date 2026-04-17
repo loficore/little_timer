@@ -189,6 +189,12 @@
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 10px 22px color-mix(in oklab, var(--accent-color) 20%, transparent);
   }
 
+  .my-filter-btn-active:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--accent-color) 85%, var(--my-outline));
+    background: linear-gradient(160deg, color-mix(in oklab, var(--accent-color) 88%, transparent) 0%, color-mix(in oklab, var(--accent-color) 96%, transparent) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 12px 26px color-mix(in oklab, var(--accent-color) 28%, transparent);
+  }
+
   .my-filter-btn:disabled {
     opacity: 0.5;
     box-shadow: none;
@@ -227,8 +233,9 @@
   }
 
   html.light-mode .my-tabs {
-    background: color-mix(in oklab, var(--my-surface) 40%, transparent);
-    border-color: color-mix(in oklab, var(--my-outline) 30%, transparent);
+    background: linear-gradient(165deg, color-mix(in oklab, var(--my-surface) 72%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 78%, transparent) 100%);
+    border-color: color-mix(in oklab, var(--my-outline) 52%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 78%, transparent), 0 6px 14px color-mix(in oklab, var(--my-glass-shadow) 38%, transparent);
   }
 
   html.light-mode .my-tab {
@@ -236,41 +243,69 @@
   }
 
   html.light-mode .my-tab:hover:not(.my-tab-active) {
-    background: color-mix(in oklab, var(--my-primary-container) 30%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 44%, transparent) 0%, color-mix(in oklab, var(--my-surface) 78%, transparent) 100%);
     color: var(--my-on-surface);
   }
 
   html.light-mode .my-tab-active {
-    background: color-mix(in oklab, var(--my-primary-container) 80%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 72%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 86%, transparent) 100%);
     color: var(--my-on-primary-container);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight-strong) 72%, transparent), 0 3px 10px color-mix(in oklab, var(--my-glass-shadow) 34%, transparent);
   }
 
   html.light-mode .my-filter-btn {
-    border-color: color-mix(in oklab, var(--my-outline) 58%, transparent);
-    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 88%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 92%, transparent) 100%);
+    border-color: color-mix(in oklab, var(--my-outline) 62%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 80%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 86%, transparent) 100%);
     color: var(--my-on-surface-variant);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 74%, transparent), 0 6px 14px color-mix(in oklab, var(--my-glass-shadow) 35%, transparent);
   }
 
   html.light-mode .my-filter-btn:hover:not(:disabled) {
-    border-color: color-mix(in oklab, var(--my-outline) 78%, transparent);
-    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 94%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 96%, transparent) 100%);
+    border-color: color-mix(in oklab, var(--my-outline) 80%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 84%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 88%, transparent) 100%);
     color: var(--my-on-surface);
   }
 
   html.light-mode .my-filter-btn-active {
-    border-color: color-mix(in oklab, var(--accent-color) 60%, var(--my-outline));
-    background: linear-gradient(160deg, color-mix(in oklab, var(--accent-color) 82%, transparent) 0%, color-mix(in oklab, var(--accent-color) 90%, transparent) 100%);
+    border-color: color-mix(in oklab, var(--accent-color) 68%, var(--my-outline));
+    background: linear-gradient(160deg, color-mix(in oklab, var(--accent-color) 74%, var(--my-surface)) 0%, color-mix(in oklab, var(--accent-color) 84%, transparent) 100%);
     color: #ffffff;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 8px 18px color-mix(in oklab, var(--accent-color) 24%, transparent);
+  }
+
+  html.light-mode .my-filter-btn-active:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--accent-color) 80%, var(--my-outline));
+    background: linear-gradient(160deg, color-mix(in oklab, var(--accent-color) 80%, var(--my-surface)) 0%, color-mix(in oklab, var(--accent-color) 90%, transparent) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 10px 22px color-mix(in oklab, var(--accent-color) 32%, transparent);
+  }
+
+  html.light-mode.light-style-mist .my-tab-active {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 64%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 86%, transparent) 100%);
+  }
+
+  html.light-mode.light-style-mist .my-filter-btn-active {
+    background: linear-gradient(160deg, color-mix(in oklab, var(--accent-color) 68%, var(--my-surface)) 0%, color-mix(in oklab, var(--accent-color) 80%, transparent) 100%);
+  }
+
+  html.webview-stats-lite .my-filter-btn {
+    transition: none;
+    backdrop-filter: blur(10px) saturate(112%);
+    -webkit-backdrop-filter: blur(10px) saturate(112%);
+  }
+
+  html.webview-stats-lite .my-filter-btn-active {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 4px 10px color-mix(in oklab, var(--accent-color) 18%, transparent);
   }
 
   html.light-mode .my-btn-secondary {
-    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 98%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 100%, transparent) 100%);
-    border-color: color-mix(in oklab, var(--my-outline) 46%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 80%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 86%, transparent) 100%);
+    border-color: color-mix(in oklab, var(--my-outline) 58%, transparent);
     color: var(--my-on-surface);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 74%, transparent), 0 6px 14px color-mix(in oklab, var(--my-glass-shadow) 35%, transparent);
   }
 
   html.light-mode .my-btn-secondary:hover {
-    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 99%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 100%, transparent) 100%);
-    border-color: color-mix(in oklab, var(--my-outline) 64%, transparent);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 84%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 89%, transparent) 100%);
+    border-color: color-mix(in oklab, var(--my-outline) 72%, transparent);
   }
 }

@@ -152,7 +152,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
     if (mode === "set") {
       return isSetEdit ? t("modal.edit_set") : t("modal.create_set");
     }
-    return isHabitEdit ? t("modal.edit_habit") : t("modal.add_habit");
+    return isHabitEdit ? t("modal.edit_habit") : t("habit.add_habit");
   };
 
   const getSubmitText = () => {

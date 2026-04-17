@@ -16,6 +16,7 @@ export const STORAGE_KEYS = {
   WALLPAPER_DEBUG: "debug_wallpaper",
   LAYOUT_DENSITY: "layout_density",
   TIME_DISPLAY_STYLE: "time_display_style",
+  LIGHT_STYLE: "lt_light_style",
 } as const;
 
 // 布局密度选项

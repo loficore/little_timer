@@ -14,17 +14,19 @@ interface CountdownSettingsProps {
   onChange: (config: any) => void;
   /** 当非倒计时模式时隐藏循环相关配置 */
   showLoopControls?: boolean;
+  isAnimated?: boolean;
 }
 
 export const CountdownSettings = ({
   config,
   onChange,
   showLoopControls = true,
+  isAnimated = true,
 }: CountdownSettingsProps) => {
   return (
     <div
-      className="space-y-4 sm:space-y-6 animate-slideUp"
-      style={{ animationDelay: "0.3s", animationFillMode: "both" }}
+      className={`space-y-4 sm:space-y-6 ${isAnimated ? "animate-slideUp" : ""}`}
+      style={isAnimated ? { animationDelay: "0.3s", animationFillMode: "both" } : undefined}
     >
       <SettingItem label={t("settings.countdown.duration")}>
         <TimeInput

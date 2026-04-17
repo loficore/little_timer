@@ -3,9 +3,10 @@ import { useState, useEffect, useRef, useMemo } from "preact/hooks";
 import { Header } from "./components/Header";
 import { t } from "./utils/i18n";
 import { getAPIClient } from "./utils/apiClientSingleton";
-import { formatDurationShort, formatDuration, getToday, getDaysAgo } from "./utils/formatters";
+import { getToday, getDaysAgo } from "./utils/formatters";
 import type { ApexOptions, ApexCharts as ApexChartsClass } from "apexcharts";
-import { isPerfDebugEnabled, logPerf } from "./utils/logger";
+import type { Chart as ChartJsClass, ChartConfiguration } from "chart.js";
+import { isPerfDebugEnabled, isWebViewRuntime, logError, logPerf } from "./utils/logger";
 
 interface StatsPageProps {
   onBackClick: () => void;
@@ -21,6 +22,11 @@ interface Session {
   habit_id: number;
   duration_seconds: number;
   date: string;
+}
+
+interface PerformanceMemoryInfo {
+  usedJSHeapSize: number;
+  totalJSHeapSize: number;
 }
 
 type TimeRange = "today" | "week" | "month" | "custom";
@@ -41,24 +47,121 @@ const parseHabitId = (raw: unknown): number | null => {
   return null;
 };
 
-const getIsWebView = (): boolean => {
-  if (typeof window === "undefined") return false;
-  return !!window.webui;
+const getIsWebView = (): boolean => isWebViewRuntime();
+
+const getPerformanceMemory = (): PerformanceMemoryInfo | null => {
+  const memory = (performance as Performance & { memory?: PerformanceMemoryInfo }).memory;
+  return memory ?? null;
+};
+
+const formatMinutesAsHoursAndMinutes = (totalMinutes: number): string => {
+  const numericMinutes = Number(totalMinutes);
+  const safeMinutes = Math.max(0, Number.isFinite(numericMinutes) ? Math.floor(numericMinutes) : 0);
+  const hours = Math.floor(safeMinutes / 60);
+  const minutes = safeMinutes % 60;
+  return `${hours}${t("common.hours")} ${minutes}${t("common.minutes")}`;
+};
+
+const formatSecondsAsHoursAndMinutes = (totalSeconds: number): string => {
+  const numericSeconds = Number(totalSeconds);
+  const safeSeconds = Math.max(0, Number.isFinite(numericSeconds) ? Math.floor(numericSeconds) : 0);
+  const totalMinutes = Math.floor(safeSeconds / 60);
+  return formatMinutesAsHoursAndMinutes(totalMinutes);
 };
 
 export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) => {
   const [timeRange, setTimeRange] = useState<TimeRange>("week");
+  const [uiTimeRange, setUiTimeRange] = useState<TimeRange>("week");
   const [habits, setHabits] = useState<Habit[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedHabitId, setSelectedHabitId] = useState<number | null>(null);
+  const [uiSelectedHabitId, setUiSelectedHabitId] = useState<number | null>(null);
   
   const pieChartRef = useRef<HTMLDivElement>(null);
-  const barChartRef = useRef<HTMLDivElement>(null);
+  const barChartCanvasRef = useRef<HTMLCanvasElement>(null);
   const pieChartInstanceRef = useRef<ApexChartsClass | null>(null);
-  const barChartInstanceRef = useRef<ApexChartsClass | null>(null);
+  const barChartInstanceRef = useRef<ChartJsClass<"bar"> | null>(null);
   const ApexCtorRef = useRef<typeof ApexChartsClass | null>(null);
+  const ChartJsCtorRef = useRef<typeof import("chart.js").Chart | null>(null);
+  const ChartJsRegisteredRef = useRef(false);
   const isWebViewRef = useRef(getIsWebView());
+  const isMountedRef = useRef(true);
+  const chartRenderVersionRef = useRef(0);
+  const pieLastThemeModeRef = useRef<"light" | "dark" | null>(null);
+  const pieEmptyStateRef = useRef(true);
+  const pieUpdateQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const barUpdateQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const statsScrollRef = useRef<HTMLDivElement>(null);
+  const isScrollingRef = useRef(false);
+  const scrollResumeTimerRef = useRef<number | null>(null);
+  const timeRangeRafRef = useRef<number | null>(null);
+  const habitFilterRafRef = useRef<number | null>(null);
+
+  const setChartInteractionPaused = (paused: boolean) => {
+    if (isScrollingRef.current === paused) return;
+    isScrollingRef.current = paused;
+
+    try {
+      if (pieChartInstanceRef.current) {
+        pieChartInstanceRef.current.updateOptions({
+          tooltip: {
+            enabled: !paused,
+            followCursor: false,
+          },
+        }, false, false);
+      }
+    } catch {
+      // 忽略运行期瞬态错误，下一轮渲染会覆盖。
+    }
+
+    try {
+      const barChart = barChartInstanceRef.current;
+      if (barChart) {
+        if (barChart.options.plugins?.tooltip) {
+          barChart.options.plugins.tooltip.enabled = !paused;
+        }
+        barChart.options.events = paused
+          ? ["click", "touchstart", "touchmove"]
+          : ["mousemove", "mouseout", "click", "touchstart", "touchmove"];
+        barChart.update("none");
+      }
+    } catch {
+      // 忽略运行期瞬态错误，下一轮渲染会覆盖。
+    }
+  };
+
+  const enqueueChartTask = (
+    queueRef: { current: Promise<void> },
+    task: () => Promise<void>,
+  ): Promise<void> => {
+    queueRef.current = queueRef.current
+      .catch(() => {
+        // 吞掉上一轮异常，避免队列中断。
+      })
+      .then(task);
+    return queueRef.current;
+  };
+
+  const chartAnimation = useMemo(() => {
+    if (isWebViewRef.current) {
+      return {
+        enabled: true,
+        easing: "easeinout" as const,
+        speed: 160,
+        animateGradually: { enabled: true, delay: 16 },
+        dynamicAnimation: { enabled: true, speed: 120 },
+      };
+    }
+
+    return {
+      enabled: true,
+      easing: "easeinout" as const,
+      speed: 320,
+      animateGradually: { enabled: true, delay: 36 },
+      dynamicAnimation: { enabled: true, speed: 220 },
+    };
+  }, []);
 
   const loadApexCtor = async (): Promise<typeof ApexChartsClass> => {
     if (!ApexCtorRef.current) {
@@ -68,14 +171,47 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
     return ApexCtorRef.current;
   };
 
+  const loadChartJsCtor = async (): Promise<typeof import("chart.js").Chart> => {
+    if (!ChartJsCtorRef.current) {
+      const ChartJsModule = await import("chart.js");
+      if (!ChartJsRegisteredRef.current) {
+        ChartJsModule.Chart.register(...ChartJsModule.registerables);
+        ChartJsRegisteredRef.current = true;
+      }
+      ChartJsCtorRef.current = ChartJsModule.Chart;
+    }
+    return ChartJsCtorRef.current;
+  };
+
+  const applyTimeRange = (range: TimeRange) => {
+    setUiTimeRange((prev) => (prev === range ? prev : range));
+    if (timeRangeRafRef.current !== null) {
+      cancelAnimationFrame(timeRangeRafRef.current);
+    }
+
+    timeRangeRafRef.current = requestAnimationFrame(() => {
+      setTimeRange((prev) => (prev === range ? prev : range));
+      timeRangeRafRef.current = null;
+    });
+  };
+
+  const applyHabitFilter = (habitId: number | null) => {
+    setUiSelectedHabitId((prev) => (prev === habitId ? prev : habitId));
+    if (habitFilterRafRef.current !== null) {
+      cancelAnimationFrame(habitFilterRafRef.current);
+    }
+
+    habitFilterRafRef.current = requestAnimationFrame(() => {
+      setSelectedHabitId((prev) => (prev === habitId ? prev : habitId));
+      habitFilterRafRef.current = null;
+    });
+  };
+
   const loadData = async () => {
     const startAt = performance.now();
     setIsLoading(true);
     try {
       const client = getAPIClient();
-      const habitsData = await client.getHabits();
-      setHabits(Array.isArray(habitsData) ? habitsData : []);
-      
       let startDate = "";
       let endDate = "";
       const today = getToday();
@@ -89,18 +225,35 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
         startDate = getDaysAgo(30);
         endDate = today;
       }
-      
-      if (startDate && endDate) {
-        const sessionsData = await client.getSessions(undefined, startDate, endDate);
-        setSessions(Array.isArray(sessionsData) ? sessionsData : []);
-      } else {
-        setSessions([]);
+
+      const habitsStartAt = performance.now();
+      const habitsData = await client.getHabits();
+      const habitsDurationMs = Math.round(performance.now() - habitsStartAt);
+
+      const sessionsStartAt = performance.now();
+      const sessionsData = startDate && endDate
+        ? await client.getSessions(undefined, startDate, endDate)
+        : [];
+      const sessionsDurationMs = Math.round(performance.now() - sessionsStartAt);
+
+      setHabits(Array.isArray(habitsData) ? habitsData : []);
+      setSessions(Array.isArray(sessionsData) ? sessionsData : []);
+
+      const memoryInfo: Record<string, number> = {};
+      const perfMemory = getPerformanceMemory();
+      if (perfMemory) {
+        memoryInfo.usedJSHeapSizeMB = Math.round(perfMemory.usedJSHeapSize / 1048576);
+        memoryInfo.totalJSHeapSizeMB = Math.round(perfMemory.totalJSHeapSize / 1048576);
       }
 
       logPerf("Stats.loadData.success", {
         timeRange,
-        habits: Array.isArray(habitsData) ? habitsData.length : 0,
-        durationMs: Math.round(performance.now() - startAt),
+        habitsCount: Array.isArray(habitsData) ? habitsData.length : 0,
+        sessionsCount: Array.isArray(sessionsData) ? sessionsData.length : 0,
+        apiGetHabitsMs: habitsDurationMs,
+        apiGetSessionsMs: sessionsDurationMs,
+        totalDurationMs: Math.round(performance.now() - startAt),
+        ...memoryInfo,
       });
     } catch (e) {
       console.error("[Stats] loadData error:", e);
@@ -119,6 +272,14 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
 
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
+      chartRenderVersionRef.current += 1;
+      if (timeRangeRafRef.current !== null) {
+        cancelAnimationFrame(timeRangeRafRef.current);
+      }
+      if (habitFilterRafRef.current !== null) {
+        cancelAnimationFrame(habitFilterRafRef.current);
+      }
       pieChartInstanceRef.current?.destroy();
       barChartInstanceRef.current?.destroy();
       pieChartInstanceRef.current = null;
@@ -183,17 +344,42 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
   useEffect(() => {
     if (isLoading) return;
 
+    const renderVersion = chartRenderVersionRef.current + 1;
+    chartRenderVersionRef.current = renderVersion;
+    const isRenderActive = () => {
+      return isMountedRef.current && chartRenderVersionRef.current === renderVersion;
+    };
+
     const updateStartAt = performance.now();
+    const isLightMode = typeof document !== "undefined" && document.documentElement.classList.contains("light-mode");
+    const chartTextColor = isLightMode ? "#4a3b2b" : "#f3f4f6";
+    const chartMutedTextColor = isLightMode ? "#6b5d4f" : "#9ca3af";
+    const chartGridColor = isLightMode ? "#cbb8a0" : "#374151";
+    const chartThemeMode: "light" | "dark" = isLightMode ? "light" : "dark";
 
     const renderPieChart = async () => {
       const pieStartAt = performance.now();
-      if (!pieChartRef.current) return;
+      if (!isRenderActive()) return;
 
-      if (!pieData.canShow) {
+      if (!pieChartRef.current || !pieChartRef.current.isConnected) {
+        // 饼图容器可能因快速切换被卸载，先销毁旧实例避免后续操作悬挂 DOM。
         pieChartInstanceRef.current?.destroy();
         pieChartInstanceRef.current = null;
+        pieLastThemeModeRef.current = null;
+        pieEmptyStateRef.current = true;
         return;
       }
+
+      if (!pieData.canShow) {
+        pieEmptyStateRef.current = true;
+        // 无数据或筛选态下直接销毁，避免后续快速切换时在旧容器上 update。
+        pieChartInstanceRef.current?.destroy();
+        pieChartInstanceRef.current = null;
+        pieLastThemeModeRef.current = null;
+        return;
+      }
+
+      pieEmptyStateRef.current = false;
 
       const totalSeconds = pieData.series.reduce((sum, value) => sum + value, 0);
       const pieOptions: ApexOptions = {
@@ -203,7 +389,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
           type: "donut",
           height: 300,
           background: "transparent",
-          animations: { enabled: !isWebViewRef.current },
+          animations: chartAnimation,
         },
         colors: pieData.colors,
         plotOptions: {
@@ -214,29 +400,42 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
                 name: { show: true, color: "#fff" },
                 value: {
                   show: true,
-                  color: "#fff",
-                  formatter: (val: number) => formatDuration(val),
+                  color: chartTextColor,
+                  formatter: (val: number) => formatSecondsAsHoursAndMinutes(val),
                 },
                 total: {
                   show: true,
                   label: "总计",
-                  color: "#fff",
-                  formatter: () => formatDuration(totalSeconds),
+                  color: chartTextColor,
+                  formatter: () => formatSecondsAsHoursAndMinutes(totalSeconds),
                 },
               },
             },
           },
         },
-        legend: { position: "bottom", labels: { colors: "#fff" } },
+        legend: { position: "bottom", labels: { colors: chartTextColor } },
         dataLabels: { enabled: false },
         stroke: { show: false },
-        theme: { mode: "dark" },
+        theme: { mode: chartThemeMode },
+        tooltip: {
+          theme: chartThemeMode,
+          enabled: !isScrollingRef.current,
+          shared: false,
+          intersect: false,
+          followCursor: false,
+          y: {
+            formatter: (val: number) => formatSecondsAsHoursAndMinutes(val),
+          },
+        },
       };
 
       if (!pieChartInstanceRef.current) {
         const ApexCharts = await loadApexCtor();
+        if (!isRenderActive() || !pieChartRef.current) return;
         pieChartInstanceRef.current = new ApexCharts(pieChartRef.current, pieOptions);
         await pieChartInstanceRef.current.render();
+        pieLastThemeModeRef.current = chartThemeMode;
+        if (!isRenderActive()) return;
         logPerf("Stats.chart.pie.initialRender", {
           points: pieData.series.length,
           durationMs: Math.round(performance.now() - pieStartAt),
@@ -244,8 +443,35 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
         return;
       }
 
-      pieChartInstanceRef.current.updateOptions(pieOptions, false, false);
-      pieChartInstanceRef.current.updateSeries(pieData.series, false);
+      if (!isRenderActive() || !pieChartRef.current.isConnected) {
+        pieChartInstanceRef.current?.destroy();
+        pieChartInstanceRef.current = null;
+        pieLastThemeModeRef.current = null;
+        pieEmptyStateRef.current = true;
+        return;
+      }
+
+      try {
+        if (pieLastThemeModeRef.current !== chartThemeMode || pieEmptyStateRef.current) {
+          pieChartInstanceRef.current.updateOptions({
+            labels: pieData.labels,
+            colors: pieData.colors,
+            legend: { labels: { colors: chartTextColor } },
+            theme: { mode: chartThemeMode },
+            tooltip: { theme: chartThemeMode },
+          }, false, false);
+          pieLastThemeModeRef.current = chartThemeMode;
+        }
+        pieChartInstanceRef.current.updateSeries(pieData.series, true);
+      } catch (error) {
+        // 组件切换时 ApexCharts 可能在已销毁节点上更新，重置实例避免后续连续异常。
+        pieChartInstanceRef.current?.destroy();
+        pieChartInstanceRef.current = null;
+        pieLastThemeModeRef.current = null;
+        pieEmptyStateRef.current = true;
+        if (!isRenderActive()) return;
+        throw error;
+      }
       logPerf("Stats.chart.pie.update", {
         points: pieData.series.length,
         durationMs: Math.round(performance.now() - pieStartAt),
@@ -254,58 +480,98 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
 
     const renderBarChart = async () => {
       const barStartAt = performance.now();
-      if (!barChartRef.current) return;
+      if (!isRenderActive()) return;
 
-      if (barData.seriesData.length === 0) {
+      if (!barChartCanvasRef.current || !barChartCanvasRef.current.isConnected) {
+        // 柱图容器在空数据或快速切换下会被卸载，旧实例必须清理。
         barChartInstanceRef.current?.destroy();
         barChartInstanceRef.current = null;
         return;
       }
 
-      const barOptions: ApexOptions = {
-        series: [{ name: "专注分钟", data: barData.seriesData }],
-        chart: {
-          type: "bar",
-          height: 350,
-          background: "transparent",
-          toolbar: { show: false },
-          animations: { enabled: !isWebViewRef.current },
-        },
-        plotOptions: {
-          bar: {
-            borderRadius: 4,
-            columnWidth: "60%",
-            horizontal: false,
-          },
-        },
-        xaxis: {
-          categories: barData.categories,
-          labels: {
-            style: { colors: "#9ca3af" },
-          },
-        },
-        yaxis: {
-          labels: {
-            style: { colors: "#9ca3af" },
-            formatter: (val: number) => `${val}m`,
-          },
-        },
-        colors: ["#6366f1"],
-        grid: { borderColor: "#374151" },
-        theme: { mode: "dark" },
-        responsive: [{
-          breakpoint: 480,
-          options: {
-            chart: { height: 200 },
-            plotOptions: { bar: { columnWidth: "80%" } },
-          },
-        }],
-      };
+      const barAnimationDuration = isWebViewRef.current ? 180 : 300;
+      const barAnimationEasing = "easeOutQuart" as const;
+      const barEvents: (keyof HTMLElementEventMap)[] | undefined = isWebViewRef.current
+        ? (isScrollingRef.current
+          ? ["click", "touchstart", "touchmove"]
+          : ["mousemove", "mouseout", "click", "touchstart", "touchmove"])
+        : undefined;
+
+      if (barData.seriesData.length === 0) {
+        // 对应 UI 会移除 canvas，销毁实例避免指向旧 canvas 导致不出图。
+        barChartInstanceRef.current?.destroy();
+        barChartInstanceRef.current = null;
+        return;
+      }
+
+      if (
+        barChartInstanceRef.current
+        && barChartInstanceRef.current.canvas !== barChartCanvasRef.current
+      ) {
+        // 新旧 canvas 已替换（条件渲染），销毁旧实例强制在新容器重建。
+        barChartInstanceRef.current.destroy();
+        barChartInstanceRef.current = null;
+      }
 
       if (!barChartInstanceRef.current) {
-        const ApexCharts = await loadApexCtor();
-        barChartInstanceRef.current = new ApexCharts(barChartRef.current, barOptions);
-        await barChartInstanceRef.current.render();
+        const ChartCtor = await loadChartJsCtor();
+        if (!isRenderActive() || !barChartCanvasRef.current) return;
+
+        const config: ChartConfiguration<"bar"> = {
+          type: "bar",
+          data: {
+            labels: barData.categories,
+            datasets: [
+              {
+                label: t("stats.total_focus_time"),
+                data: barData.seriesData,
+                backgroundColor: "#6366f1",
+                borderRadius: 4,
+                maxBarThickness: 42,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+              duration: barAnimationDuration,
+              easing: barAnimationEasing,
+            },
+            plugins: {
+              legend: {
+                display: false,
+                labels: { color: chartMutedTextColor },
+              },
+              tooltip: {
+                enabled: !isScrollingRef.current,
+                callbacks: {
+                  label: (context) => {
+                    const value = Number(context.raw || 0);
+                    return `${context.dataset.label || ""}: ${formatMinutesAsHoursAndMinutes(value)}`;
+                  },
+                },
+              },
+            },
+            events: barEvents,
+            scales: {
+              x: {
+                grid: { color: chartGridColor },
+                ticks: { color: chartMutedTextColor },
+              },
+              y: {
+                grid: { color: chartGridColor },
+                ticks: {
+                  color: chartMutedTextColor,
+                  callback: (value) => formatMinutesAsHoursAndMinutes(Number(value || 0)),
+                },
+              },
+            },
+          },
+        };
+
+        barChartInstanceRef.current = new ChartCtor(barChartCanvasRef.current, config);
+        if (!isRenderActive()) return;
         logPerf("Stats.chart.bar.initialRender", {
           points: barData.seriesData.length,
           durationMs: Math.round(performance.now() - barStartAt),
@@ -313,25 +579,77 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
         return;
       }
 
-      barChartInstanceRef.current.updateOptions(barOptions, false, false);
-      barChartInstanceRef.current.updateSeries([{ name: "专注分钟", data: barData.seriesData }], false);
+      if (!isRenderActive() || !barChartCanvasRef.current.isConnected) {
+        barChartInstanceRef.current?.destroy();
+        barChartInstanceRef.current = null;
+        return;
+      }
+
+      try {
+        const barChart = barChartInstanceRef.current;
+        barChart.data.labels = barData.categories;
+        barChart.data.datasets[0].label = t("stats.total_focus_time");
+        barChart.data.datasets[0].data = barData.seriesData;
+
+        const xScale = barChart.options.scales?.x;
+        const yScale = barChart.options.scales?.y;
+        if (xScale) {
+          xScale.grid = { color: chartGridColor };
+          xScale.ticks = { color: chartMutedTextColor };
+        }
+        if (yScale) {
+          yScale.grid = { color: chartGridColor };
+          yScale.ticks = {
+            color: chartMutedTextColor,
+            callback: (value) => formatMinutesAsHoursAndMinutes(Number(value || 0)),
+          };
+        }
+
+        barChart.update();
+      } catch (error) {
+        // 图表更新失败时重建实例，避免后续状态持续损坏。
+        barChartInstanceRef.current?.destroy();
+        barChartInstanceRef.current = null;
+        if (!isRenderActive()) return;
+        throw error;
+      }
       logPerf("Stats.chart.bar.update", {
         points: barData.seriesData.length,
         durationMs: Math.round(performance.now() - barStartAt),
       });
     };
 
-    void renderPieChart();
-    void renderBarChart();
+    void enqueueChartTask(pieUpdateQueueRef, async () => {
+      if (!isRenderActive()) return;
+      await renderPieChart();
+    }).catch((error) => {
+      if (!isRenderActive()) return;
+      logError("统计页饼图更新失败", error instanceof Error ? error : undefined);
+    });
+    void enqueueChartTask(barUpdateQueueRef, async () => {
+      if (!isRenderActive()) return;
+      await renderBarChart();
+    }).catch((error) => {
+      if (!isRenderActive()) return;
+      logError("统计页柱图更新失败", error instanceof Error ? error : undefined);
+    });
 
     requestAnimationFrame(() => {
+      if (!isRenderActive()) return;
+      const memoryInfo: Record<string, number> = {};
+      const perfMemory = getPerformanceMemory();
+      if (perfMemory) {
+        memoryInfo.usedJSHeapSizeMB = Math.round(perfMemory.usedJSHeapSize / 1048576);
+        memoryInfo.totalJSHeapSizeMB = Math.round(perfMemory.totalJSHeapSize / 1048576);
+      }
       logPerf("Stats.effect.frame", {
         sessions: sessions.length,
         filteredSessions: filteredSessions.length,
         totalEffectMs: Math.round(performance.now() - updateStartAt),
+        ...memoryInfo,
       });
     });
-  }, [isLoading, pieData, barData]);
+  }, [isLoading, pieData, barData, chartAnimation]);
 
   useEffect(() => {
     if (!isPerfDebugEnabled()) return;
@@ -344,6 +662,56 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
       barPoints: barData.seriesData.length,
     });
   }, [timeRange, selectedHabitId, sessions.length, filteredSessions.length, pieData.series.length, barData.seriesData.length]);
+
+  useEffect(() => {
+    if (!isPerfDebugEnabled()) return;
+    const scrollEl = statsScrollRef.current;
+    if (!scrollEl) return;
+
+    let rafId: number | null = null;
+    let wheelStartAt = 0;
+
+    const onWheel = () => {
+      if (scrollResumeTimerRef.current !== null) {
+        clearTimeout(scrollResumeTimerRef.current);
+        scrollResumeTimerRef.current = null;
+      }
+
+      setChartInteractionPaused(true);
+      wheelStartAt = performance.now();
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      rafId = requestAnimationFrame(() => {
+        const durationMs = Math.round(performance.now() - wheelStartAt);
+        if (durationMs >= 24) {
+          logPerf("Stats.scroll.frame", {
+            durationMs,
+            scrollTop: Math.round(scrollEl.scrollTop),
+          });
+        }
+        rafId = null;
+      });
+
+      scrollResumeTimerRef.current = window.setTimeout(() => {
+        setChartInteractionPaused(false);
+        scrollResumeTimerRef.current = null;
+      }, 180);
+    };
+
+    scrollEl.addEventListener("wheel", onWheel, { passive: true });
+    return () => {
+      scrollEl.removeEventListener("wheel", onWheel);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      if (scrollResumeTimerRef.current !== null) {
+        clearTimeout(scrollResumeTimerRef.current);
+        scrollResumeTimerRef.current = null;
+      }
+      setChartInteractionPaused(false);
+    };
+  }, []);
 
   const totalSeconds = useMemo(() => {
     return filteredSessions.reduce((sum, session) => sum + (session.duration_seconds || 0), 0);
@@ -360,14 +728,16 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
         onBackClick={onBackClick}
       />
 
-      <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-6 min-h-0">
+      <div ref={statsScrollRef} className="flex-1 overflow-y-auto px-4 pb-4 space-y-6 min-h-0">
         <div className="my-surface-panel flex flex-col gap-4 p-4">
           <div className="flex flex-wrap gap-2">
             {(["today", "week", "month"] as TimeRange[]).map((range) => (
               <button
                 key={range}
-                className={`my-filter-btn ${timeRange === range ? "my-filter-btn-active" : ""}`}
-                onClick={() => setTimeRange(range)}
+                className={`my-filter-btn ${uiTimeRange === range ? "my-filter-btn-active" : ""}`}
+                style={{ touchAction: "manipulation" }}
+                onPointerDown={() => applyTimeRange(range)}
+                onClick={() => applyTimeRange(range)}
               >
                 {range === "today" ? t("stats.today") : range === "week" ? t("stats.this_week") : t("stats.this_month")}
               </button>
@@ -378,16 +748,20 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
 
           <div className="flex gap-2 overflow-x-auto pb-1">
             <button
-              className={`my-filter-btn ${selectedHabitId === null ? "my-filter-btn-active" : ""}`}
-              onClick={() => setSelectedHabitId(null)}
+              className={`my-filter-btn ${uiSelectedHabitId === null ? "my-filter-btn-active" : ""}`}
+              style={{ touchAction: "manipulation" }}
+              onPointerDown={() => applyHabitFilter(null)}
+              onClick={() => applyHabitFilter(null)}
             >
               {t("stats.all")}
             </button>
             {habits.map((h) => (
               <button
                 key={h.id}
-                className={`my-filter-btn ${selectedHabitId === h.id ? "my-filter-btn-active" : ""}`}
-                onClick={() => setSelectedHabitId(h.id)}
+                className={`my-filter-btn ${uiSelectedHabitId === h.id ? "my-filter-btn-active" : ""}`}
+                style={{ touchAction: "manipulation" }}
+                onPointerDown={() => applyHabitFilter(h.id)}
+                onClick={() => applyHabitFilter(h.id)}
               >
                 <span className="w-2 h-2 rounded-full mr-1" style={{ backgroundColor: h.color }} />
                 {h.name}
@@ -400,7 +774,7 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
           <div className="card my-surface-card">
             <div className="card-body p-4">
               <h3 className="text-sm text-base-content/60">{t("stats.total_focus_time")}</h3>
-              <p className="text-2xl font-bold text-primary">{formatDurationShort(totalSeconds)}</p>
+              <p className="text-2xl font-bold text-primary">{formatSecondsAsHoursAndMinutes(totalSeconds)}</p>
             </div>
           </div>
           <div className="card my-surface-card">
@@ -442,7 +816,9 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
                 {t("stats.no_data")}
               </div>
             ) : (
-              <div ref={barChartRef} className="w-full"></div>
+              <div className="relative h-[300px] w-full">
+                <canvas ref={barChartCanvasRef} className="h-full w-full"></canvas>
+              </div>
             )}
           </div>
         </div>

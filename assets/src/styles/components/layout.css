@@ -56,6 +56,27 @@
     background: linear-gradient(90deg, color-mix(in oklab, var(--my-outline) 18%, transparent) 0%, transparent 100%);
   }
 
+  html.light-mode .my-topbar {
+    background: var(--my-surface-strong);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 48%, transparent), var(--my-elevation-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html.light-mode .my-sidebar {
+    background: var(--my-surface);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 44%, transparent), var(--my-elevation-1);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html.light-mode .my-bottom-nav {
+    background: var(--my-surface-strong);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 42%, transparent), var(--my-elevation-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
   .my-sidebar-nav-btn {
     @apply w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-left;
     color: var(--my-on-surface-variant);
@@ -94,7 +115,8 @@
 
   .my-clock-glass > div {
     margin: 0 !important;
-    padding-top: 0.15em;
+    padding-top: 0;
+    text-align: center;
   }
 
   .my-bottom-nav {
@@ -154,8 +176,10 @@
 
   html.light-mode .my-clock-glass {
     border: 1px solid color-mix(in oklab, var(--my-outline) 46%, transparent);
-    background: linear-gradient(160deg, rgba(255, 255, 255, 0.94) 0%, rgba(230, 234, 240, 0.84) 100%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48), inset 0 -1px 0 rgba(0, 0, 0, 0.04), 0 10px 22px rgba(0, 0, 0, 0.08);
+    background: var(--my-surface-strong);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 46%, transparent), var(--my-elevation-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     min-height: 80px;
     width: 92vw;
     max-width: 560px;
@@ -166,6 +190,25 @@
 
   html.light-mode .my-clock-glass > div {
     margin: 0 !important;
-    padding-top: 0.15em;
+    padding-top: 0;
+    text-align: center;
+  }
+
+  html.light-mode .my-sidebar-nav-btn:hover {
+    background: color-mix(in oklab, var(--my-primary-container) 54%, var(--my-surface));
+  }
+
+  html.light-mode .my-sidebar-nav-btn.is-active {
+    background: color-mix(in oklab, var(--my-primary-container) 76%, var(--my-surface-strong));
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 36%, transparent), var(--my-elevation-1);
+  }
+
+  html.light-mode .my-bottom-nav-item:hover {
+    background: color-mix(in oklab, var(--my-primary-container) 54%, var(--my-surface));
+  }
+
+  html.light-mode .my-bottom-nav-item.active {
+    background: color-mix(in oklab, var(--my-primary-container) 76%, var(--my-surface-strong));
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 34%, transparent), var(--my-elevation-1);
   }
 }

@@ -23,16 +23,12 @@ export const formatDuration = (totalSeconds: number): string => {
 /**
  * 格式化持续时间为简写格式
  * 用于统计卡片和列表显示
- * 例如: 2h 30m, 45m
+ * 例如: 2h 30min, 0h 45min
  */
 export const formatDurationShort = (totalSeconds: number): string => {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  return `${minutes}m`;
+  return `${hours}h ${minutes}min`;
 };
 
 /**

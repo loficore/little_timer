@@ -533,7 +533,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
                 <div className="flex flex-1 flex-col items-center justify-center">
                 <div className="my-clock-glass mb-3 sm:mb-4">
-                  <div className={`text-[clamp(3.2rem,13vw,8rem)] leading-none font-mono font-semibold time-transition ${timeDisplayStyle === "seven_segment" ? "time-style-seven-segment" : "time-style-classic"} ${timeDisplayStyle === "classic" ? (isFinished ? "text-success" : (isResting ? "text-warning" : "text-primary")) : ""} ${timeStateClass} ${isRunning && timeDisplayStyle === "seven_segment" ? "time-running-segment" : ""}`}>
+                                    <div className={`text-[clamp(3.2rem,13vw,8rem)] leading-none font-mono font-semibold time-transition ${timeDisplayStyle === "seven_segment" ? "time-style-seven-segment" : "time-style-classic"} ${timeStateClass} ${isRunning && timeDisplayStyle === "seven_segment" ? "time-running-segment" : ""}`}>
                       {timeDisplayStyle === "seven_segment" ? (
                           <SevenSegmentDisplay value={timeDisplay} />
                       ) : (

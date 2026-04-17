@@ -6,17 +6,19 @@ interface StopwatchSettingsProps {
   config: {
     max_seconds: number;
   };
+  isAnimated?: boolean;
   onChange: (config: any) => void;
 }
 
 export const StopwatchSettings = ({
   config,
   onChange,
+  isAnimated = true,
 }: StopwatchSettingsProps) => {
   return (
     <div
-      className="space-y-4 sm:space-y-6 animate-slideUp"
-      style={{ animationDelay: "0.3s", animationFillMode: "both" }}
+      className={`space-y-4 sm:space-y-6 ${isAnimated ? "animate-slideUp" : ""}`}
+      style={isAnimated ? { animationDelay: "0.3s", animationFillMode: "both" } : undefined}
     >
       <SettingItem label={t("settings.stopwatch.max_hours")}>
         <NumberInput

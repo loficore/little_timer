@@ -1,4 +1,6 @@
 import type { FunctionalComponent } from "preact";
+import { memo } from "preact/compat";
+import { useMemo } from "preact/hooks";
 
 type Segment = "a" | "b" | "c" | "d" | "e" | "f" | "g";
 
@@ -23,9 +25,12 @@ interface SevenSegmentDisplayProps {
 
 const SEGMENT_ORDER: Segment[] = ["a", "b", "c", "d", "e", "f", "g"];
 
-const SevenSegmentDigit: FunctionalComponent<{ char: string }> = ({ char }) => {
-  const onSegments = DIGIT_SEGMENTS[char] ?? [];
+interface SevenSegmentDigitProps {
+  char: string;
+  onSegments: Segment[];
+}
 
+const SevenSegmentDigit: FunctionalComponent<SevenSegmentDigitProps> = memo(({ char, onSegments }) => {
   if (char === ":") {
     return (
       <span className="seven-segment-char seven-segment-colon" aria-hidden="true">
@@ -45,17 +50,26 @@ const SevenSegmentDigit: FunctionalComponent<{ char: string }> = ({ char }) => {
       ))}
     </span>
   );
-};
+});
 
-export const SevenSegmentDisplay: FunctionalComponent<SevenSegmentDisplayProps> = ({
-  value,
-  className = "",
-}) => {
+export const SevenSegmentDisplay: FunctionalComponent<SevenSegmentDisplayProps> = memo(({ value, className = "" }) => {
+  const digits = useMemo(() => Array.from(value), [value]);
+
   return (
     <span className={`seven-segment-display ${className}`} role="img" aria-label={value}>
-      {Array.from(value).map((char, index) => (
-        <SevenSegmentDigit key={`${char}-${index}`} char={char} />
-      ))}
+      {digits.map((char, index) => {
+        const onSegments = useMemo(
+          () => DIGIT_SEGMENTS[char] ?? [],
+          [char]
+        );
+        return (
+          <SevenSegmentDigit
+            key={`${char}-${index}`}
+            char={char}
+            onSegments={onSegments}
+          />
+        );
+      })}
     </span>
   );
-};
+});

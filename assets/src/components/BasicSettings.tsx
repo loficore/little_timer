@@ -2,6 +2,8 @@ import { SettingItem } from "./SettingItem";
 import { SelectInput } from "./SelectInput";
 import { WallpaperSelector } from "./WallpaperSelector";
 import { t } from "../utils/i18n";
+import { setPerfDebugEnabled } from "../utils/logger";
+import { useState, useEffect } from "preact/hooks";
 
 interface BasicSettingsProps {
   config: {
@@ -16,11 +18,39 @@ interface BasicSettingsProps {
     sound_volume: number;
     layout_density?: string;
     time_display_style?: string;
+    light_style?: string;
+    debug_mode?: boolean;
   };
+  isAnimated?: boolean;
   onChange: (config: any) => void;
 }
 
-export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
+const DEBUG_STORAGE_KEY = "lt_debug_perf";
+
+interface PerformanceMemoryInfo {
+  usedJSHeapSize: number;
+  totalJSHeapSize: number;
+}
+
+const getPerformanceMemory = (): PerformanceMemoryInfo | null => {
+  const memory = (performance as Performance & { memory?: PerformanceMemoryInfo }).memory;
+  return memory ?? null;
+};
+
+const saveDebugMode = (enabled: boolean) => {
+  if (typeof window === "undefined") return;
+  try {
+    if (enabled) {
+      localStorage.setItem(DEBUG_STORAGE_KEY, "1");
+    } else {
+      localStorage.removeItem(DEBUG_STORAGE_KEY);
+    }
+  } catch {
+    // 忽略
+  }
+};
+
+export const BasicSettings = ({ config, onChange, isAnimated = true }: BasicSettingsProps) => {
   const timezones = Array.from({ length: 27 }, (_, i) => i - 12).map((tz) => ({
     value: tz,
     label: `UTC${tz >= 0 ? "+" : ""}${tz}`,
@@ -55,10 +85,54 @@ export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
     { value: "seven_segment", label: t("settings.basic.time_display_seven_segment") },
   ];
 
+  const lightStyleOptions = [
+    { value: "paper", label: t("settings.basic.light_style_paper") },
+    { value: "mist", label: t("settings.basic.light_style_mist") },
+  ];
+
+  const DebugInfoDisplay = () => {
+    const [memInfo, setMemInfo] = useState<{
+      used: string;
+      total: string;
+    } | null>(null);
+
+    useEffect(() => {
+      const updateMemory = () => {
+        const memory = getPerformanceMemory();
+        if (memory) {
+          const usedMB = (memory.usedJSHeapSize / 1048576).toFixed(1);
+          const totalMB = (memory.totalJSHeapSize / 1048576).toFixed(1);
+          setMemInfo({ used: usedMB, total: totalMB });
+        }
+      };
+
+      updateMemory();
+      const interval = setInterval(updateMemory, 2000);
+      return () => clearInterval(interval);
+    }, []);
+
+    if (!memInfo) {
+      return (
+        <div className="text-[var(--my-on-surface-variant)]">
+          {t("settings.basic.debug_no_memory")}
+        </div>
+      );
+    }
+
+    return (
+      <div className="text-[var(--my-on-surface-variant)] space-y-1">
+        <div>JS Heap: {memInfo.used}MB / {memInfo.total}MB</div>
+        <div className="text-[10px] opacity-60">
+          {t("settings.basic.debug_memory_hint")}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div
-      className="space-y-4 sm:space-y-6 animate-slideUp"
-      style={{ animationDelay: "0.3s", animationFillMode: "both" }}
+      className={`space-y-4 sm:space-y-6 ${isAnimated ? "animate-slideUp" : ""}`}
+      style={isAnimated ? { animationDelay: "0.3s", animationFillMode: "both" } : undefined}
     >
       <WallpaperSelector
         value={config.wallpaper || ""}
@@ -115,6 +189,15 @@ export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
           value={config.time_display_style || "classic"}
           options={timeDisplayStyleOptions}
           onChange={(value) => onChange({ ...config, time_display_style: value })}
+        />
+      </SettingItem>
+
+      <SettingItem label={t("settings.basic.light_style")}>
+        <SelectInput
+          value={config.light_style || "paper"}
+          options={lightStyleOptions}
+          onChange={(value) => onChange({ ...config, light_style: value })}
+          hint={t("settings.basic.light_style_hint")}
         />
       </SettingItem>
 
@@ -186,6 +269,30 @@ export const BasicSettings = ({ config, onChange }: BasicSettingsProps) => {
               className="range range-primary range-sm"
             />
           </div>
+        </div>
+      </SettingItem>
+
+      <SettingItem label={t("settings.basic.debug_mode")}>
+        <div className="space-y-2">
+          <label className="label cursor-pointer rounded-lg px-3 py-2 bg-[var(--my-surface-strong)]/50 border border-[var(--my-outline)]/50">
+            <span className="text-[var(--my-on-surface)]">{t("settings.basic.debug_mode_desc")}</span>
+            <input
+              type="checkbox"
+              className="toggle toggle-primary"
+              checked={config.debug_mode === true}
+              onChange={(e) => {
+                const enabled = e.currentTarget.checked;
+                saveDebugMode(enabled);
+                setPerfDebugEnabled(enabled);
+                onChange({ ...config, debug_mode: enabled });
+              }}
+            />
+          </label>
+          {config.debug_mode === true && (
+            <div className="rounded-lg px-3 py-2 bg-[var(--my-surface-strong)]/30 border border-[var(--my-outline)]/30 text-xs">
+              <DebugInfoDisplay />
+            </div>
+          )}
         </div>
       </SettingItem>
     </div>

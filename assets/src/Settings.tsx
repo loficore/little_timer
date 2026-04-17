@@ -1,5 +1,5 @@
 import type { FunctionalComponent, VNode } from "preact";
-import { useEffect, useState, useRef } from "preact/hooks";
+import { useEffect, useState, useRef, useCallback } from "preact/hooks";
 import { Header } from "./components/Header";
 import { TabPanel } from "./components/TabPanel";
 import { BasicSettings } from "./components/BasicSettings";
@@ -14,7 +14,8 @@ import {
   normalizeAudioPreferences,
   saveAudioPreferences,
 } from "./utils/audio";
-import { isPerfDebugEnabled, logPerf } from "./utils/logger";
+import { STORAGE_KEYS } from "./utils/constants";
+import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
 
 interface SettingsPageProps {
   onBackClick?: () => void;
@@ -35,6 +36,7 @@ interface SettingsConfig {
     sound_volume: number;
     layout_density?: string;
     time_display_style?: string;
+    light_style?: string;
   };
   clock_defaults: {
     countdown: {
@@ -62,6 +64,7 @@ const DEFAULT_CONFIG: SettingsConfig = {
     sound_volume: DEFAULT_AUDIO_PREFERENCES.sound_volume,
     layout_density: "normal",
     time_display_style: "classic",
+    light_style: "paper",
   },
   clock_defaults: {
     countdown: {
@@ -82,6 +85,9 @@ const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
 ];
 
+const LIGHT_STYLE_STORAGE_KEY = "lt_light_style";
+const THEME_MODE_STORAGE_KEY = "lt_theme_mode";
+
 export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   onBackClick,
   wallpaper,
@@ -92,6 +98,20 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   const [activeTab, setActiveTab] = useState("basic");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const animationsEnabled = !isWebViewRuntime();
+  const pendingInteractionLabelRef = useRef<string | null>(null);
+  const pendingInteractionStartRef = useRef<number>(0);
+
+  const markInteraction = useCallback((label: string) => {
+    if (!isPerfDebugEnabled()) return;
+    pendingInteractionLabelRef.current = label;
+    pendingInteractionStartRef.current = performance.now();
+  }, []);
+
+  const handleTabChange = useCallback((tabId: string) => {
+    markInteraction(`tab.change:${tabId}`);
+    setActiveTab(tabId);
+  }, [markInteraction]);
 
   useEffect(() => {
     apiClientRef.current = getAPIClient();
@@ -120,6 +140,14 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     }
   };
 
+  const applyLightStyle = (lightStyle = "paper") => {
+    const html = document.documentElement;
+    html.classList.remove("light-style-mist");
+    if (lightStyle === "mist") {
+      html.classList.add("light-style-mist");
+    }
+  };
+
   const loadSettings = async () => {
     const startAt = performance.now();
     if (!apiClientRef.current) {
@@ -128,7 +156,11 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     }
 
     try {
+      const apiStartAt = performance.now();
       const settings = await apiClientRef.current.getSettings();
+      const apiDurationMs = Math.round(performance.now() - apiStartAt);
+
+      const normalizeStartAt = performance.now();
       const s = settings as any;
       const localAudioPreferences = loadAudioPreferences();
       const audioPreferences = normalizeAudioPreferences({
@@ -139,8 +171,9 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       });
       saveAudioPreferences(audioPreferences);
       
-      const localLayoutDensity = localStorage.getItem("layout_density") || "normal";
-      const localTimeDisplayStyle = localStorage.getItem("time_display_style") || "classic";
+      const localLayoutDensity = localStorage.getItem(STORAGE_KEYS.LAYOUT_DENSITY) || "normal";
+      const localTimeDisplayStyle = localStorage.getItem(STORAGE_KEYS.TIME_DISPLAY_STYLE) || "classic";
+      const localLightStyle = localStorage.getItem(LIGHT_STYLE_STORAGE_KEY) || "paper";
       
       const loadedConfig: SettingsConfig = {
         basic: {
@@ -155,6 +188,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           sound_volume: audioPreferences.sound_volume,
           layout_density: localLayoutDensity,
           time_display_style: localTimeDisplayStyle,
+          light_style: localLightStyle,
         },
         clock_defaults: {
           countdown: s?.countdown ? {
@@ -168,10 +202,15 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           } : DEFAULT_CONFIG.clock_defaults.stopwatch,
         },
       };
+      const normalizeDurationMs = Math.round(performance.now() - normalizeStartAt);
       
+      const setStateStartAt = performance.now();
       setConfig(loadedConfig);
       logPerf("Settings.load.success", {
         durationMs: Math.round(performance.now() - startAt),
+        apiDurationMs,
+        normalizeDurationMs,
+        setStateScheduleMs: Math.round(performance.now() - setStateStartAt),
         defaultMode: loadedConfig.basic.default_mode,
         language: loadedConfig.basic.language,
       });
@@ -190,12 +229,23 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
 
   useEffect(() => {
     const startAt = performance.now();
-    applyTheme(config.basic.theme_mode || "dark");
+    const themeMode = config.basic.theme_mode || "dark";
+    applyTheme(themeMode);
+    localStorage.setItem(THEME_MODE_STORAGE_KEY, themeMode);
     logPerf("Settings.theme.applied", {
-      themeMode: config.basic.theme_mode || "dark",
+      themeMode,
       durationMs: Math.round(performance.now() - startAt),
     });
   }, [config.basic.theme_mode]);
+
+  useEffect(() => {
+    const startAt = performance.now();
+    applyLightStyle(config.basic.light_style || "paper");
+    logPerf("Settings.lightStyle.applied", {
+      lightStyle: config.basic.light_style || "paper",
+      durationMs: Math.round(performance.now() - startAt),
+    });
+  }, [config.basic.light_style]);
 
   useEffect(() => {
     const startAt = performance.now();
@@ -226,8 +276,9 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     saveAudioPreferences(audioPreferences);
     
     // 保存布局密度到localStorage
-    localStorage.setItem("layout_density", config.basic.layout_density || "normal");
-    localStorage.setItem("time_display_style", config.basic.time_display_style || "classic");
+    localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, config.basic.layout_density || "normal");
+    localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, config.basic.time_display_style || "classic");
+    localStorage.setItem(LIGHT_STYLE_STORAGE_KEY, config.basic.light_style || "paper");
 
     const {
       sound_enabled,
@@ -236,6 +287,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       sound_volume,
       layout_density,
       time_display_style,
+      light_style,
       ...serverBasic
     } =
       config.basic;
@@ -250,6 +302,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     void sound_volume;
     void layout_density;
     void time_display_style;
+    void light_style;
 
     if (apiClientRef.current) {
       void apiClientRef.current.updateSettings(serverConfig)
@@ -279,8 +332,9 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       const startAt = performance.now();
       setConfig(DEFAULT_CONFIG);
       saveAudioPreferences(DEFAULT_AUDIO_PREFERENCES);
-      localStorage.setItem("layout_density", "normal");
-      localStorage.setItem("time_display_style", "classic");
+      localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, "normal");
+      localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, "classic");
+      localStorage.setItem(LIGHT_STYLE_STORAGE_KEY, "paper");
       setSaveMessage(t("common.save_hint"));
       logPerf("Settings.reset", {
         durationMs: Math.round(performance.now() - startAt),
@@ -296,11 +350,58 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     });
   }, [activeTab, config.basic.default_mode]);
 
+  useEffect(() => {
+    if (!isPerfDebugEnabled()) return;
+    if (!pendingInteractionLabelRef.current) return;
+
+    const interactionLabel = pendingInteractionLabelRef.current;
+    const interactionStartAt = pendingInteractionStartRef.current;
+    pendingInteractionLabelRef.current = null;
+
+    requestAnimationFrame(() => {
+      logPerf("Settings.interaction.frame", {
+        label: interactionLabel,
+        durationMs: Math.round(performance.now() - interactionStartAt),
+        activeTab,
+      });
+    });
+  }, [activeTab, config]);
+
+  useEffect(() => {
+    if (!isPerfDebugEnabled()) return;
+    if (typeof PerformanceObserver === "undefined") return;
+
+    const observer = new PerformanceObserver((list) => {
+      const entries = list.getEntries();
+      for (const entry of entries) {
+        logPerf("Settings.longtask", {
+          name: entry.name,
+          durationMs: Math.round(entry.duration),
+          activeTab,
+        });
+      }
+    });
+
+    try {
+      observer.observe({ type: "longtask", buffered: true } as PerformanceObserverInit);
+    } catch {
+      // 部分 WebView 不支持 longtask，忽略即可。
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeTab]);
+
   return (
-    <div className="flex flex-col flex-1 text-base-content transition-colors duration-300 animate-fadeIn overflow-hidden bg-transparent">
+    <div
+      className={`flex flex-col flex-1 text-base-content transition-colors duration-300 overflow-hidden bg-transparent ${
+        animationsEnabled ? "animate-fadeIn" : ""
+      }`}
+    >
       <div
         className="flex flex-col w-full h-full"
-        style={(config.basic.wallpaper || wallpaper) ? { backgroundColor: "rgba(0,0,0,0.5)" } : {}}
+        style={(config.basic.wallpaper || wallpaper) ? { backgroundColor: "rgba(0,0,0,0.15)" } : {}}
       >
         <Header
           title={t("common.settings_title")}
@@ -312,13 +413,15 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         <TabPanel
           tabs={TABS.map((tab) => ({ ...tab, label: t(tab.labelKey) }))}
           activeTab={activeTab}
-          onTabChange={setActiveTab}
-          isAnimated={true}
+          onTabChange={handleTabChange}
+          isAnimated={animationsEnabled}
         >
           {activeTab === "basic" && (
             <BasicSettings
               config={config.basic}
+              isAnimated={animationsEnabled}
               onChange={(newBasic) => {
+                markInteraction("basic.config.change");
                 setConfig((prev) => {
                   const next = { ...prev, basic: newBasic };
 
@@ -344,37 +447,43 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
             <CountdownSettings
               config={config.clock_defaults.countdown}
               showLoopControls={config.basic.default_mode === "countdown"}
-              onChange={(newCountdown) =>
+              isAnimated={animationsEnabled}
+              onChange={(newCountdown) => {
+                markInteraction("countdown.config.change");
                 setConfig({
                   ...config,
                   clock_defaults: {
                     ...config.clock_defaults,
                     countdown: newCountdown,
                   },
-                })
-              }
+                });
+              }}
             />
           )}
 
           {activeTab === "stopwatch" && (
             <StopwatchSettings
               config={config.clock_defaults.stopwatch}
-              onChange={(newStopwatch) =>
+              isAnimated={animationsEnabled}
+              onChange={(newStopwatch) => {
+                markInteraction("stopwatch.config.change");
                 setConfig({
                   ...config,
                   clock_defaults: {
                     ...config.clock_defaults,
                     stopwatch: newStopwatch,
                   },
-                })
-              }
+                });
+              }}
             />
           )}
         </TabPanel>
 
         <div
-          className="my-surface-panel flex gap-2 sm:gap-3 md:gap-4 items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 flex-wrap animate-slideUp flex-shrink-0"
-          style={{ animationDelay: "0.3s", animationFillMode: "both" }}
+          className={`my-surface-panel flex gap-2 sm:gap-3 md:gap-4 items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 flex-wrap flex-shrink-0 ${
+            animationsEnabled ? "animate-slideUp" : ""
+          }`}
+          style={animationsEnabled ? { animationDelay: "0.3s", animationFillMode: "both" } : undefined}
         >
           <button
             onClick={handleSave}

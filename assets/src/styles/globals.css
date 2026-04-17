@@ -115,43 +115,56 @@
 
 .time-style-classic {
   font-variant-numeric: tabular-nums;
+  color: color-mix(in oklab, var(--accent-color) 72%, var(--my-on-surface) 28%);
+}
+
+.time-state-active.time-style-classic {
+  color: color-mix(in oklab, var(--accent-color) 72%, var(--my-on-surface) 28%);
+}
+
+.time-state-rest.time-style-classic {
+  color: color-mix(in oklab, var(--my-on-surface) 86%, var(--my-on-surface-variant) 14%);
+}
+
+.time-state-finished.time-style-classic {
+  color: color-mix(in oklab, var(--my-on-primary-container) 72%, var(--my-on-surface) 28%);
 }
 
 .time-style-seven-segment {
-  --segment-on: #d0d0d0;
-  --segment-hot: #ffffff;
-  --segment-off: rgba(20, 24, 26, 0.12);
-  --segment-glow-tight: rgba(255, 255, 255, 0.2);
-  --segment-glow-mid: rgba(255, 255, 255, 0.12);
-  --segment-glow-wide: rgba(255, 255, 255, 0.06);
+  --segment-on: color-mix(in oklab, var(--accent-color) 74%, var(--my-on-surface) 26%);
+  --segment-hot: var(--my-on-surface);
+  --segment-off: color-mix(in oklab, var(--my-outline) 36%, transparent);
+  --segment-glow-tight: color-mix(in oklab, var(--my-on-surface) 26%, transparent);
+  --segment-glow-mid: color-mix(in oklab, var(--my-on-surface) 16%, transparent);
+  --segment-glow-wide: color-mix(in oklab, var(--my-on-surface) 8%, transparent);
   --segment-backlight: rgba(0, 0, 0, 0);
 }
 
 .time-state-active.time-style-seven-segment {
-  --segment-on: #d0d0d0;
-  --segment-hot: #ffffff;
-  --segment-glow-tight: rgba(255, 255, 255, 0.2);
-  --segment-glow-mid: rgba(255, 255, 255, 0.12);
-  --segment-glow-wide: rgba(255, 255, 255, 0.06);
-  --segment-backlight: rgba(255, 255, 255, 0.03);
+  --segment-on: color-mix(in oklab, var(--accent-color) 74%, var(--my-on-surface) 26%);
+  --segment-hot: var(--my-on-surface);
+  --segment-glow-tight: color-mix(in oklab, var(--my-on-surface) 26%, transparent);
+  --segment-glow-mid: color-mix(in oklab, var(--my-on-surface) 16%, transparent);
+  --segment-glow-wide: color-mix(in oklab, var(--my-on-surface) 8%, transparent);
+  --segment-backlight: color-mix(in oklab, var(--my-primary-container) 20%, transparent);
 }
 
 .time-state-rest.time-style-seven-segment {
-  --segment-on: #d0d0d0;
-  --segment-hot: #ffffff;
-  --segment-glow-tight: rgba(255, 255, 255, 0.2);
-  --segment-glow-mid: rgba(255, 255, 255, 0.12);
-  --segment-glow-wide: rgba(255, 255, 255, 0.06);
-  --segment-backlight: rgba(255, 255, 255, 0.03);
+  --segment-on: color-mix(in oklab, var(--my-on-surface) 84%, var(--my-on-surface-variant) 16%);
+  --segment-hot: var(--my-on-surface);
+  --segment-glow-tight: color-mix(in oklab, var(--my-on-surface) 22%, transparent);
+  --segment-glow-mid: color-mix(in oklab, var(--my-on-surface) 14%, transparent);
+  --segment-glow-wide: color-mix(in oklab, var(--my-on-surface) 7%, transparent);
+  --segment-backlight: color-mix(in oklab, var(--my-primary-container) 16%, transparent);
 }
 
 .time-state-finished.time-style-seven-segment {
-  --segment-on: #d0d0d0;
-  --segment-hot: #ffffff;
-  --segment-glow-tight: rgba(255, 255, 255, 0.2);
-  --segment-glow-mid: rgba(255, 255, 255, 0.12);
-  --segment-glow-wide: rgba(255, 255, 255, 0.06);
-  --segment-backlight: rgba(255, 255, 255, 0.03);
+  --segment-on: color-mix(in oklab, var(--my-on-primary-container) 76%, var(--my-on-surface) 24%);
+  --segment-hot: var(--my-on-surface);
+  --segment-glow-tight: color-mix(in oklab, var(--my-on-surface) 24%, transparent);
+  --segment-glow-mid: color-mix(in oklab, var(--my-on-surface) 15%, transparent);
+  --segment-glow-wide: color-mix(in oklab, var(--my-on-surface) 8%, transparent);
+  --segment-backlight: color-mix(in oklab, var(--my-primary-container) 18%, transparent);
 }
 
 .seven-segment-display {
@@ -314,6 +327,28 @@
 
 .time-running-segment {
   animation: segmentBreath 7.8s ease-in-out infinite;
+}
+
+.apexcharts-tooltip,
+.apexcharts-xaxistooltip,
+.apexcharts-yaxistooltip {
+  z-index: 120 !important;
+  background: color-mix(in oklab, var(--my-surface-strong) 96%, transparent) !important;
+  color: var(--my-on-surface) !important;
+  border: 1px solid color-mix(in oklab, var(--my-outline) 58%, transparent) !important;
+  box-shadow: var(--my-elevation-2, 0 8px 22px rgba(0, 0, 0, 0.2)) !important;
+}
+
+.apexcharts-tooltip * {
+  color: var(--my-on-surface) !important;
+}
+
+html.light-mode .apexcharts-tooltip,
+html.light-mode .apexcharts-xaxistooltip,
+html.light-mode .apexcharts-yaxistooltip {
+  background: color-mix(in oklab, var(--my-surface-strong) 98%, #ffffff 2%) !important;
+  color: var(--my-on-surface) !important;
+  border: 1px solid color-mix(in oklab, var(--my-outline) 72%, transparent) !important;
 }
 
 @keyframes segmentBreath {

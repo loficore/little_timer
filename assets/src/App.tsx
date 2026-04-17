@@ -7,11 +7,12 @@ import { StatsPage } from "./Stats.tsx";
 import { ErrorNotification } from "./components/ErrorNotification.tsx";
 import { getAPIClient } from "./utils/apiClientSingleton";
 import { WALLPAPER_FALLBACK_GRADIENT, STORAGE_KEYS } from "./utils/constants";
-import { getFrontendLogLevel, isPerfDebugEnabled, logError, logLifecycle, logPerf } from "./utils/logger";
+import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, logLifecycle, logPerf } from "./utils/logger";
 
 type Page = "timer" | "habits" | "stats" | "settings";
 const WALLPAPER_STORAGE_KEY = STORAGE_KEYS.WALLPAPER;
 const WALLPAPER_DEBUG_STORAGE_KEY = STORAGE_KEYS.WALLPAPER_DEBUG;
+const THEME_MODE_STORAGE_KEY = "lt_theme_mode";
 
 const normalizeWallpaper = (value: unknown): string => {
   return typeof value === "string" ? value.trim() : "";
@@ -45,11 +46,6 @@ const readCachedWallpaper = (): string => {
   }
 };
 
-const isWebViewRuntime = (): boolean => {
-  if (typeof window === "undefined") return false;
-  return !!window.webui;
-};
-
 const formatUnknownError = (value: unknown): string => {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return `${value}`;
@@ -70,6 +66,24 @@ export const App = () => {
     const cached = readCachedWallpaper();
     return cached || null;
   });
+
+  const applyThemeMode = (themeMode = "dark") => {
+    const html = document.documentElement;
+    const theme =
+      themeMode === "auto"
+        ? window.matchMedia("(prefers-color-scheme: light)").matches
+          ? "light"
+          : "dark"
+        : themeMode;
+
+    if (theme === "light") {
+      html.classList.add("light-mode");
+      document.body.classList.add("light-mode");
+    } else {
+      html.classList.remove("light-mode");
+      document.body.classList.remove("light-mode");
+    }
+  };
 
   const navigateTo = (newPage: Page) => {
     setPage(newPage);
@@ -99,8 +113,27 @@ export const App = () => {
   };
 
   useEffect(() => {
+    try {
+      const cachedThemeMode = localStorage.getItem(THEME_MODE_STORAGE_KEY);
+      if (cachedThemeMode) {
+        applyThemeMode(cachedThemeMode);
+      }
+    } catch {
+      // 忽略 localStorage 不可用场景
+    }
+
     const client = getAPIClient();
     client.getSettings().then(settings => {
+      const serverThemeMode = typeof settings.basic?.theme_mode === "string"
+        ? settings.basic.theme_mode
+        : "dark";
+      applyThemeMode(serverThemeMode);
+      try {
+        localStorage.setItem(THEME_MODE_STORAGE_KEY, serverThemeMode);
+      } catch {
+        // 忽略 localStorage 不可用场景
+      }
+
       const serverWallpaper = normalizeWallpaper(settings.basic?.wallpaper);
       const cachedWallpaper = readCachedWallpaper();
 
@@ -113,6 +146,7 @@ export const App = () => {
       updateGlobalWallpaper(serverWallpaper || cachedWallpaper, "server-settings");
     }).catch(() => {
       // 忽略设置获取错误
+      applyThemeMode(localStorage.getItem(THEME_MODE_STORAGE_KEY) || "dark");
       const cachedWallpaper = readCachedWallpaper();
       logWallpaperDebug("serverSettingsFailed", { cachedWallpaper });
       updateGlobalWallpaper(cachedWallpaper, "server-fallback-cache");
@@ -210,6 +244,20 @@ export const App = () => {
       htmlAnimation: html.style.animation,
     });
   }, [globalWallpaper]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const html = document.documentElement;
+    const isStatsWebViewLite = isWebViewRuntime() && page === "stats";
+
+    // 仅在 WebView 的统计页启用轻量视觉，平衡风格与流畅度
+    html.classList.toggle("webview-stats-lite", isStatsWebViewLite);
+
+    return () => {
+      html.classList.remove("webview-stats-lite");
+    };
+  }, [page]);
 
   return (
     <>

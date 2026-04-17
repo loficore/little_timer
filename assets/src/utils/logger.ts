@@ -2,14 +2,42 @@
 
 export type LogCategory = 'lifecycle' | 'operation' | 'network' | 'error' | 'perf';
 export type FrontendLogLevel = 'error' | 'info' | 'debug';
+export type FrontendRuntime = 'webview' | 'browser' | 'unknown';
 
 const PERF_DEBUG_QUERY_KEY = 'debugPerf';
 const PERF_DEBUG_STORAGE_KEY = 'lt_debug_perf';
 const LOG_LEVEL_QUERY_KEY = 'logLevel';
 const LOG_LEVEL_STORAGE_KEY = 'lt_log_level';
+const RUNTIME_QUERY_KEY = 'runtime';
 
 let perfDebugCached: boolean | null = null;
 let frontendLogLevelCached: FrontendLogLevel | null = null;
+
+const normalizeRuntime = (value: string | null): FrontendRuntime | null => {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'webview' || normalized === 'browser') {
+    return normalized;
+  }
+  return null;
+};
+
+export const getFrontendRuntime = (): FrontendRuntime => {
+  if (typeof window === 'undefined') return 'unknown';
+
+  try {
+    const search = new URLSearchParams(window.location.search);
+    const fromQuery = normalizeRuntime(search.get(RUNTIME_QUERY_KEY));
+    if (fromQuery) return fromQuery;
+  } catch {
+    // 忽略 URL 解析异常
+  }
+
+  if (window.webui) return 'webview';
+  return 'browser';
+};
+
+export const isWebViewRuntime = (): boolean => getFrontendRuntime() === 'webview';
 
 const readPerfDebugFlag = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -34,7 +62,7 @@ const readPerfDebugFlag = (): boolean => {
   }
 
   // WebView 调试优先开启，便于定位页面卡顿。
-  return !!window.webui;
+  return isWebViewRuntime();
 };
 
 export const isPerfDebugEnabled = (): boolean => {
@@ -118,11 +146,13 @@ const shouldLog = (category: LogCategory): boolean => {
 const logToBackend = (category: LogCategory, message: string, level: 'info' | 'error') => {
   if (typeof window === 'undefined') return;
 
+  const runtime = getFrontendRuntime();
+
   // 优先使用 HTTP 日志接口，便于统一落盘。
   fetch('/api/log', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ category, level, message }),
+    body: JSON.stringify({ category, level, message, runtime }),
   }).catch((error) => {
     void error;
   });
@@ -152,14 +182,16 @@ const getCategoryStyle = (category: LogCategory, isError = false): string => {
 export const logInfo = (msg: string, category: LogCategory = 'operation') => {
   if (!shouldLog(category)) return;
   const formatted = formatMessage(category, msg);
-  console.log(`%c[前端] ${formatted}`, getCategoryStyle(category));
+  const runtime = getFrontendRuntime();
+  console.log(`%c[前端:${runtime}] ${formatted}`, getCategoryStyle(category));
   logToBackend(category, msg, 'info');
 };
 
 export const logSuccess = (msg: string, category: LogCategory = 'operation') => {
   if (!shouldLog(category)) return;
   const formatted = formatMessage(category, msg);
-  console.log(`%c[前端] ${formatted}`, getCategoryStyle(category));
+  const runtime = getFrontendRuntime();
+  console.log(`%c[前端:${runtime}] ${formatted}`, getCategoryStyle(category));
   logToBackend(category, msg, 'info');
 };
 
@@ -167,7 +199,8 @@ export const logError = (msg: string, error?: Error) => {
   const fullMsg = error?.message ? `${msg}: ${error.message}` : msg;
   const stack = error?.stack ? `\n${error.stack}` : '';
   const formatted = formatMessage('error', fullMsg);
-  console.error(`%c[前端] ${formatted}`, getCategoryStyle('error', true));
+  const runtime = getFrontendRuntime();
+  console.error(`%c[前端:${runtime}] ${formatted}`, getCategoryStyle('error', true));
   if (stack) {
     console.error(stack);
   }

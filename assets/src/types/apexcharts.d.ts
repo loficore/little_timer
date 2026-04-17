@@ -29,7 +29,14 @@ declare module 'apexcharts' {
     grid?: { borderColor?: string };
     theme?: { mode?: 'light' | 'dark' };
     responsive?: { breakpoint?: number; options?: ApexOptions }[];
-    tooltip?: { theme?: 'light' | 'dark' | 'colored' };
+    tooltip?: {
+      theme?: 'light' | 'dark' | 'colored';
+      enabled?: boolean;
+      shared?: boolean;
+      intersect?: boolean;
+      followCursor?: boolean;
+      y?: { formatter?: (val: number) => string };
+    };
   }
 
   /**

@@ -28,6 +28,7 @@ export interface BasicSettings {
   sound_volume: number;
   layout_density?: string;
   time_display_style?: string;
+  debug_mode?: boolean;
 }
 
 export interface ClockDefaults {
@@ -66,6 +67,18 @@ const DEFAULT_SETTINGS: BasicSettings = {
   sound_volume: DEFAULT_AUDIO_PREFERENCES.sound_volume,
   layout_density: "normal",
   time_display_style: "classic",
+  debug_mode: false,
+};
+
+const DEBUG_STORAGE_KEY = "lt_debug_perf";
+
+const loadDebugMode = (): boolean => {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(DEBUG_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
 };
 
 const DEFAULT_CLOCK_DEFAULTS: ClockDefaults = {
@@ -139,6 +152,7 @@ export const useSettings = (): UseSettingsReturn => {
         sound_volume: audioPrefs.sound_volume,
         layout_density: localLayoutDensity,
         time_display_style: localTimeDisplayStyle,
+        debug_mode: loadDebugMode(),
       });
 
       setClockDefaults({

@@ -97,31 +97,16 @@ Windows 构建（推荐 PowerShell）：
 
 ## 配置说明
 
-运行时配置文件：
+运行时配置已改为 SQLite 持久化，不再读取 `settings.toml`。
 
-- **settings.toml**：应用启动时读取，位于项目根目录
-- **presets.json**：计时器预设持久化文件，与 settings.toml 同目录
+- 主数据库：`little_timer.db`（默认在程序工作目录）
+- 设置项：存储在 SQLite 的 settings 相关表中
+- 预设与习惯：统一存储在 SQLite 中
 
-常用字段（摘录）：
+可通过接口查看/更新设置：
 
-- **[basic]**
-  - `timezone`：时区（范围 -12 ~ 14）
-  - `language`：语言代码（如 "ZH"、"EN"）
-  - `default_mode`：默认模式（countdown / stopwatch / world_clock）
-  - `theme_mode`：主题（dark / light / auto）
-- **[clock_defaults.countdown]**
-  - `duration_seconds`：倒计时总秒数
-  - `loop`：是否循环
-  - `loop_count`：循环次数（0 表示无限循环）
-  - `loop_interval_seconds`：循环间隔休息秒数
-- **[clock_defaults.stopwatch]**
-  - `max_seconds`：正计时上限秒数
-- **[logging]**
-  - `level`：日志等级（DEBUG/INFO/WARN/ERROR）
-  - `enable_timestamp`：日志时间戳开关
-  - `tick_interval_ms`：Tick 间隔（100 ~ 5000ms）
-
-如需完整默认值，请查看 [settings.toml](settings.toml)。
+- `GET /api/settings`
+- `POST /api/settings`
 
 ## 关于工具使用
 

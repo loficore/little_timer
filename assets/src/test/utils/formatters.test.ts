@@ -55,23 +55,23 @@ describe("formatDuration", () => {
 
 describe("formatDurationShort", () => {
   it("应该格式化 0 分钟", () => {
-    expect(formatDurationShort(0)).toBe("0m");
+    expect(formatDurationShort(0)).toBe("0h 0min");
   });
 
   it("应该格式化小于 1 小时", () => {
-    expect(formatDurationShort(1800)).toBe("30m");
+    expect(formatDurationShort(1800)).toBe("0h 30min");
   });
 
   it("应该格式化 1 小时", () => {
-    expect(formatDurationShort(3600)).toBe("1h 0m");
+    expect(formatDurationShort(3600)).toBe("1h 0min");
   });
 
   it("应该格式化 1 小时 30 分钟", () => {
-    expect(formatDurationShort(5400)).toBe("1h 30m");
+    expect(formatDurationShort(5400)).toBe("1h 30min");
   });
 
   it("应该格式化超过 24 小时", () => {
-    expect(formatDurationShort(90000)).toBe("25h 0m");
+    expect(formatDurationShort(90000)).toBe("25h 0min");
   });
 });
 

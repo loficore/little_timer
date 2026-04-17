@@ -97,31 +97,16 @@ Packaging scripts:
 
 ## Configuration
 
-Runtime configuration files:
+Runtime configuration is now persisted in SQLite and no longer loaded from `settings.toml`.
 
-- **settings.toml**: Loaded at app startup, located in the project root
-- **presets.json**: Timer presets persistence file, stored alongside settings.toml
+- Main database: `little_timer.db` (default in the app working directory)
+- Settings: stored in SQLite settings-related tables
+- Presets and habits: stored in SQLite as well
 
-Common fields (excerpt):
+You can read/update settings via API:
 
-- **[basic]**
-  - `timezone`: Timezone (range -12 ~ 14)
-  - `language`: Language code (e.g. "ZH", "EN")
-  - `default_mode`: Default mode (countdown / stopwatch / world_clock)
-  - `theme_mode`: Theme (dark / light / auto)
-- **[clock_defaults.countdown]**
-  - `duration_seconds`: Countdown total seconds
-  - `loop`: Enable loop
-  - `loop_count`: Loop count (0 means infinite)
-  - `loop_interval_seconds`: Rest interval in seconds between loops
-- **[clock_defaults.stopwatch]**
-  - `max_seconds`: Stopwatch upper limit in seconds
-- **[logging]**
-  - `level`: Log level (DEBUG/INFO/WARN/ERROR)
-  - `enable_timestamp`: Enable timestamps in logs
-  - `tick_interval_ms`: Tick interval (100 ~ 5000ms)
-
-For full defaults, see [settings.toml](settings.toml).
+- `GET /api/settings`
+- `POST /api/settings`
 
 ## FAQ
 

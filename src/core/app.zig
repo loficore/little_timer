@@ -4,7 +4,7 @@ const logger = @import("logger.zig");
 const builtin = @import("builtin");
 
 const build_options = @import("build_options");
-const http_server = if (build_options.use_std_http) @import("http/std_server.zig") else @import("http/http_server.zig");
+const http_server = @import("http/std_server.zig");
 const clock = @import("clock.zig");
 const settings = @import("../settings/settings_manager.zig");
 const interface = @import("interface.zig");
@@ -418,15 +418,15 @@ pub const MainApplication = struct {
         const display = self.clock_manager.update();
         switch (display.getMode()) {
             .COUNTDOWN_MODE => {
-                display.COUNTDOWN_MODE.remaining_ms = if (s.remaining_seconds) |r| r * 1000 else s.work_duration * 1000;
-                display.COUNTDOWN_MODE.is_paused = s.is_paused;
-                display.COUNTDOWN_MODE.is_finished = s.is_finished;
-                display.COUNTDOWN_MODE.in_rest = s.in_rest;
+                display.*.COUNTDOWN_MODE.remaining_ms = if (s.remaining_seconds) |r| r * 1000 else s.work_duration * 1000;
+                display.*.COUNTDOWN_MODE.is_paused = s.is_paused;
+                display.*.COUNTDOWN_MODE.is_finished = s.is_finished;
+                display.*.COUNTDOWN_MODE.in_rest = s.in_rest;
             },
             .STOPWATCH_MODE => {
-                display.STOPWATCH_MODE.esplased_ms = s.elapsed_seconds * 1000;
-                display.STOPWATCH_MODE.is_paused = s.is_paused;
-                display.STOPWATCH_MODE.is_finished = s.is_finished;
+                display.*.STOPWATCH_MODE.esplased_ms = s.elapsed_seconds * 1000;
+                display.*.STOPWATCH_MODE.is_paused = s.is_paused;
+                display.*.STOPWATCH_MODE.is_finished = s.is_finished;
             },
         }
 

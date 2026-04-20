@@ -1,0 +1,93 @@
+@layer components {
+  .my-surface-card,
+  .my-surface-modal,
+  .my-surface-panel,
+  .my-field-surface,
+  .my-filter-btn {
+    /* 解决 backdrop-filter 与半透明边框叠加产生的发丝线 */
+    isolation: isolate;
+    outline: 1px solid transparent;
+    outline-offset: -1px;
+  }
+
+  .my-overlay-backdrop {
+    background: rgba(8, 10, 18, 0.68);
+    backdrop-filter: blur(34px) saturate(145%);
+    -webkit-backdrop-filter: blur(34px) saturate(145%);
+  }
+
+  .my-surface-card {
+    border: 1px solid color-mix(in oklab, var(--my-outline) 54%, transparent);
+    border-radius: 1rem;
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 94%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 98%, transparent) 100%);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight), inset 0 -1px 0 color-mix(in oklab, var(--my-glass-shadow) 72%, transparent), 0 12px 26px rgba(0, 0, 0, 0.14);
+    backdrop-filter: blur(32px) saturate(140%);
+    -webkit-backdrop-filter: blur(32px) saturate(140%);
+    background-clip: padding-box;
+  }
+
+  .my-surface-modal {
+    border: 1px solid color-mix(in oklab, var(--my-outline) 56%, transparent);
+    border-radius: 1rem;
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 96%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 99%, transparent) 100%);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight-strong), inset 0 -1px 0 color-mix(in oklab, var(--my-glass-shadow) 72%, transparent), 0 16px 32px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(36px) saturate(142%);
+    -webkit-backdrop-filter: blur(36px) saturate(142%);
+    background-clip: padding-box;
+  }
+
+  .my-surface-panel {
+    border: 1px solid color-mix(in oklab, var(--my-outline) 52%, transparent);
+    border-radius: 1rem;
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 92%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 97%, transparent) 100%);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight), inset 0 -1px 0 color-mix(in oklab, var(--my-glass-shadow) 72%, transparent), 0 10px 22px rgba(0, 0, 0, 0.12);
+    backdrop-filter: blur(32px) saturate(140%);
+    -webkit-backdrop-filter: blur(32px) saturate(140%);
+    background-clip: padding-box;
+  }
+
+  html.light-mode .my-overlay-backdrop {
+    background: color-mix(in oklab, rgba(64, 54, 42, 0.32) 100%, transparent);
+    backdrop-filter: blur(4px) saturate(102%);
+    -webkit-backdrop-filter: blur(4px) saturate(102%);
+  }
+
+  html.light-mode .my-surface-card {
+    background: var(--my-surface);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 52%, transparent), var(--my-elevation-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html.light-mode .my-surface-modal {
+    background: var(--my-surface-strong);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight-strong) 52%, transparent), var(--my-elevation-3);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html.light-mode .my-surface-panel {
+    background: var(--my-surface);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 48%, transparent), var(--my-elevation-1);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .my-field-surface + .my-field-surface,
+  .my-surface-card + .my-surface-card,
+  .my-surface-panel + .my-surface-panel {
+    border-top-color: color-mix(in oklab, var(--my-outline) 20%, transparent);
+  }
+
+  html.webview-stats-lite .my-surface-card,
+  html.webview-stats-lite .my-surface-panel {
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 68%, transparent), 0 4px 12px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px) saturate(112%);
+    -webkit-backdrop-filter: blur(10px) saturate(112%);
+  }
+
+  html.webview-stats-lite .my-overlay-backdrop {
+    backdrop-filter: blur(12px) saturate(116%);
+    -webkit-backdrop-filter: blur(12px) saturate(116%);
+  }
+}

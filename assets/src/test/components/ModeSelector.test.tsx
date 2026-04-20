@@ -6,17 +6,16 @@ import { Mode } from "../../utils/share";
 describe("ModeSelector 组件", () => {
   const mockOnModeChange = vi.fn();
 
-  const modes = [
-    { key: Mode.Countdown, label: "倒计时", icon: "⏱" },
-    { key: Mode.Stopwatch, label: "秒表", icon: "⏲" },
-    { key: Mode.WorldClock, label: "世界时钟", icon: "🌐" },
-  ];
-
   beforeEach(() => {
     mockOnModeChange.mockClear();
   });
 
   it("应该渲染所有模式按钮", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
+    
     render(
       <ModeSelector
         modes={modes}
@@ -27,24 +26,13 @@ describe("ModeSelector 组件", () => {
 
     expect(screen.getByText("倒计时")).toBeTruthy();
     expect(screen.getByText("秒表")).toBeTruthy();
-    expect(screen.getByText("世界时钟")).toBeTruthy();
-  });
-
-  it("应该显示所有模式的图标", () => {
-    const { container } = render(
-      <ModeSelector
-        modes={modes}
-        activeMode={Mode.Countdown}
-        onModeChange={mockOnModeChange}
-      />,
-    );
-
-    expect(container.textContent).toContain("⏱");
-    expect(container.textContent).toContain("⏲");
-    expect(container.textContent).toContain("🌐");
   });
 
   it("应该高亮激活的模式", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     const { container } = render(
       <ModeSelector
         modes={modes}
@@ -58,11 +46,14 @@ describe("ModeSelector 组件", () => {
       btn.textContent?.includes("倒计时"),
     );
 
-    expect(countdownBtn?.className).toContain("bg-accent-dark");
-    expect(countdownBtn?.className).toContain("text-white");
+    expect(countdownBtn?.className).toContain("btn-primary");
   });
 
   it("非激活模式应该有不同样式", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     const { container } = render(
       <ModeSelector
         modes={modes}
@@ -76,11 +67,14 @@ describe("ModeSelector 组件", () => {
       btn.textContent?.includes("秒表"),
     );
 
-    expect(stopwatchBtn?.className).toContain("border-border-dark");
-    expect(stopwatchBtn?.className).not.toContain("bg-accent-dark");
+    expect(stopwatchBtn?.className).toContain("my-btn-secondary");
   });
 
   it("点击模式按钮应该触发回调", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     render(
       <ModeSelector
         modes={modes}
@@ -96,6 +90,10 @@ describe("ModeSelector 组件", () => {
   });
 
   it("切换模式时应该更新高亮", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     const { rerender, container } = render(
       <ModeSelector
         modes={modes}
@@ -107,7 +105,7 @@ describe("ModeSelector 组件", () => {
     let countdownBtn = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent?.includes("倒计时"),
     );
-    expect(countdownBtn?.className).toContain("bg-accent-dark");
+    expect(countdownBtn?.className).toContain("btn-primary");
 
     rerender(
       <ModeSelector
@@ -120,15 +118,19 @@ describe("ModeSelector 组件", () => {
     countdownBtn = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent?.includes("倒计时"),
     );
-    expect(countdownBtn?.className).not.toContain("bg-accent-dark");
+    expect(countdownBtn?.className).toContain("my-btn-secondary");
 
     const stopwatchBtn = Array.from(container.querySelectorAll("button")).find(
       (btn) => btn.textContent?.includes("秒表"),
     );
-    expect(stopwatchBtn?.className).toContain("bg-accent-dark");
+    expect(stopwatchBtn?.className).toContain("btn-primary");
   });
 
   it("应该支持自定义动画延迟", () => {
+    const modes = [
+      { key: Mode.Countdown, label: "倒计时", icon: null },
+      { key: Mode.Stopwatch, label: "秒表", icon: null },
+    ];
     const { container } = render(
       <ModeSelector
         modes={modes}

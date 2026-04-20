@@ -4,21 +4,30 @@
 // - key = "string" | integer | boolean
 // - 不支持数组、内联表，请在语言文件中避免
 
-import zhRaw from "../../i18n/zh.toml?raw";
-import enRaw from "../../i18n/en.toml?raw";
-import jpRaw from "../../i18n/jp.toml?raw";
+// 使用 Vite 的 glob + eager 将所有语言文件内嵌进打包产物
+// 这样不会在运行时依赖外部 i18n 文件，适配单文件/内嵌发布
+const rawI18n = import.meta.glob("../../i18n/*.toml", {
+  as: "raw",
+  eager: true,
+});
 
 type Messages = Record<string, unknown>;
 
 type LangCode = "ZH" | "EN" | "JP";
 
-const loaders: Record<LangCode, () => Promise<string>> = {
-  ZH: async () => zhRaw,
-  EN: async () => enRaw,
-  JP: async () => jpRaw,
+const embeddedLangs: Record<LangCode, string> = {
+  ZH: rawI18n["../../i18n/zh.toml"] ?? "",
+  EN: rawI18n["../../i18n/en.toml"] ?? "",
+  JP: rawI18n["../../i18n/jp.toml"] ?? "",
 };
 
-const defaultMessages = parseToml(zhRaw);
+const loaders: Record<LangCode, () => Promise<string>> = {
+  ZH: () => Promise.resolve(embeddedLangs.ZH),
+  EN: () => Promise.resolve(embeddedLangs.EN),
+  JP: () => Promise.resolve(embeddedLangs.JP),
+};
+
+const defaultMessages = parseToml(embeddedLangs.ZH);
 let messages: Messages = defaultMessages;
 let currentLang: LangCode = "ZH";
 
@@ -46,6 +55,11 @@ function parseValue(raw: string): any {
   return trimmed;
 }
 
+/**
+ * 解析 TOML 字符串为消息对象
+ * @param {string} raw - 原始 TOML 字符串
+ * @returns {Messages} 解析后的消息对象
+ */
 export function parseToml(raw: string): Messages {
   const result: Messages = {};
   let path: string[] = [];
@@ -72,12 +86,18 @@ export function parseToml(raw: string): Messages {
   return result;
 }
 
+/**
+ * 深度合并两个消息对象
+ * @param {Messages} base - 基础消息对象
+ * @param {Messages} override - 覆盖消息对象
+ * @returns {Messages} 合并后的消息对象
+ */
 function deepMerge(base: Messages, override: Messages): Messages {
   const output: Messages = { ...base };
   for (const [k, v] of Object.entries(override)) {
     if (v && typeof v === "object" && !Array.isArray(v)) {
-      const baseChild = (base as any)[k];
-      const nextBase = baseChild && typeof baseChild === "object" && !Array.isArray(baseChild) ? baseChild : {};
+      const baseChild = (base as Record<string, unknown>)[k];
+      const nextBase = baseChild && typeof baseChild === "object" && !Array.isArray(baseChild) ? baseChild as Messages : {};
       output[k] = deepMerge(nextBase, v as Messages);
     } else {
       output[k] = v;
@@ -95,6 +115,12 @@ function getPath(obj: any, path: string[]): any {
   return node;
 }
 
+/**
+ * 获取翻译消息
+ * @param {string} path - 消息路径
+ * @param {Record<string, string | number>} params - 替换参数
+ * @returns {string} 翻译后的消息
+ */
 export function t(path: string, params?: Record<string, string | number>): string {
   const parts = path.split(".");
   const val = (getPath(messages, parts) ?? getPath(defaultMessages, parts)) as
@@ -107,6 +133,10 @@ export function t(path: string, params?: Record<string, string | number>): strin
   return Object.keys(params).reduce((acc, key) => acc.replace(`{${key}}`, String(params[key])), str);
 }
 
+/**
+ * 设置当前语言
+ * @param {string} lang - 语言代码，例如 "ZH"、"EN"、"JP"
+ */
 export async function setLanguage(lang: string): Promise<void> {
   const upper = lang.toUpperCase() as LangCode;
   const loader = loaders[upper] ?? loaders.ZH;
@@ -122,10 +152,18 @@ export async function setLanguage(lang: string): Promise<void> {
   }
 }
 
+/**
+ * 获取当前语言
+ * @returns {string} 当前语言代码，例如 "ZH"、"EN"、"JP"
+ */
 export function getCurrentLanguage(): LangCode {
   return currentLang;
 }
 
+/**
+ * 获取当前语言的所有消息对象，主要用于调试或导出完整翻译内容
+ * @returns {Messages} 当前语言的所有消息对象
+ */
 export function getMessages(): Messages {
   return messages;
 }

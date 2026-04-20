@@ -17,7 +17,7 @@ describe("TimeDisplay 组件", () => {
     );
 
     expect(container.querySelector("div")?.className).toContain(
-      "text-accent-dark",
+      "text-primary",
     );
   });
 
@@ -27,27 +27,8 @@ describe("TimeDisplay 组件", () => {
     );
 
     const timeDiv = container.querySelector("div");
-    expect(timeDiv?.className).toContain("text-text-primary-dark");
-    expect(timeDiv?.className).not.toContain("text-accent-dark");
-  });
-
-  it("动画激活时应该添加动画类", () => {
-    const { container } = render(
-      <TimeDisplay time="25:30:45" isRunning={false} isAnimating={true} />,
-    );
-
-    expect(container.querySelector("div")?.className).toContain(
-      "time-transition--active",
-    );
-  });
-
-  it("应该支持自定义动画延迟", () => {
-    const { container } = render(
-      <TimeDisplay time="25:30:45" isRunning={false} animationDelay="0.3s" />,
-    );
-
-    const timeDiv = container.querySelector("div");
-    expect(timeDiv?.style.animationDelay).toBe("0.3s");
+    expect(timeDiv?.className).toContain("text-base-content");
+    expect(timeDiv?.className).not.toContain("text-primary");
   });
 
   it("应该使用等宽字体", () => {

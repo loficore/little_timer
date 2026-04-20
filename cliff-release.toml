@@ -1,0 +1,59 @@
+# git-cliff configuration for Release descriptions
+# 专门用于 GitHub Release 页面的轻量级模板
+# Usage: git cliff --config cliff-release.toml
+
+[changelog]
+# Release 页面专用 header（精简）
+header = """
+"""
+
+# Release 描述模板：移除日期、版本号等冗余信息
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | upper_first }} ({{ commit.id | truncate(length=7, end="") }})
+{% endfor %}
+{% endfor %}
+"""
+
+# Release 页面 footer（简洁）
+footer = """
+"""
+
+# 移除前后空白
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+
+# 提交分类规则（与主配置保持一致）
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->✨ Features" },
+  { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
+  { message = "^doc", group = "<!-- 2 -->📚 Documentation" },
+  { message = "^perf", group = "<!-- 3 -->⚡ Performance" },
+  { message = "^refactor", group = "<!-- 4 -->🔨 Refactor" },
+  { message = "^style", group = "<!-- 5 -->💄 Styling" },
+  { message = "^test", group = "<!-- 6 -->🧪 Testing" },
+  { message = "^chore\\(release\\): prepare for", skip = true },
+  { message = "^chore\\(deps.*\\)", skip = true },
+  { message = "^chore\\(pr\\)", skip = true },
+  { message = "^chore\\(pull\\)", skip = true },
+  { message = "^chore|^ci", group = "<!-- 7 -->⚙️ Miscellaneous Tasks" },
+  { body = ".*security", group = "<!-- 8 -->🛡️ Security" },
+  { message = "^revert", group = "<!-- 9 -->◀️ Revert" },
+  { message = "^Merge branch", skip = true },
+  { message = "^Merge pull request", skip = true },
+  { message = "^[Ii]nitial [Cc]ommit", group = "<!-- 10 -->🎉 Initial" },
+  { message = ".*", group = "<!-- 11 -->📦 Other" },
+]
+
+protect_breaking_commits = false
+filter_commits = false
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "oldest"

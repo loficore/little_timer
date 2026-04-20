@@ -32,23 +32,15 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        .webui = .{
-            .url = "https://github.com/webui-dev/zig-webui/archive/bf8c1784d26411932764ac1c6480e6ae6a05d95b.tar.gz",
-            .hash = "zig_webui-2.5.0-beta.4-M4z7zfBlAQDm7VVsOShCKu-VqoXZb7mk3hcQUxy3BOR2",
+        .zqlite = .{
+            .url = "https://github.com/karlseguin/zqlite.zig/archive/b44ed5cdc64859b08446c246f307e65ebe2b2d9c.tar.gz",
+            .hash = "zqlite-0.0.0-RWLaY_y_mADh2LdbDrG_2HT2dBAcsAR8Jig_7-dOJd0B",
         },
-        .toml = .{
-            .url = "https://github.com/sam701/zig-toml/archive/cf50bd59c6276fb2b6d34b8d71d35486eecc719c.tar.gz",
-            .hash = "toml-0.3.0-bV14Bd-EAQBKoXhpYft303BtA2vgLNlxntUCIWgRUl46",
+        .httpz = .{
+            .url = "git+https://github.com/karlseguin/http.zig?ref=master#5d160ba8675aeed9dd5071fdb307fab66702ca28",
+            .hash = "httpz-0.0.0-PNVzrH5LBwA1XI4tiije77J8S9DkfNZXSkx2H93VwJl9",
         },
     },
-    // Specifies the set of files and directories that are included in this package.
-    // Only files and directories listed here are included in the `hash` that
-    // is computed for this package. Only files listed here will remain on disk
-    // when using the zig package manager. As a rule of thumb, one should list
-    // files required for compilation plus any license(s).
-    // Paths are relative to the build root. Use the empty string (`""`) to refer to
-    // the build root itself.
-    // A directory listed here means that all files within, recursively, are included.
     .paths = .{
         "build.zig",
         "build.zig.zon",

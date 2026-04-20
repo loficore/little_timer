@@ -1,8 +1,9 @@
 //! 边界条件综合测试 - 验证所有关键问题修复
 const std = @import("std");
-const clock = @import("../clock.zig");
-const settings_module = @import("../settings.zig");
-const interface = @import("../interface.zig");
+const clock = @import("../core/clock.zig");
+const settings_module = @import("../settings/settings_manager.zig");
+const interface = @import("../core/interface.zig");
+const logger = @import("../core/logger.zig");
 
 // ============ Clock 模块边界条件测试 ============
 
@@ -20,13 +21,13 @@ test "问题1: 倒计时整数溢出检查" {
             .loop_interval_seconds = 0,
         },
         .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
-        .world_clock = .{ .timezone = 8 },
     };
 
     const manager = clock.ClockManager.init(config);
 
     // 验证已降级到安全值
     try std.testing.expectEqual(manager.state.COUNTDOWN_MODE.duration_ms, 25 * 60 * 1000);
+    logger.global_logger.info("倒计时整数溢出检查通过，duration_seconds={}", .{large_duration});
 }
 
 test "问题1: 正计时整数溢出检查" {
@@ -39,7 +40,6 @@ test "问题1: 正计时整数溢出检查" {
         .stopwatch = .{
             .max_seconds = large_max_seconds,
         },
-        .world_clock = .{ .timezone = 8 },
     };
 
     const manager = clock.ClockManager.init(config);
@@ -59,7 +59,6 @@ test "问题1: 安全的 duration 值不被修改" {
             .loop_interval_seconds = 0,
         },
         .stopwatch = .{ .max_seconds = 24 * 60 * 60 },
-        .world_clock = .{ .timezone = 8 },
     };
 
     const manager = clock.ClockManager.init(config);
@@ -141,7 +140,6 @@ test "问题3: 倒计时在暂停时不会消耗" {
         },
         .stopwatch = .{ .max_seconds = 3600 },
         .default_mode = .COUNTDOWN_MODE,
-        .world_clock = .{ .timezone = 8 },
     };
 
     var manager = clock.ClockManager.init(config);
@@ -200,6 +198,7 @@ test "问题5: 预设列表满返回正确错误类型" {
     const allocator = std.testing.allocator;
     var manager = try settings_module.SettingsManager.init(allocator, "");
     defer manager.deinit();
+    defer manager.presets.clear();
 
     // 缩小上限以验证满载错误分支
     manager.presets.max_count = 10;
@@ -207,7 +206,7 @@ test "问题5: 预设列表满返回正确错误类型" {
     // 添加 10 个预设（达到上限）
     for (0..10) |i| {
         var buf: [50]u8 = undefined;
-        const name = try std.fmt.bufPrint(&buf, "预设{d}", .{i});
+        const name = try std.fmt.bufPrint(&buf, "边界测试_预设{d}", .{i});
         const preset: interface.TimerPreset = .{
             .name = name,
             .mode = .COUNTDOWN_MODE,
@@ -218,7 +217,7 @@ test "问题5: 预设列表满返回正确错误类型" {
 
     // 尝试添加第 11 个（应该返回 PresetListFull）
     const preset: interface.TimerPreset = .{
-        .name = "预设10",
+        .name = "边界测试_预设10",
         .mode = .COUNTDOWN_MODE,
         .config = .{ .countdown = .{ .duration_seconds = 1500, .loop = false, .loop_count = 0, .loop_interval_seconds = 0 } },
     };

@@ -1,4 +1,7 @@
+import { memo } from "preact/compat";
+import type { FunctionalComponent } from "preact";
 import { useState } from "preact/hooks";
+import { PickerNumberInput } from "./PickerNumberInput";
 import { t } from "../utils/i18n";
 
 interface NumberInputProps {
@@ -12,93 +15,64 @@ interface NumberInputProps {
   disabled?: boolean;
 }
 
-export const NumberInput = ({
+export const NumberInput: FunctionalComponent<NumberInputProps> = memo(({
   value,
-  min,
-  max,
+  min = 0,
+  max = 9999,
   onChange,
   label,
   unit,
   hint,
   disabled = false,
-}: NumberInputProps) => {
+}) => {
   const [error, setError] = useState<string>("");
 
-  const handleChange = (e: Event) => {
-    const input = e.currentTarget as HTMLInputElement;
-    const rawValue = input.value.trim();
-
-    // 清除错误状态（用户正在修改）
+  const handleChange = (newValue: number) => {
     setError("");
-
-    // 空值检查
-    if (rawValue === "") {
+    
+    if (newValue === null || newValue === undefined) {
       setError(t("validation.input_required"));
       return;
     }
 
-    const numValue = parseInt(rawValue, 10);
-
-    // NaN 检查
-    if (Number.isNaN(numValue)) {
-      setError(t("validation.input_invalid"));
-      return;
-    }
-
-    // 范围检查
-    if (min !== undefined && numValue < min) {
+    if (min !== undefined && newValue < min) {
       onChange(min);
       return;
     }
 
-    if (max !== undefined && numValue > max) {
+    if (max !== undefined && newValue > max) {
       onChange(max);
       return;
     }
 
-    // 校验通过，调用回调
-    onChange(numValue);
-  };
-
-  const handleBlur = () => {
-    // 失焦时重新校验（可选）
-    if (value === null || value === undefined) {
-      setError(t("validation.input_required"));
-    }
+    onChange(newValue);
   };
 
   return (
-    <>
+    <div className="form-control w-full">
       {label && (
-        <label className="block text-xs sm:text-sm font-medium text-text-primary-dark mb-2">
-          {label}
+        <label className="label">
+          <span className="label-text">{label}</span>
         </label>
       )}
       <div className="flex items-center gap-2">
-        <input
-          type="number"
-          min={min}
-          max={max}
+        <PickerNumberInput
           value={value}
-          disabled={disabled}
+          min={min ?? 0}
+          max={max ?? 9999}
           onChange={handleChange}
-          onBlur={handleBlur}
-          className={`form-input input-base flex-1 px-3 sm:px-4 py-2 sm:py-3 border rounded-lg text-xs sm:text-sm bg-secondary-dark text-text-primary-dark focus:border-accent-dark transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
-            error ? "border-red-500 focus:border-red-500" : "border-border-dark"
-          }`}
+          disabled={disabled}
         />
         {unit && (
-          <span className="text-xs sm:text-sm text-text-secondary-dark whitespace-nowrap">
-            {unit}
-          </span>
+          <span className="label-text-alt">{unit}</span>
         )}
       </div>
-      {error && (
-        <span className="text-xs text-red-500 font-medium">{error}</span>
-      )}
-      {!error && hint && (
-        <span className="text-xs text-text-secondary-dark italic">{hint}</span>
-      )}
-    </>
+      <label className="label">
+        {error && <span className="label-text-alt text-error">{error}</span>}
+        {!error && hint && <span className="label-text-alt">{hint}</span>}
+      </label>
+    </div>
   );
-};
+});
+
+NumberInput.displayName = "NumberInput";

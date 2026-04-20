@@ -12,47 +12,35 @@ interface StatusBadgeProps {
 }
 
 /**
- * 获取状态样式类
+ * 获取 Material You 徽章类名
  */
-const getStatusClasses = (status: StatusType): string => {
-  const classes: Record<StatusType, string> = {
-    running:
-      "bg-accent-dark text-white border border-accent-dark animate-pulse",
-    paused:
-      "bg-secondary-dark text-text-secondary-dark border border-border-dark",
-    finished: "bg-green-600 text-white border border-green-600",
+const getStatusVariant = (status: StatusType): string => {
+  const variants: Record<StatusType, string> = {
+    running: "my-badge-running",
+    paused: "my-badge-paused",
+    finished: "my-badge-finished",
   };
-  return classes[status];
+  return variants[status];
 };
 
 /**
- * 状态徽章组件 - 显示计时器运行状态
- *
- * @example
- * ```tsx
- * <StatusBadge
- *   status="running"
- *   label="运行中"
- * />
- *
- * <StatusBadge
- *   status="finished"
- *   label="已完成"
- * />
- * ```
+ * 状态徽章组件 - Material You 风格
  */
 export const StatusBadge: FunctionalComponent<StatusBadgeProps> = ({
   status,
   label,
   animationDelay = "0s",
 }) => {
-  const statusClasses = getStatusClasses(status);
+  const variant = getStatusVariant(status);
 
   return (
     <span
-      className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium transition-all duration-200 whitespace-nowrap animate-slideUp ${statusClasses}`}
+      className={`${variant} gap-2 text-xs sm:text-sm animate-slideUp`}
       style={{ animationDelay, animationFillMode: "both" }}
     >
+      {status === "running" && (
+        <span className="w-2 h-2 rounded-full bg-white/80 animate-pulse" />
+      )}
       {label}
     </span>
   );

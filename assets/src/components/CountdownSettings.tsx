@@ -1,4 +1,5 @@
 import { SettingItem } from "./SettingItem";
+import { TimeInput } from "./TimeInput";
 import { NumberInput } from "./NumberInput";
 import { CheckboxInput } from "./CheckboxInput";
 import { t } from "../utils/i18n";
@@ -13,25 +14,26 @@ interface CountdownSettingsProps {
   onChange: (config: any) => void;
   /** 当非倒计时模式时隐藏循环相关配置 */
   showLoopControls?: boolean;
+  isAnimated?: boolean;
 }
 
 export const CountdownSettings = ({
   config,
   onChange,
   showLoopControls = true,
+  isAnimated = true,
 }: CountdownSettingsProps) => {
   return (
     <div
-      className="space-y-4 sm:space-y-6 animate-slideUp"
-      style={{ animationDelay: "0.3s", animationFillMode: "both" }}
+      className={`space-y-4 sm:space-y-6 ${isAnimated ? "animate-slideUp" : ""}`}
+      style={isAnimated ? { animationDelay: "0.3s", animationFillMode: "both" } : undefined}
     >
-      <SettingItem label={t("settings.countdown.duration_minutes")}>
-        <NumberInput
-          value={Math.floor(config.duration_seconds / 60)}
-          min={1}
-          max={1440}
-          onChange={(value) =>
-            onChange({ ...config, duration_seconds: value * 60 })
+      <SettingItem label={t("settings.countdown.duration")}>
+        <TimeInput
+          value={config.duration_seconds}
+          maxHours={24}
+          onChange={(totalSeconds) =>
+            onChange({ ...config, duration_seconds: totalSeconds })
           }
           hint={t("settings.countdown.duration_hint", {
             minutes: Math.floor(config.duration_seconds / 60),
@@ -43,7 +45,7 @@ export const CountdownSettings = ({
         <>
           <SettingItem label={t("settings.countdown.loop_mode")}>
             <CheckboxInput
-              checked={config.loop}
+              value={config.loop}
               onChange={(checked) => onChange({ ...config, loop: checked })}
               label={t("settings.countdown.loop_enable")}
             />
@@ -64,12 +66,12 @@ export const CountdownSettings = ({
               </SettingItem>
 
               <SettingItem label={t("settings.countdown.loop_interval")}>
-                <NumberInput
+                <TimeInput
                   value={config.loop_interval_seconds}
-                  min={0}
-                  max={3600}
-                  onChange={(value) =>
-                    onChange({ ...config, loop_interval_seconds: value })
+                  maxHours={1}
+                  showHours={false}
+                  onChange={(totalSeconds) =>
+                    onChange({ ...config, loop_interval_seconds: totalSeconds })
                   }
                   hint={t("settings.countdown.loop_interval_hint")}
                 />

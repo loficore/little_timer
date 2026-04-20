@@ -30,7 +30,6 @@ describe("Header 组件", () => {
 
     const settingsBtn = screen.getByTitle(/设置/i);
     expect(settingsBtn).toBeTruthy();
-    expect(settingsBtn.textContent).toContain("⚙");
   });
 
   it("设置按钮点击应该触发回调", () => {
@@ -53,7 +52,6 @@ describe("Header 组件", () => {
 
     const backBtn = screen.getByTitle(/返回|back/i);
     expect(backBtn).toBeTruthy();
-    expect(backBtn.textContent).toContain("←");
   });
 
   it("返回按钮点击应该触发回调", () => {

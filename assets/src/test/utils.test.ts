@@ -42,27 +42,4 @@ describe('工具函数测试', () => {
       expect(result).toBe('00:00:00') // 负数应该返回零时间
     })
   })
-
-  describe('世界时钟格式化', () => {
-    const formatClockTime = (unixSeconds: number): string => {
-      const d = new Date(unixSeconds * 1000)
-      const h = d.getUTCHours().toString().padStart(2, '0')
-      const m = d.getUTCMinutes().toString().padStart(2, '0')
-      const s = d.getUTCSeconds().toString().padStart(2, '0')
-      return `${h}:${m}:${s}`
-    }
-
-    it('应该正确格式化 Unix 时间戳', () => {
-      // Unix epoch (1970-01-01 00:00:00 UTC)
-      expect(formatClockTime(0)).toBe('00:00:00')
-      
-      // 2000-01-01 12:00:00 UTC
-      expect(formatClockTime(946728000)).toBe('12:00:00')
-    })
-
-    it('应该使用 UTC 时间避免时区偏移', () => {
-      const result = formatClockTime(3600) // 1970-01-01 01:00:00 UTC
-      expect(result).toBe('01:00:00')
-    })
-  })
 })

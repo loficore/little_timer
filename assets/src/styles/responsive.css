@@ -1,0 +1,110 @@
+@media (max-width: 480px) {
+  @layer components {
+    .text-responsive-lg {
+      @apply text-2xl sm:text-3xl;
+    }
+    .text-responsive-title {
+      @apply text-lg sm:text-xl;
+    }
+    .text-responsive-body {
+      @apply text-sm sm:text-base;
+    }
+  }
+}
+
+@media (min-width: 768px) {
+  @layer components {
+    .text-responsive-lg {
+      @apply text-5xl lg:text-7xl;
+    }
+    .text-responsive-title {
+      @apply text-2xl lg:text-3xl;
+    }
+    .text-responsive-body {
+      @apply text-base lg:text-lg;
+    }
+  }
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-secondary);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  button, a, input[type="button"], input[type="checkbox"], input[type="radio"] {
+    padding: 0.5rem;
+  }
+
+  button, a {
+    transition-duration: 100ms;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* 布局密度配置 */
+.layout-compact {
+  --layout-px: 1rem;
+  --layout-py: 1.5rem;
+  --layout-control-mb: 1rem;
+  --layout-control-gap: 0.5rem;
+}
+
+.layout-normal {
+  --layout-px: 1.25rem;
+  --layout-py: 2rem;
+  --layout-control-mb: 1.5rem;
+  --layout-control-gap: 0.75rem;
+}
+
+.layout-spacious {
+  --layout-px: 1.75rem;
+  --layout-py: 2.5rem;
+  --layout-control-mb: 2rem;
+  --layout-control-gap: 1rem;
+}

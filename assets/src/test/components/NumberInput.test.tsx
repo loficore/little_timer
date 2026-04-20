@@ -22,8 +22,6 @@ describe("NumberInput 组件", () => {
 
     const input = screen.getByDisplayValue("25");
     expect(input).toBeTruthy();
-    expect(input.getAttribute("min")).toBe("1");
-    expect(input.getAttribute("max")).toBe("100");
   });
 
   it("应该在输入变化时调用 onChange", () => {

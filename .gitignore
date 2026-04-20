@@ -1,6 +1,7 @@
 .roo/
 .zig-cache/
 zig-out
+test-tmp/
 
 # Editor directories and files
 .vscode/*
@@ -16,6 +17,11 @@ zig-out
 QWEN.md
 
 *.sh
+!scripts/
+!scripts/*.sh
+!scripts/**/*.sh
+!android-build.sh
+
 
 # Core dumps and backup files
 core.*
@@ -39,6 +45,24 @@ node_modules/
 dist
 dist-ssr
 *.local
+*.db
 
 .vscode/
-.github/
+# 保留 .github 下多数文件为私有，但允许跟踪 CI workflows
+.github/*
+!.github/workflows/
+!.github/workflows/**
+cliff.toml
+
+AGENTS.md
+
+test_tmp/
+.agents/
+.opencode/
+
+temp.txt
+
+
+assets/test-results
+
+assets/src/test/visual/

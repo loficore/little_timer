@@ -1,5 +1,7 @@
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
+import { Button } from "./Button";
+import { PlayIconComponent, PauseIconComponent, ResetIcon } from "../utils/icons";
 
 interface ControlPanelProps {
   /** 计时器是否正在运行 */
@@ -14,20 +16,6 @@ interface ControlPanelProps {
   animationDelay?: string;
 }
 
-/**
- * 计时器控制面板组件 - 管理开始/暂停/重置按钮
- *
- * @example
- * ```tsx
- * <ControlPanel
- *   isRunning={isRunning}
- *   onStart={handleStart}
- *   onPause={handlePause}
- *   onReset={handleReset}
- *   animationDelay="0.3s"
- * />
- * ```
- */
 export const ControlPanel: FunctionalComponent<ControlPanelProps> = ({
   isRunning,
   onStart,
@@ -41,29 +29,20 @@ export const ControlPanel: FunctionalComponent<ControlPanelProps> = ({
       style={{ animationDelay, animationFillMode: "both" }}
     >
       {!isRunning ? (
-        <button
-          onClick={onStart}
-          className="btn-primary flex-1 sm:flex-none sm:w-32 md:w-40 flex items-center justify-center gap-1 sm:gap-2 text-sm sm:text-base"
-        >
-          <span className="text-lg sm:text-xl">▶</span>
+        <Button variant="primary" onClick={onStart} className="flex-1 sm:flex-none sm:w-32 md:w-40">
+          <PlayIconComponent />
           <span className="hidden sm:inline">{t("home.start")}</span>
-        </button>
+        </Button>
       ) : (
-        <button
-          onClick={onPause}
-          className="btn-primary flex-1 sm:flex-none sm:w-32 md:w-40 flex items-center justify-center gap-1 sm:gap-2 text-sm sm:text-base"
-        >
-          <span className="text-lg sm:text-xl">⏸</span>
+        <Button variant="primary" onClick={onPause} className="flex-1 sm:flex-none sm:w-32 md:w-40">
+          <PauseIconComponent />
           <span className="hidden sm:inline">{t("home.pause")}</span>
-        </button>
+        </Button>
       )}
-      <button
-        onClick={onReset}
-        className="btn-secondary flex-1 sm:flex-none sm:w-32 md:w-40 flex items-center justify-center gap-1 sm:gap-2 text-sm sm:text-base"
-      >
-        <span className="text-lg sm:text-xl">↻</span>
+      <Button variant="secondary" onClick={onReset} className="flex-1 sm:flex-none sm:w-32 md:w-40">
+        <ResetIcon />
         <span className="hidden sm:inline">{t("home.reset")}</span>
-      </button>
+      </Button>
     </div>
   );
 };

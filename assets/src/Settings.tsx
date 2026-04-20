@@ -1,16 +1,26 @@
-import type { FunctionalComponent } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import type { FunctionalComponent, VNode } from "preact";
+import { useEffect, useState, useRef, useCallback } from "preact/hooks";
 import { Header } from "./components/Header";
 import { TabPanel } from "./components/TabPanel";
 import { BasicSettings } from "./components/BasicSettings";
 import { CountdownSettings } from "./components/CountdownSettings";
 import { StopwatchSettings } from "./components/StopwatchSettings";
-import { PresetSettings, type TimerPreset } from "./components/PresetSettings";
-import { WorldClockSettings } from "./components/WorldClockSettings";
 import { t, setLanguage } from "./utils/i18n";
+import { getAPIClient } from "./utils/apiClientSingleton";
+import { ClockIconComponent, CheckIconComponent, ResetIcon } from "./utils/icons";
+import {
+  DEFAULT_AUDIO_PREFERENCES,
+  loadAudioPreferences,
+  normalizeAudioPreferences,
+  saveAudioPreferences,
+} from "./utils/audio";
+import { STORAGE_KEYS } from "./utils/constants";
+import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
 
 interface SettingsPageProps {
   onBackClick?: () => void;
+  wallpaper?: string;
+  onWallpaperChange?: (wallpaper: string) => void;
 }
 
 interface SettingsConfig {
@@ -19,6 +29,14 @@ interface SettingsConfig {
     language: string;
     default_mode: string;
     theme_mode: string;
+    wallpaper?: string;
+    sound_enabled: boolean;
+    sound_tick: boolean;
+    sound_finish: boolean;
+    sound_volume: number;
+    layout_density?: string;
+    time_display_style?: string;
+    light_style?: string;
   };
   clock_defaults: {
     countdown: {
@@ -31,7 +49,6 @@ interface SettingsConfig {
       max_seconds: number;
     };
   };
-  presets?: TimerPreset[];
 }
 
 const DEFAULT_CONFIG: SettingsConfig = {
@@ -40,6 +57,14 @@ const DEFAULT_CONFIG: SettingsConfig = {
     language: "ZH",
     default_mode: "countdown",
     theme_mode: "dark",
+    wallpaper: "",
+    sound_enabled: DEFAULT_AUDIO_PREFERENCES.sound_enabled,
+    sound_tick: DEFAULT_AUDIO_PREFERENCES.sound_tick,
+    sound_finish: DEFAULT_AUDIO_PREFERENCES.sound_finish,
+    sound_volume: DEFAULT_AUDIO_PREFERENCES.sound_volume,
+    layout_density: "normal",
+    time_display_style: "classic",
+    light_style: "paper",
   },
   clock_defaults: {
     countdown: {
@@ -52,39 +77,52 @@ const DEFAULT_CONFIG: SettingsConfig = {
       max_seconds: 86400,
     },
   },
-  presets: [],
 };
 
-const TABS = [
-  { id: "basic", labelKey: "settings.tabs.basic", icon: "⚙️" },
-  { id: "countdown", labelKey: "settings.tabs.countdown", icon: "⏱️" },
-  { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: "⏲️" },
-  { id: "world_clock", labelKey: "settings.tabs.world_clock", icon: "🌐" },
-  { id: "presets", labelKey: "settings.tabs.presets", icon: "⭐" },
+const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
+  { id: "basic", labelKey: "settings.tabs.basic" },
+  { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
+  { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
 ];
+
+const LIGHT_STYLE_STORAGE_KEY = "lt_light_style";
+const THEME_MODE_STORAGE_KEY = "lt_theme_mode";
 
 export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   onBackClick,
+  wallpaper,
+  onWallpaperChange,
 }) => {
+  const apiClientRef = useRef<ReturnType<typeof getAPIClient> | null>(null);
   const [config, setConfig] = useState<SettingsConfig>(DEFAULT_CONFIG);
-  const [presets, setPresets] = useState<TimerPreset[]>([]);
   const [activeTab, setActiveTab] = useState("basic");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const animationsEnabled = !isWebViewRuntime();
+  const pendingInteractionLabelRef = useRef<string | null>(null);
+  const pendingInteractionStartRef = useRef<number>(0);
 
-  // 根据默认模式切换标签页，确保模式与配置联动
+  const markInteraction = useCallback((label: string) => {
+    if (!isPerfDebugEnabled()) return;
+    pendingInteractionLabelRef.current = label;
+    pendingInteractionStartRef.current = performance.now();
+  }, []);
+
+  const handleTabChange = useCallback((tabId: string) => {
+    markInteraction(`tab.change:${tabId}`);
+    setActiveTab(tabId);
+  }, [markInteraction]);
+
   useEffect(() => {
-    const modeTab =
-      config.basic.default_mode === "countdown"
-        ? "countdown"
-        : config.basic.default_mode === "stopwatch"
-          ? "stopwatch"
-          : "world_clock";
+    apiClientRef.current = getAPIClient();
+  }, []);
+
+  useEffect(() => {
+    const modeTab = config.basic.default_mode === "countdown" ? "countdown" : "stopwatch";
     setActiveTab(modeTab);
   }, [config.basic.default_mode]);
 
-  // 应用主题
-  const applyTheme = (themeMode: string = "dark") => {
+  const applyTheme = (themeMode = "dark") => {
     const html = document.documentElement;
     const theme =
       themeMode === "auto"
@@ -102,258 +140,369 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     }
   };
 
-  const loadSettings = () => {
-    // 从后端加载设置
-    // 后端会通过 window.updateSettingsDisplay() 回调返回设置数据
-    return new Promise<void>((resolve) => {
-      try {
-        // 设置超时：如果 2 秒内未收到回调，使用默认配置
-        const timeoutId = setTimeout(() => {
-          console.warn("⚠️ 加载设置超时，使用默认配置");
-          setSaveMessage(t("errors.offline.message"));
-          resolve();
-        }, 2000);
-
-        // 设置全局回调，用于接收后端发送的设置数据
-        (window as any).updateSettingsDisplay = (settingsJson: string) => {
-          clearTimeout(timeoutId);
-          try {
-            const parsedConfig = JSON.parse(settingsJson) as SettingsConfig;
-            setConfig(parsedConfig);
-            setPresets(parsedConfig.presets || []);
-            console.log("✅ 设置已加载:", parsedConfig);
-          } catch (parseError) {
-            console.error("❌ 解析设置 JSON 失败:", parseError);
-            setSaveMessage(
-              t("validation.load_error", { error: "JSON 解析失败" }),
-            );
-          }
-          resolve();
-        };
-
-        // 调用后端的 get_settings，后端会通过 window.run() 调用上面的回调
-        window.webui?.call("get_settings");
-      } catch (error) {
-        setSaveMessage(
-          t("validation.load_error", {
-            error: error instanceof Error ? error.message : "未知错误",
-          }),
-        );
-      }
-    });
+  const applyLightStyle = (lightStyle = "paper") => {
+    const html = document.documentElement;
+    html.classList.remove("light-style-mist");
+    if (lightStyle === "mist") {
+      html.classList.add("light-style-mist");
+    }
   };
 
-  // 组件挂载时加载设置
+  const loadSettings = async () => {
+    const startAt = performance.now();
+    if (!apiClientRef.current) {
+      setSaveMessage(t("errors.offline.message"));
+      return;
+    }
+
+    try {
+      const apiStartAt = performance.now();
+      const settings = await apiClientRef.current.getSettings();
+      const apiDurationMs = Math.round(performance.now() - apiStartAt);
+
+      const normalizeStartAt = performance.now();
+      const s = settings as any;
+      const localAudioPreferences = loadAudioPreferences();
+      const audioPreferences = normalizeAudioPreferences({
+        sound_enabled: s?.basic?.sound_enabled ?? localAudioPreferences.sound_enabled,
+        sound_tick: s?.basic?.sound_tick ?? localAudioPreferences.sound_tick,
+        sound_finish: s?.basic?.sound_finish ?? localAudioPreferences.sound_finish,
+        sound_volume: s?.basic?.sound_volume ?? localAudioPreferences.sound_volume,
+      });
+      saveAudioPreferences(audioPreferences);
+      
+      const localLayoutDensity = localStorage.getItem(STORAGE_KEYS.LAYOUT_DENSITY) || "normal";
+      const localTimeDisplayStyle = localStorage.getItem(STORAGE_KEYS.TIME_DISPLAY_STYLE) || "classic";
+      const localLightStyle = localStorage.getItem(LIGHT_STYLE_STORAGE_KEY) || "paper";
+      
+      const loadedConfig: SettingsConfig = {
+        basic: {
+          timezone: s?.basic?.timezone ?? 8,
+          language: s?.basic?.language ?? "ZH",
+          default_mode: s?.basic?.default_mode ?? "countdown",
+          theme_mode: s?.basic?.theme_mode ?? "dark",
+          wallpaper: s?.basic?.wallpaper ?? "",
+          sound_enabled: audioPreferences.sound_enabled,
+          sound_tick: audioPreferences.sound_tick,
+          sound_finish: audioPreferences.sound_finish,
+          sound_volume: audioPreferences.sound_volume,
+          layout_density: localLayoutDensity,
+          time_display_style: localTimeDisplayStyle,
+          light_style: localLightStyle,
+        },
+        clock_defaults: {
+          countdown: s?.countdown ? {
+            duration_seconds: s.countdown?.duration_seconds ?? 1500,
+            loop: s.countdown?.loop ?? false,
+            loop_count: s.countdown?.loop_count ?? 0,
+            loop_interval_seconds: s.countdown?.loop_interval_seconds ?? 0,
+          } : DEFAULT_CONFIG.clock_defaults.countdown,
+          stopwatch: s?.stopwatch ? {
+            max_seconds: s.stopwatch?.max_seconds ?? 86400,
+          } : DEFAULT_CONFIG.clock_defaults.stopwatch,
+        },
+      };
+      const normalizeDurationMs = Math.round(performance.now() - normalizeStartAt);
+      
+      const setStateStartAt = performance.now();
+      setConfig(loadedConfig);
+      logPerf("Settings.load.success", {
+        durationMs: Math.round(performance.now() - startAt),
+        apiDurationMs,
+        normalizeDurationMs,
+        setStateScheduleMs: Math.round(performance.now() - setStateStartAt),
+        defaultMode: loadedConfig.basic.default_mode,
+        language: loadedConfig.basic.language,
+      });
+    } catch (error) {
+      console.error("加载设置失败:", error);
+      setSaveMessage(t("errors.offline.message"));
+      logPerf("Settings.load.error", {
+        durationMs: Math.round(performance.now() - startAt),
+      });
+    }
+  };
+
   useEffect(() => {
-    loadSettings();
+    void loadSettings();
   }, []);
 
-  // 主题变化时应用主题
   useEffect(() => {
-    applyTheme(config.basic.theme_mode || "dark");
+    const startAt = performance.now();
+    const themeMode = config.basic.theme_mode || "dark";
+    applyTheme(themeMode);
+    localStorage.setItem(THEME_MODE_STORAGE_KEY, themeMode);
+    logPerf("Settings.theme.applied", {
+      themeMode,
+      durationMs: Math.round(performance.now() - startAt),
+    });
   }, [config.basic.theme_mode]);
 
-  // 语言变化时加载对应语言包
   useEffect(() => {
+    const startAt = performance.now();
+    applyLightStyle(config.basic.light_style || "paper");
+    logPerf("Settings.lightStyle.applied", {
+      lightStyle: config.basic.light_style || "paper",
+      durationMs: Math.round(performance.now() - startAt),
+    });
+  }, [config.basic.light_style]);
+
+  useEffect(() => {
+    const startAt = performance.now();
     setLanguage(config.basic.language).catch((err) =>
       console.error("加载语言失败", err),
     );
+    logPerf("Settings.language.changed", {
+      language: config.basic.language,
+      scheduleMs: Math.round(performance.now() - startAt),
+    });
   }, [config.basic.language]);
 
+  useEffect(() => {
+    onWallpaperChange?.(config.basic.wallpaper || "");
+  }, [config.basic.wallpaper, onWallpaperChange]);
+
   const handleSave = () => {
+    const startAt = performance.now();
     setIsSaving(true);
     setSaveMessage("");
 
-    try {
-      // 调用后端保存设置
-      const configJson = JSON.stringify({ ...config, presets });
-      window.webui?.call("change_settings", configJson);
+    const audioPreferences = normalizeAudioPreferences({
+      sound_enabled: config.basic.sound_enabled,
+      sound_tick: config.basic.sound_tick,
+      sound_finish: config.basic.sound_finish,
+      sound_volume: config.basic.sound_volume,
+    });
+    saveAudioPreferences(audioPreferences);
+    
+    // 保存布局密度到localStorage
+    localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, config.basic.layout_density || "normal");
+    localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, config.basic.time_display_style || "classic");
+    localStorage.setItem(LIGHT_STYLE_STORAGE_KEY, config.basic.light_style || "paper");
 
-      setTimeout(() => {
-        setIsSaving(false);
-        setSaveMessage(t("common.save_success"));
-        setTimeout(() => setSaveMessage(""), 3000);
-      }, 500);
-    } catch (error) {
-      setIsSaving(false);
-      const errorMessage = error instanceof Error ? error.message : "未知错误";
-      setSaveMessage(t("validation.save_error", { error: errorMessage }));
+    const {
+      sound_enabled,
+      sound_tick,
+      sound_finish,
+      sound_volume,
+      layout_density,
+      time_display_style,
+      light_style,
+      ...serverBasic
+    } =
+      config.basic;
+    const serverConfig = {
+      ...config,
+      basic: serverBasic,
+    };
+
+    void sound_enabled;
+    void sound_tick;
+    void sound_finish;
+    void sound_volume;
+    void layout_density;
+    void time_display_style;
+    void light_style;
+
+    if (apiClientRef.current) {
+      void apiClientRef.current.updateSettings(serverConfig)
+        .then(() => {
+          setSaveMessage(t("common.save_success"));
+          setTimeout(() => setSaveMessage(""), 3000);
+          logPerf("Settings.save.success", {
+            durationMs: Math.round(performance.now() - startAt),
+          });
+        })
+        .catch((error) => {
+          const errorMessage = error instanceof Error ? error.message : "未知错误";
+          setSaveMessage(t("validation.save_error", { error: errorMessage }));
+          logPerf("Settings.save.error", {
+            durationMs: Math.round(performance.now() - startAt),
+            error: errorMessage,
+          });
+        })
+        .finally(() => {
+          setIsSaving(false);
+        });
     }
   };
 
   const handleReset = () => {
     if (confirm(t("common.reset_confirm"))) {
+      const startAt = performance.now();
       setConfig(DEFAULT_CONFIG);
-      setPresets([]);
+      saveAudioPreferences(DEFAULT_AUDIO_PREFERENCES);
+      localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, "normal");
+      localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, "classic");
+      localStorage.setItem(LIGHT_STYLE_STORAGE_KEY, "paper");
       setSaveMessage(t("common.save_hint"));
+      logPerf("Settings.reset", {
+        durationMs: Math.round(performance.now() - startAt),
+      });
     }
   };
 
+  useEffect(() => {
+    if (!isPerfDebugEnabled()) return;
+    logPerf("Settings.tab.changed", {
+      activeTab,
+      defaultMode: config.basic.default_mode,
+    });
+  }, [activeTab, config.basic.default_mode]);
+
+  useEffect(() => {
+    if (!isPerfDebugEnabled()) return;
+    if (!pendingInteractionLabelRef.current) return;
+
+    const interactionLabel = pendingInteractionLabelRef.current;
+    const interactionStartAt = pendingInteractionStartRef.current;
+    pendingInteractionLabelRef.current = null;
+
+    requestAnimationFrame(() => {
+      logPerf("Settings.interaction.frame", {
+        label: interactionLabel,
+        durationMs: Math.round(performance.now() - interactionStartAt),
+        activeTab,
+      });
+    });
+  }, [activeTab, config]);
+
+  useEffect(() => {
+    if (!isPerfDebugEnabled()) return;
+    if (typeof PerformanceObserver === "undefined") return;
+
+    const observer = new PerformanceObserver((list) => {
+      const entries = list.getEntries();
+      for (const entry of entries) {
+        logPerf("Settings.longtask", {
+          name: entry.name,
+          durationMs: Math.round(entry.duration),
+          activeTab,
+        });
+      }
+    });
+
+    try {
+      observer.observe({ type: "longtask", buffered: true } as PerformanceObserverInit);
+    } catch {
+      // 部分 WebView 不支持 longtask，忽略即可。
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeTab]);
+
   return (
-    <div className="flex flex-col w-screen h-screen bg-primary-dark text-text-primary-dark transition-colors duration-300 animate-fadeIn overflow-hidden">
-      {/* 头部 */}
+    <div
+      className={`flex flex-col flex-1 text-base-content transition-colors duration-300 overflow-hidden bg-transparent ${
+        animationsEnabled ? "animate-fadeIn" : ""
+      }`}
+    >
       <div
-        className="flex justify-between items-center px-4 sm:px-6 md:px-8 py-3 sm:py-4 md:py-6 border-b border-border-dark animate-slideUp flex-shrink-0"
-        style={{ animationDelay: "0.1s", animationFillMode: "both" }}
+        className="flex flex-col w-full h-full"
+        style={(config.basic.wallpaper || wallpaper) ? { backgroundColor: "rgba(0,0,0,0.15)" } : {}}
       >
         <Header
-          title={`⚙ ${t("common.settings_title")}`}
+          title={t("common.settings_title")}
           showBack={true}
           onBackClick={onBackClick}
+          showSettings={false}
         />
-      </div>
 
-      {/* 标签页和内容 */}
-      <TabPanel
-        tabs={TABS.map((tab) => ({ ...tab, label: t(tab.labelKey) }))}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        isAnimated={true}
-      >
-        {activeTab === "basic" && (
-          <BasicSettings
-            config={config.basic}
-            onChange={(newBasic) => {
-              setConfig((prev) => {
-                const next = { ...prev, basic: newBasic };
-
-                // 非倒计时模式下隐藏循环配置并重置为关闭
-                if (newBasic.default_mode !== "countdown") {
-                  next.clock_defaults = {
-                    ...prev.clock_defaults,
-                    countdown: {
-                      ...prev.clock_defaults.countdown,
-                      loop: false,
-                      loop_count: 0,
-                      loop_interval_seconds: 0,
-                    },
-                  };
-                }
-
-                return next;
-              });
-            }}
-          />
-        )}
-
-        {activeTab === "countdown" && (
-          <CountdownSettings
-            config={config.clock_defaults.countdown}
-            showLoopControls={config.basic.default_mode === "countdown"}
-            onChange={(newCountdown) =>
-              setConfig({
-                ...config,
-                clock_defaults: {
-                  ...config.clock_defaults,
-                  countdown: newCountdown,
-                },
-              })
-            }
-          />
-        )}
-
-        {activeTab === "stopwatch" && (
-          <StopwatchSettings
-            config={config.clock_defaults.stopwatch}
-            onChange={(newStopwatch) =>
-              setConfig({
-                ...config,
-                clock_defaults: {
-                  ...config.clock_defaults,
-                  stopwatch: newStopwatch,
-                },
-              })
-            }
-          />
-        )}
-
-        {activeTab === "world_clock" && (
-          <WorldClockSettings
-            timezone={config.basic.timezone}
-            onTimezoneChange={(tz) =>
-              setConfig({
-                ...config,
-                basic: { ...config.basic, timezone: tz },
-              })
-            }
-          />
-        )}
-
-        {activeTab === "presets" && (
-          <PresetSettings
-            presets={presets}
-            onChange={setPresets}
-            onUsePreset={(preset) => {
-              if (
-                preset.mode === "countdown" &&
-                preset.config.duration_seconds
-              ) {
-                setConfig({
-                  ...config,
-                  basic: { ...config.basic, default_mode: "countdown" },
-                  clock_defaults: {
-                    ...config.clock_defaults,
-                    countdown: {
-                      duration_seconds: preset.config.duration_seconds,
-                      loop: !!preset.config.loop,
-                      loop_count: preset.config.loop_count ?? 0,
-                      loop_interval_seconds:
-                        preset.config.loop_interval_seconds ?? 0,
-                    },
-                  },
-                });
-              } else if (
-                preset.mode === "stopwatch" &&
-                preset.config.max_seconds
-              ) {
-                setConfig({
-                  ...config,
-                  basic: { ...config.basic, default_mode: "stopwatch" },
-                  clock_defaults: {
-                    ...config.clock_defaults,
-                    stopwatch: {
-                      max_seconds: preset.config.max_seconds,
-                    },
-                  },
-                });
-              } else if (preset.mode === "world_clock") {
-                setConfig({
-                  ...config,
-                  basic: {
-                    ...config.basic,
-                    default_mode: "world_clock",
-                    timezone: preset.config.timezone ?? config.basic.timezone,
-                  },
-                });
-              }
-              setSaveMessage(
-                t("settings.presets.applied", { name: preset.name }),
-              );
-            }}
-          />
-        )}
-      </TabPanel>
-
-      {/* 操作按钮 */}
-      <div
-        className="flex gap-2 sm:gap-3 md:gap-4 items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 border-t border-border-dark bg-primary-dark flex-wrap animate-slideUp flex-shrink-0"
-        style={{ animationDelay: "0.3s", animationFillMode: "both" }}
-      >
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="btn-primary"
+        <TabPanel
+          tabs={TABS.map((tab) => ({ ...tab, label: t(tab.labelKey) }))}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          isAnimated={animationsEnabled}
         >
-          {isSaving ? t("common.saving") : `💾 ${t("common.save")}`}
-        </button>
-        <button onClick={handleReset} className="btn-secondary">
-          {`🔄 ${t("common.reset_default")}`}
-        </button>
-        {saveMessage && (
-          <div className="px-4 sm:px-5 py-2 rounded-lg text-xs sm:text-sm font-medium bg-secondary-dark text-accent-dark animate-pulse">
-            {saveMessage}
-          </div>
-        )}
+          {activeTab === "basic" && (
+            <BasicSettings
+              config={config.basic}
+              isAnimated={animationsEnabled}
+              onChange={(newBasic) => {
+                markInteraction("basic.config.change");
+                setConfig((prev) => {
+                  const next = { ...prev, basic: newBasic };
+
+                  if (newBasic.default_mode !== "countdown") {
+                    next.clock_defaults = {
+                      ...prev.clock_defaults,
+                      countdown: {
+                        ...prev.clock_defaults.countdown,
+                        loop: false,
+                        loop_count: 0,
+                        loop_interval_seconds: 0,
+                      },
+                    };
+                  }
+
+                  return next;
+                });
+              }}
+            />
+          )}
+
+          {activeTab === "countdown" && (
+            <CountdownSettings
+              config={config.clock_defaults.countdown}
+              showLoopControls={config.basic.default_mode === "countdown"}
+              isAnimated={animationsEnabled}
+              onChange={(newCountdown) => {
+                markInteraction("countdown.config.change");
+                setConfig({
+                  ...config,
+                  clock_defaults: {
+                    ...config.clock_defaults,
+                    countdown: newCountdown,
+                  },
+                });
+              }}
+            />
+          )}
+
+          {activeTab === "stopwatch" && (
+            <StopwatchSettings
+              config={config.clock_defaults.stopwatch}
+              isAnimated={animationsEnabled}
+              onChange={(newStopwatch) => {
+                markInteraction("stopwatch.config.change");
+                setConfig({
+                  ...config,
+                  clock_defaults: {
+                    ...config.clock_defaults,
+                    stopwatch: newStopwatch,
+                  },
+                });
+              }}
+            />
+          )}
+        </TabPanel>
+
+        <div
+          className={`my-surface-panel flex gap-2 sm:gap-3 md:gap-4 items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 flex-wrap flex-shrink-0 ${
+            animationsEnabled ? "animate-slideUp" : ""
+          }`}
+          style={animationsEnabled ? { animationDelay: "0.3s", animationFillMode: "both" } : undefined}
+        >
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="btn-primary inline-flex items-center gap-2"
+          >
+            {!isSaving && <CheckIconComponent />}
+            {isSaving ? t("common.saving") : t("common.save")}
+          </button>
+          <button onClick={handleReset} className="my-btn-secondary inline-flex items-center gap-2">
+            <ResetIcon />
+            {t("common.reset_default")}
+          </button>
+          {saveMessage && (
+            <div className="px-4 sm:px-5 py-2 rounded-lg text-xs sm:text-sm font-medium bg-secondary-dark text-accent-dark animate-pulse">
+              {saveMessage}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

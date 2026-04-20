@@ -4,6 +4,9 @@ import { viteSingleFile } from 'vite-plugin-singlefile'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
+  build: {
+    assetsInlineLimit: Number.MAX_SAFE_INTEGER,
+  },
   plugins: [
     tailwindcss(),
     preact(), // 代替 react()
@@ -17,4 +20,12 @@ export default defineConfig({
     },
   },
   assetsInclude: ['**/*.toml'], // 允许 TOML 文件作为资产导入
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
+  },
 })

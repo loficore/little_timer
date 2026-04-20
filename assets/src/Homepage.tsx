@@ -10,48 +10,24 @@ import { memo } from "preact/compat";
 import { logInfo, logSuccess, logError } from "./utils/logger";
 import { Mode } from "./utils/share";
 import { t } from "./utils/i18n";
+import { formatDuration, getToday } from "./utils/formatters";
+import { getAPIClient, type APIClient, type TimerState } from "./utils/apiClientSingleton";
+import { SSEClient } from "./utils/sseClient";
+import type { HabitSet, Habit, HabitWithProgress } from "./types/habit.ts";
+import { audioEngine, loadAudioPreferences } from "./utils/audio";
 import { Header } from "./components/Header";
 import { TimeDisplay } from "./components/TimeDisplay";
-import { StatusBadge } from "./components/StatusBadge";
 import { ControlPanel } from "./components/ControlPanel";
-import { ModeSelector } from "./components/ModeSelector";
+import { HabitModal } from "./components/HabitModal";
 
 interface HomePageProps {
-  onSettingsClick?: () => void;
+  onStatsClick?: () => void;
+  onBackClick?: () => void;
+  selectedSetId?: number | null;
+  selectedHabit?: Habit | null;
+  onSetClick?: (setId: number) => void;
+  onHabitClick?: (habit: Habit) => void;
 }
-
-// 声明全局 webui 类型
-declare global {
-  interface Window {
-    webui?: {
-      call: (functionName: string, ...args: unknown[]) => void;
-    };
-  }
-}
-
-// 倒计时/秒表用：格式化持续时间（秒）
-const formatDuration = (totalSeconds: number): string => {
-  const hours = Math.floor(totalSeconds / 3600)
-    .toString()
-    .padStart(2, "0");
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = Math.floor(totalSeconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${hours}:${minutes}:${seconds}`;
-};
-
-// 世界时钟用：格式化 Unix 秒为本地时区时间
-const formatClockTime = (unixSeconds: number): string => {
-  const d = new Date(unixSeconds * 1000);
-  // 使用 UTC 视角读取，避免本地时区再次偏移（否则会双重偏移）
-  const h = d.getUTCHours().toString().padStart(2, "0");
-  const m = d.getUTCMinutes().toString().padStart(2, "0");
-  const s = d.getUTCSeconds().toString().padStart(2, "0");
-  return `${h}:${m}:${s}`;
-};
 
 interface HomeState {
   time: string;
@@ -62,11 +38,14 @@ interface HomeState {
   loopTotal: number | null;
   restRemaining: number;
   isFinished: boolean;
-  timezone: number; // 前端本地 world clock 时区（来自 settings），单位小时
+  timezone: number;
 }
 
-const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
-  // 合并所有状态为一个对象，减少多次 setState
+const HomePage = memo((props: HomePageProps) => {
+  const { onStatsClick, onBackClick, selectedSetId, selectedHabit, onSetClick, onHabitClick } = props;
+  const apiClientRef = useRef<APIClient | null>(null);
+  const sseClientRef = useRef<SSEClient | null>(null);
+
   const [state, setState] = useState<HomeState>(() => ({
     time: "25:00:00",
     mode: Mode.Countdown,
@@ -78,11 +57,25 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     isFinished: false,
     timezone: 8,
   }));
+  const [isConnected, setIsConnected] = useState(true);
+  const [habitSets, setHabitSets] = useState<HabitSet[]>([]);
+  const [habits, setHabits] = useState<HabitWithProgress[]>([]);
+  const [modalState, setModalState] = useState<{ isOpen: boolean; mode: "set" | "habit"; setId?: number }>({
+    isOpen: false,
+    mode: "set",
+  });
+  const [isLoadingHabits, setIsLoadingHabits] = useState(false);
   const prevFinishedRef = useRef(false);
-  const [isTimeAnimating, setIsTimeAnimating] = useState(false);
-  const timeAnimTimerRef = useRef<number | null>(null);
+  const sessionRecordedRef = useRef(false);
+  const isConnectedRef = useRef(false);
+  const lastCalibratedTimeRef = useRef<number>(0);
+  const lastCalibratedTimestampRef = useRef<number>(0);
 
-  // 应用主题（提前定义以便在 useEffect 中使用）
+  const modeMap: Record<string, Mode> = {
+    countdown: Mode.Countdown,
+    stopwatch: Mode.Stopwatch,
+  };
+
   const applyTheme = useCallback((theme: string) => {
     const html = document.documentElement;
     if (theme === "light") {
@@ -94,122 +87,119 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     }
   }, []);
 
-  // 将 webuiEvent 回调用 useCallback 包裹，避免每次渲染重新创建
-  const handleWebuiEvent = useCallback((event: any) => {
-    logInfo("收到来自后端的事件: " + event.function);
-    if (event.function === "update_time") {
-      // 只在 time 变化时 setState
-      const seconds = typeof event.data === "number" ? event.data : 0;
-      setState((prev) => {
-        // 世界时钟交给前端自驱动，不使用后端时间
-        if (prev.mode === Mode.WorldClock) return prev;
-        const formatted = formatDuration(seconds);
-        if (prev.time === formatted) return prev;
-        logInfo("⏱️ 时间已更新: " + seconds + "秒 -> " + formatted);
-        return { ...prev, time: formatted };
-      });
-    } else if (event.function === "update_mode") {
-      const newMode = event.data as Mode;
-      logInfo(
-        "🔄 收到模式更新事件，新模式值: " +
-          newMode +
-          " (类型: " +
-          typeof newMode +
-          ")",
-      );
-      setState((prev) => {
-        if (prev.mode === newMode) {
-          logInfo("🔄 模式相同，跳过更新");
-          return prev;
-        }
-        logSuccess("🔄 模式已更新: " + prev.mode + " -> " + newMode);
-        return { ...prev, mode: newMode };
-      });
-    } else if (event.function === "update_state") {
-      const s = event.data as {
-        isRunning: boolean;
-        isFinished: boolean;
-        inRest: boolean;
-        loopRemaining?: number;
-        loopTotal?: number;
-        restRemaining?: number;
-        timezone?: number;
-      };
-      setState((prev) => {
-        // 只有有变化时才 setState，避免无谓重渲染
-        if (
-          prev.isRunning === s.isRunning &&
-          prev.inRest === s.inRest &&
-          prev.loopRemaining === (s.loopRemaining ?? null) &&
-          prev.loopTotal === (s.loopTotal ?? null) &&
-          prev.restRemaining === (s.restRemaining ?? 0) &&
-          prev.isFinished === s.isFinished &&
-          prev.timezone === (s.timezone ?? prev.timezone)
-        ) {
-          return prev;
-        }
-        return {
-          ...prev,
-          isRunning: s.isRunning,
-          inRest: s.inRest,
-          loopRemaining: s.loopRemaining ?? null,
-          loopTotal: s.loopTotal ?? null,
-          restRemaining: s.restRemaining ?? 0,
-          isFinished: s.isFinished,
-          timezone: s.timezone ?? prev.timezone,
-        };
-      });
-      // 完成通知（仅在从未完成到完成时触发一次）
-      if (s.isFinished && !prevFinishedRef.current) {
-        try {
-          const AudioCtx =
-            (window as any).AudioContext || (window as any).webkitAudioContext;
-          if (AudioCtx) {
-            const ctx = new AudioCtx();
-            const o = ctx.createOscillator();
-            const g = ctx.createGain();
-            o.type = "sine";
-            o.frequency.value = 880;
-            g.gain.value = 0.06;
-            o.connect(g);
-            g.connect(ctx.destination);
-            o.start();
-            setTimeout(() => {
-              o.stop();
-              ctx.close();
-            }, 300);
-          }
-        } catch {
-          // 忽略音频相关错误
-        }
-        try {
-          if ("Notification" in window) {
-            if (Notification.permission === "granted") {
-              new Notification(t("home.finished_notification"));
-            } else if (Notification.permission !== "denied") {
-              Notification.requestPermission().then((p) => {
-                if (p === "granted")
-                  new Notification(t("home.finished_notification"));
-              });
-            }
-          }
-        } catch {
-          // 忽略通知相关错误
-        }
+  const updateStateFromTimerState = useCallback((timerState: TimerState) => {
+    const newMode = modeMap[timerState.mode] || Mode.Countdown;
+
+    lastCalibratedTimeRef.current = timerState.time;
+    lastCalibratedTimestampRef.current = Date.now();
+
+    setState((prev) => {
+      const newTime = formatDuration(timerState.time);
+
+      if (
+        prev.time === newTime &&
+        prev.mode === newMode &&
+        prev.isRunning === timerState.is_running &&
+        prev.inRest === timerState.in_rest &&
+        prev.loopRemaining === (timerState.loop_remaining ?? null) &&
+        prev.loopTotal === (timerState.loop_total ?? null) &&
+        prev.restRemaining === (timerState.rest_remaining ?? 0) &&
+        prev.isFinished === timerState.is_finished &&
+        prev.timezone === timerState.timezone
+      ) {
+        return prev;
       }
-      prevFinishedRef.current = s.isFinished;
-      logInfo("📊 状态已更新: " + JSON.stringify(s));
+
+      return {
+        ...prev,
+        time: newTime,
+        mode: newMode,
+        isRunning: timerState.is_running,
+        inRest: timerState.in_rest,
+        loopRemaining: timerState.loop_remaining ?? null,
+        loopTotal: timerState.loop_total ?? null,
+        restRemaining: timerState.rest_remaining ?? 0,
+        isFinished: timerState.is_finished,
+        timezone: timerState.timezone,
+      };
+    });
+
+    if (timerState.is_finished && !prevFinishedRef.current) {
+      try {
+        audioEngine.playFinish();
+      } catch {
+        // 忽略音频相关错误
+      }
+      try {
+        if ("Notification" in window) {
+          if (Notification.permission === "granted") {
+            new Notification(t("home.finished_notification"));
+          } else if (Notification.permission !== "denied") {
+            Notification.requestPermission().then((p) => {
+              if (p === "granted")
+                new Notification(t("home.finished_notification"));
+            }).catch(() => {
+              // ignore notification errors
+            });
+          }
+        }
+      } catch {
+        // 忽略通知相关错误
+      }
+
+      // 自动记录 session（使用 SSE 推送的 habit_id 和 elapsed）
+      const habitId = timerState.habit_id;
+      const elapsed = timerState.elapsed ?? 0;
+      if (habitId && elapsed > 0 && !sessionRecordedRef.current) {
+        sessionRecordedRef.current = true;
+        const today = getToday();
+        const client = getAPIClient();
+        void client.createSession(habitId, elapsed, 1, today).then(() => {
+          logSuccess("✓ Session 已自动记录");
+        }).catch((e) => {
+          logError(`记录 session 失败: ${e}`);
+        });
+      }
     }
-  }, []);
+    prevFinishedRef.current = timerState.is_finished;
+  }, [selectedHabit]);
 
   useEffect(() => {
-    logSuccess("✅ React 应用已加载，准备就绪");
-    if (typeof window.webui !== "undefined") {
-      logSuccess("✅ webui 对象已加载");
-    } else {
-      logError("❌ webui 对象未加载！这可能是一个问题");
-    }
-    // 监听系统主题变化（自动模式）
+    const baseUrl = window.location.origin;
+    apiClientRef.current = getAPIClient();
+    sseClientRef.current = new SSEClient(baseUrl);
+    audioEngine.setPreferences(loadAudioPreferences());
+
+    const initApp = async () => {
+      logSuccess("React 应用已加载，准备就绪");
+
+      try {
+        const initialState = await apiClientRef.current!.getState();
+        updateStateFromTimerState(initialState);
+        logSuccess("初始状态已获取");
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        logError(`获取初始状态失败: ${errorMsg}`);
+      }
+
+      sseClientRef.current!.connect(
+        (timerState) => {
+          isConnectedRef.current = true;
+          setIsConnected(true);
+          updateStateFromTimerState(timerState);
+        },
+        (error: unknown) => {
+          isConnectedRef.current = false;
+          setIsConnected(false);
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          logError(`SSE 连接错误: ${errorMsg}`);
+        }
+      );
+      logInfo("SSE 连接已建立");
+    };
+
+    void initApp();
+
     const mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
     const handleThemeChange = (e: MediaQueryListEvent) => {
       const theme = e.matches ? "light" : "dark";
@@ -217,40 +207,73 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     };
     mediaQuery.addEventListener("change", handleThemeChange);
 
-    // 设置全局事件处理函数
-    (window as any).webuiEvent = handleWebuiEvent;
-    logInfo("初始化完成，等待用户交互...");
-
     return () => {
       mediaQuery.removeEventListener("change", handleThemeChange);
-    };
-  }, [applyTheme, handleWebuiEvent]);
-
-  // 时间变化时触发平滑过渡动画
-  useEffect(() => {
-    if (timeAnimTimerRef.current) {
-      window.clearTimeout(timeAnimTimerRef.current);
-    }
-    setIsTimeAnimating(true);
-    timeAnimTimerRef.current = window.setTimeout(() => {
-      setIsTimeAnimating(false);
-    }, 180);
-
-    return () => {
-      if (timeAnimTimerRef.current) {
-        window.clearTimeout(timeAnimTimerRef.current);
+      if (sseClientRef.current) {
+        sseClientRef.current.close();
       }
     };
-  }, [state.time]);
+  }, [applyTheme, updateStateFromTimerState]);
 
-  // 世界时钟前端自驱 tick：根据 settings 时区每秒刷新
+  // 加载习惯集
   useEffect(() => {
-    if (state.mode !== Mode.WorldClock) return;
+    if (!apiClientRef.current) {
+      apiClientRef.current = getAPIClient();
+    }
+    
+    const loadHabitSets = async () => {
+      try {
+        const sets = await apiClientRef.current!.getHabitSets();
+        setHabitSets(Array.isArray(sets) ? sets : []);
+      } catch (e) {
+        logError(`获取习惯集失败: ${e}`);
+      }
+    };
+    
+    void loadHabitSets();
+  }, []);
 
+  // 加载习惯列表（当选择了习惯集时）
+  useEffect(() => {
+    if (!selectedSetId || !apiClientRef.current) {
+      setHabits([]);
+      return;
+    }
+    
+    const loadHabits = async () => {
+      setIsLoadingHabits(true);
+      try {
+        const allHabits = await apiClientRef.current!.getHabits();
+        const filtered = (Array.isArray(allHabits) ? allHabits : [])
+          .filter((h: any) => h.set_id === selectedSetId)
+          .map((h: any) => ({
+            ...h,
+            today_seconds: 0,
+            today_count: 0,
+            progress: 0,
+          }));
+        setHabits(filtered);
+      } catch (e) {
+        logError(`获取习惯失败: ${e}`);
+      } finally {
+        setIsLoadingHabits(false);
+      }
+    };
+    
+    void loadHabits();
+  }, [selectedSetId]);
+
+  useEffect(() => {
     const tick = () => {
-      const now = Math.floor(Date.now() / 1000);
-      const shifted = now + state.timezone * 3600;
-      setState((prev) => ({ ...prev, time: formatClockTime(shifted) }));
+      const calibrated = lastCalibratedTimeRef.current;
+      const lastTs = lastCalibratedTimestampRef.current;
+      if (calibrated > 0 && lastTs > 0) {
+        const elapsedSeconds = Math.floor((Date.now() - lastTs) / 1000);
+        const newTime = state.mode === Mode.Countdown
+          ? Math.max(0, calibrated - elapsedSeconds)
+          : calibrated + elapsedSeconds;
+        setState((prev) => ({ ...prev, time: formatDuration(newTime) }));
+      }
     };
 
     tick();
@@ -258,77 +281,69 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
     return () => window.clearInterval(timer);
   }, [state.mode, state.timezone]);
 
-  // 控制按钮事件全部用 useCallback 包裹，避免不必要的重渲染
   const handleStart = useCallback(() => {
-    logInfo('🚀 "开始"按钮被点击');
-    try {
-      if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！后端连接失败");
-        return;
-      }
-      logInfo("✓ webui 对象存在，准备调用 start 函数");
-      window.webui.call("start");
-      // 只由后端事件驱动 isRunning 状态
-      logSuccess('✓ webui.call("start") 调用成功');
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logError("❌ 调用 start 时发生错误: " + errorMsg);
-      console.error(e);
+    logInfo('"开始"按钮被点击');
+    if (!apiClientRef.current) {
+      logError("API 客户端未初始化");
+      return;
     }
-  }, []);
+    // 重置 session 记录标记
+    sessionRecordedRef.current = false;
+    // 乐观更新：立即更新本地状态
+    setState(prev => ({ ...prev, isRunning: true, isFinished: false }));
+    const habitId = selectedHabit?.id;
+    void apiClientRef.current.startTimer(habitId).then(() => {
+      logSuccess('✓ startTimer() 调用成功');
+    }).catch((e) => {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError(`调用 startTimer 时发生错误: ${errorMsg}`);
+      // 回滚状态
+      setState(prev => ({ ...prev, isRunning: false }));
+    });
+  }, [selectedHabit]);
 
   const handlePause = useCallback(() => {
-    logInfo('⏸️ "暂停"按钮被点击');
-    try {
-      if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！后端连接失败");
-        return;
-      }
-      logInfo("✓ webui 对象存在，准备调用 pause 函数");
-      window.webui.call("pause");
-      logSuccess('✓ webui.call("pause") 调用成功');
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logError("❌ 调用 pause 时发生错误: " + errorMsg);
-      console.error(e);
+    logInfo('"暂停"按钮被点击');
+    if (!apiClientRef.current) {
+      logError("API 客户端未初始化");
+      return;
     }
+    // 乐观更新：立即更新本地状态
+    setState(prev => ({ ...prev, isRunning: false }));
+    void apiClientRef.current.pauseTimer().then(() => {
+      logSuccess('✓ pauseTimer() 调用成功');
+    }).catch((e) => {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError(`调用 pauseTimer 时发生错误: ${errorMsg}`);
+      // 回滚状态
+      setState(prev => ({ ...prev, isRunning: true }));
+    });
   }, []);
 
   const handleReset = useCallback(() => {
-    logInfo('🔄 "重置"按钮被点击');
-    try {
-      if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！");
-        return;
-      }
-      logInfo("✓ webui 对象存在，准备调用 reset 函数");
-      window.webui.call("reset");
-      logSuccess('✓ webui.call("reset") 调用成功');
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logError("❌ 调用 reset 时发生错误: " + errorMsg);
-      console.error(e);
+    logInfo('"重置"按钮被点击');
+    if (!apiClientRef.current) {
+      logError("API 客户端未初始化");
+      return;
     }
+    // 乐观更新：立即重置本地状态
+    setState(prev => ({
+      ...prev,
+      isRunning: false,
+      isFinished: false,
+      inRest: false,
+      restRemaining: 0,
+      loopRemaining: null,
+      time: "25:00:00",
+    }));
+    void apiClientRef.current.resetTimer().then(() => {
+      logSuccess('✓ resetTimer() 调用成功');
+    }).catch((e) => {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logError(`调用 resetTimer 时发生错误: ${errorMsg}`);
+    });
   }, []);
 
-  const handleModeChange = useCallback((newMode: Mode) => {
-    try {
-      if (typeof window.webui === "undefined") {
-        logError("❌ webui 对象未定义！");
-        return;
-      }
-      logInfo(`✓ webui 对象存在，准备调用 change_mode 函数，参数: ${newMode}`);
-      window.webui.call("change_mode", newMode);
-      logSuccess('✓ webui.call("change_mode") 调用成功');
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logError("❌ 调用 change_mode 时发生错误: " + errorMsg);
-      console.error(e);
-    }
-  }, []);
-
-  // 计算 memo 化的状态，避免不必要的渲染
-  // 直接使用 state 对象而不是重新构造，减少内存分配
   const statusMemo = useMemo(
     () => state,
     [
@@ -340,132 +355,217 @@ const HomePage = memo(({ onSettingsClick }: HomePageProps) => {
       state.restRemaining,
       state.mode,
       state.time,
-    ],
+    ]
   );
 
+  // 根据不同页面状态渲染内容
+  const renderContent = () => {
+    // 计时页面（选中了习惯）
+    if (selectedHabit) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center px-4 py-8">
+          <div className="text-2xl font-bold mb-2 text-white/90" style={{ color: selectedHabit.color }}>
+            {selectedHabit.name}
+          </div>
+          <div className="text-sm text-white/50 mb-8">
+            {t("timer.goal")}: {Math.floor(selectedHabit.goal_seconds / 60)} {t("common.minutes")}
+          </div>
+          
+          <TimeDisplay time={statusMemo.time} isRunning={statusMemo.isRunning} />
+          
+          <ControlPanel
+            isRunning={statusMemo.isRunning}
+            onStart={handleStart}
+            onPause={handlePause}
+            onReset={handleReset}
+          />
+          
+          <div className="mt-6">
+            <button
+              className="my-btn-secondary"
+              onClick={() => {
+                if (apiClientRef.current) {
+                  void apiClientRef.current.startRest();
+                }
+              }}
+            >
+              {t("modal.rest_5min")}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
+    // 习惯列表页面（选中了习惯集）
+    if (selectedSetId) {
+      return (
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {isLoadingHabits ? (
+            <div className="flex justify-center py-8">
+              <span className="loading loading-spinner"></span>
+            </div>
+          ) : habits.length === 0 ? (
+            <div className="text-center py-8 text-white/40">
+              {t("habit.no_habits")}
+            </div>
+          ) : (
+            habits.map((habit) => (
+              <div
+                key={habit.id}
+                className="my-surface-card rounded-xl cursor-pointer hover:scale-[1.02] transition-transform"
+                onClick={() => onHabitClick?.(habit)}
+              >
+                <div className="card-body p-4 flex-row items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-3 h-3 rounded-full"
+                      style={{ backgroundColor: habit.color }}
+                    />
+                    <div>
+                      <div className="font-medium">{habit.name}</div>
+                      <div className="text-xs text-base-content/60">
+                        {t("timer.goal")} {Math.floor(habit.goal_seconds / 60)} {t("common.minutes")}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-base-content/30">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+          
+          <button
+            className="my-btn-secondary w-full mt-4"
+            onClick={() => {
+              if (selectedSetId) {
+                setModalState({ isOpen: true, mode: "habit", setId: selectedSetId });
+              }
+            }}
+          >
+            + {t("habit.add_habit")}
+          </button>
+        </div>
+      );
+    }
+    
+    // 习惯集列表页面（首页）
+    return (
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {habitSets.length === 0 ? (
+          <div className="text-center py-8 text-white/40">
+            {t("habit.no_sets")}
+          </div>
+        ) : (
+          habitSets.map((set) => (
+            <div
+              key={set.id}
+              className="my-surface-card rounded-xl cursor-pointer hover:scale-[1.02] transition-transform"
+              onClick={() => onSetClick?.(set.id)}
+            >
+              <div className="card-body p-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-4 h-4 rounded-full"
+                    style={{ backgroundColor: set.color }}
+                  />
+                  <div className="font-semibold">{set.name}</div>
+                </div>
+                {set.description && (
+                  <div className="text-sm text-base-content/60 mt-1">
+                    {set.description}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+        
+        <button
+          className="btn btn-primary btn-block mt-4 bg-primary/80 hover:bg-primary"
+          onClick={() => setModalState({ isOpen: true, mode: "set" })}
+        >
+          + {t("habit.create_set")}
+        </button>
+      </div>
+    );
+  };
+
+  const getTitle = () => {
+    if (selectedHabit) return selectedHabit.name;
+    if (selectedSetId) {
+      const set = habitSets.find(s => s.id === selectedSetId);
+      return set?.name || t("habit.habit_list");
+    }
+    return t("common.app_name");
+  };
+
   return (
-    <div className="flex flex-col w-screen h-screen bg-primary-dark dark:bg-primary-dark transition-colors duration-300 animate-fadeIn overflow-hidden">
-      {/* 标题栏 */}
-      <Header
-        title={t("common.app_name")}
-        showSettings={true}
-        onSettingsClick={onSettingsClick}
+    <div 
+      className="flex flex-col w-screen h-screen transition-colors duration-300 animate-fadeIn overflow-hidden pb-16 lg:pb-0"
+    >
+      <div className="flex flex-col w-full h-full bg-black/40">
+        <Header
+        title={getTitle()}
+        showSettings={false}
+        showBack={!!selectedSetId || !!selectedHabit}
+        onBackClick={onBackClick}
+        showStats={!selectedSetId && !selectedHabit}
+        onStatsClick={onStatsClick}
       />
 
-      {/* 主内容区域 */}
-      <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-12 overflow-y-auto">
-        {/* 状态指示器 */}
-        <div
-          className="flex gap-2 sm:gap-3 md:gap-4 justify-center mb-6 sm:mb-8 flex-wrap w-full"
-          style={{ animationDelay: "0.1s", animationFillMode: "both" }}
-        >
-          <StatusBadge
-            status={
-              statusMemo.isRunning
-                ? "running"
-                : prevFinishedRef.current
-                  ? "finished"
-                  : "paused"
-            }
-            label={
-              statusMemo.isRunning
-                ? t("home.status_running")
-                : prevFinishedRef.current
-                  ? t("home.status_finished")
-                  : t("home.status_paused")
-            }
-            animationDelay="0.1s"
-          />
-          <span
-            className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium bg-accent-dark text-white border border-accent-dark whitespace-nowrap animate-slideUp"
-            style={{ animationDelay: "0.12s", animationFillMode: "both" }}
-          >
-            {(() => {
-              if (statusMemo.mode === Mode.Countdown)
-                return t("home.mode_countdown");
-              if (statusMemo.mode === Mode.Stopwatch)
-                return t("home.mode_stopwatch");
-              return t("home.mode_world_clock");
-            })()}
-          </span>
+      {/* 连接状态指示器 */}
+      {!isConnected && (
+        <div className="bg-error text-white text-center py-1 text-sm font-medium animate-pulse">
+          {t("connection.disconnected")}
         </div>
+      )}
 
-        {/* 时间显示 */}
-        <TimeDisplay
-          time={statusMemo.time}
-          isRunning={statusMemo.isRunning}
-          isAnimating={isTimeAnimating}
-          animationDelay="0.2s"
-        />
+      {renderContent()}
 
-        {/* 循环和休息状态提示 */}
-        {(statusMemo.inRest ||
-          (statusMemo.loopRemaining !== null &&
-            statusMemo.loopTotal !== null &&
-            statusMemo.loopTotal > 0)) && (
-          <div
-            className="text-center mb-3 sm:mb-4 text-xs sm:text-sm text-text-secondary-dark animate-slideUp w-full px-2"
-            style={{ animationDelay: "0.25s", animationFillMode: "both" }}
-          >
-            {statusMemo.inRest && (
-              <div className="text-accent-dark font-semibold">
-                {t("home.rest_status", { seconds: statusMemo.restRemaining })}
-              </div>
-            )}
-            {statusMemo.loopRemaining !== null &&
-              statusMemo.loopTotal !== null &&
-              statusMemo.loopTotal > 0 &&
-              !statusMemo.inRest && (
-                <div className="text-accent-dark font-semibold">
-                  {t("home.loop_status", {
-                    remaining: statusMemo.loopRemaining,
-                    total: statusMemo.loopTotal,
-                  })}
-                </div>
-              )}
-          </div>
-        )}
+      <HabitModal
+        isOpen={modalState.isOpen}
+        mode={modalState.mode}
+        setId={modalState.setId}
+        onClose={() => setModalState({ isOpen: false, mode: "set" })}
+        onSuccess={() => {
+          setModalState({ isOpen: false, mode: "set" });
+          // 刷新数据
+          if (modalState.mode === "set") {
+            const loadSets = async () => {
+              const client = getAPIClient();
+              const sets = await client.getHabitSets();
+              setHabitSets(Array.isArray(sets) ? sets : []);
+            };
+            void loadSets();
+          } else {
+            const loadHabits = async () => {
+              const client = getAPIClient();
+              const all = await client.getHabits();
+              const filtered = (Array.isArray(all) ? all : [])
+                .filter((h: any) => h.set_id === selectedSetId)
+                .map((h: any) => ({ ...h, today_seconds: 0, today_count: 0, progress: 0 }));
+              setHabits(filtered);
+            };
+            void loadHabits();
+          }
+        }}
+      />
 
-        {/* 主控制按钮 */}
-        <ControlPanel
-          isRunning={statusMemo.isRunning}
-          onStart={handleStart}
-          onPause={handlePause}
-          onReset={handleReset}
-          animationDelay="0.3s"
-        />
-
-        {/* 模式切换 */}
-        <ModeSelector
-          modes={[
-            {
-              key: Mode.Countdown,
-              label: t("home.mode_countdown"),
-              icon: "⏱",
-            },
-            {
-              key: Mode.Stopwatch,
-              label: t("home.mode_stopwatch"),
-              icon: "⏲",
-            },
-            {
-              key: Mode.WorldClock,
-              label: t("home.mode_world_clock"),
-              icon: "🌐",
-            },
-          ]}
-          activeMode={statusMemo.mode}
-          onModeChange={handleModeChange}
-          animationDelay="0.4s"
-        />
-      </div>
-
-      {/* 页脚 */}
       <div
-        className="px-4 sm:px-6 py-3 sm:py-4 md:py-6 text-center text-text-secondary-dark text-xs border-t border-border-dark bg-primary-dark animate-slideUp shrink-0"
-        style={{ animationDelay: "0.5s", animationFillMode: "both" }}
+        className="px-4 py-3 text-center text-text-secondary-dark text-xs border-t border-border-dark bg-primary-dark shrink-0 hidden lg:block"
       >
         <p>{t("common.version")}</p>
+      </div>
       </div>
     </div>
   );

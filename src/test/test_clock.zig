@@ -1,7 +1,7 @@
 //! 时钟模块单元测试
 const std = @import("std");
-const clock = @import("../clock.zig");
-const interface = @import("../interface.zig");
+const clock = @import("../core/clock.zig");
+const interface = @import("../core/interface.zig");
 
 // ============ 倒计时测试 ============
 
@@ -171,9 +171,6 @@ test "倒计时循环模式 - 有限次数 - 有休息时间" {
             .max_seconds = 3600,
         },
         .default_mode = .COUNTDOWN_MODE,
-        .world_clock = .{
-            .timezone = 8,
-        },
     };
 
     var manager = clock.ClockManager.init(config);
@@ -400,79 +397,6 @@ test "正计时达到上限后继续 tick 不增长" {
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_finished);
 }
 
-// ============ 世界时钟测试 ============
-
-test "世界时钟初始化" {
-    const config: interface.ClockTaskConfig = .{
-        .default_mode = .WORLD_CLOCK_MODE,
-        .world_clock = .{
-            .timezone = 8,
-        },
-    };
-    const manager = clock.ClockManager.init(config);
-
-    try std.testing.expectEqual(manager.state.WORLD_CLOCK_MODE.timezone, 8);
-}
-
-test "世界时钟不会暂停" {
-    const config: interface.ClockTaskConfig = .{
-        .default_mode = .WORLD_CLOCK_MODE,
-        .world_clock = .{
-            .timezone = 8,
-        },
-    };
-    var manager = clock.ClockManager.init(config);
-
-    // 世界时钟不支持暂停操作
-    manager.handleEvent(.user_pause_timer);
-    try std.testing.expect(!manager.state.isPaused());
-}
-
-test "世界时钟时间偏移验证" {
-    const config: interface.ClockTaskConfig = .{
-        .default_mode = .WORLD_CLOCK_MODE,
-        .world_clock = .{
-            .timezone = 8,
-        },
-    };
-    var manager = clock.ClockManager.init(config);
-
-    const time_info = manager.update().getTimeInfo();
-
-    // 弱断言：检查时间戳是否在合理范围内
-    // 2020-01-01 00:00:00 UTC = 1577836800 秒
-    // 2030-01-01 00:00:00 UTC = 1893456000 秒
-    try std.testing.expect(time_info > 1577836800);
-    try std.testing.expect(time_info < 1893456000);
-}
-
-test "世界时钟不同时区" {
-    // UTC+8 (东八区)
-    const config1: interface.ClockTaskConfig = .{
-        .default_mode = .WORLD_CLOCK_MODE,
-        .world_clock = .{
-            .timezone = 8,
-        },
-    };
-    var manager1 = clock.ClockManager.init(config1);
-
-    // UTC-5 (西五区，如纽约)
-    const config2: interface.ClockTaskConfig = .{
-        .default_mode = .WORLD_CLOCK_MODE,
-        .world_clock = .{
-            .timezone = -5,
-        },
-    };
-    var manager2 = clock.ClockManager.init(config2);
-
-    const time1 = manager1.update().getTimeInfo();
-    const time2 = manager2.update().getTimeInfo();
-
-    // 时区差应该是 13 小时 = 46800 秒
-    const diff = time1 - time2;
-    try std.testing.expectEqual(diff, 13 * 3600);
-}
-
 // ============ 模式切换测试 ============
 
 test "模式切换 - 倒计时到正计时" {
@@ -498,27 +422,6 @@ test "模式切换 - 倒计时到正计时" {
     try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 0);
 }
 
-test "模式切换 - 正计时到世界时钟" {
-    const config: interface.ClockTaskConfig = .{
-        .default_mode = .STOPWATCH_MODE,
-        .stopwatch = .{
-            .max_seconds = 3600,
-        },
-    };
-    var manager = clock.ClockManager.init(config);
-
-    // 切换到世界时钟
-    const new_config: interface.ClockTaskConfig = .{
-        .default_mode = .WORLD_CLOCK_MODE,
-        .world_clock = .{
-            .timezone = -5,
-        },
-    };
-    manager.handleEvent(.{ .user_change_config = new_config });
-
-    try std.testing.expectEqual(manager.state.WORLD_CLOCK_MODE.timezone, -5);
-}
-
 test "user_change_mode 使用默认配置" {
     const config: interface.ClockTaskConfig = .{
         .countdown = .{
@@ -536,10 +439,6 @@ test "user_change_mode 使用默认配置" {
     // 验证采用了默认配置：24小时上限
     try std.testing.expectEqual(manager.state.STOPWATCH_MODE.max_ms, 24 * 60 * 60 * 1000);
     try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 0);
-
-    // 切换到世界时钟（默认东八区）
-    manager.handleEvent(.{ .user_change_mode = .WORLD_CLOCK_MODE });
-    try std.testing.expectEqual(manager.state.WORLD_CLOCK_MODE.timezone, 8);
 
     // 切换回倒计时（默认25分钟）
     manager.handleEvent(.{ .user_change_mode = .COUNTDOWN_MODE });

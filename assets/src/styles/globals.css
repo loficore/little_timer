@@ -1,252 +1,25 @@
 @import "tailwindcss";
+@plugin "daisyui";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "./base.css";
+@import "./components.css";
+@import "./responsive.css";
 
-@layer base {
-  :root {
-    --bg-primary: #121212;
-    --bg-secondary: #1f1f1f;
-    --bg-tertiary: #2a2a2a;
-    --text-primary: #ffffff;
-    --text-secondary: #9CA3AF;
-    --border-color: #2a2a2a;
-    --accent-color: #515BD4;
-    /* 响应式相关变量 */
-    --spacing-xs: 0.5rem;
-    --spacing-sm: 0.75rem;
-    --spacing-md: 1rem;
-    --spacing-lg: 1.5rem;
-    --spacing-xl: 2rem;
-    --font-size-time: 3rem;
-    --font-size-label: 0.875rem;
-    --touch-target-min: 44px;
+@media (prefers-reduced-motion: reduce) {
+  html,
+  html.light-mode,
+  body::before,
+  .time-value-swap,
+  .time-running-glow,
+  .animate-slideDown,
+  .animate-slideUp,
+  .animate-fadeIn {
+    animation: none !important;
   }
 
-  @media (max-width: 480px) {
-    :root {
-      --spacing-xs: 0.25rem;
-      --spacing-sm: 0.5rem;
-      --spacing-md: 0.75rem;
-      --spacing-lg: 1rem;
-      --spacing-xl: 1.5rem;
-      --font-size-time: 2rem;
-      --font-size-label: 0.75rem;
-    }
-  }
-
-  @media (min-width: 768px) {
-    :root {
-      --spacing-xs: 0.75rem;
-      --spacing-sm: 1rem;
-      --spacing-md: 1.5rem;
-      --spacing-lg: 2rem;
-      --spacing-xl: 2.5rem;
-      --font-size-time: 5rem;
-      --font-size-label: 1rem;
-    }
-  }
-
-  html.light-mode {
-    --bg-primary: #ffffff;
-    --bg-secondary: #f5f5f5;
-    --bg-tertiary: #eeeeee;
-    --text-primary: #000000;
-    --text-secondary: #666666;
-    --border-color: #e0e0e0;
-    --accent-color: #007AFF;
-  }
-
-  html {
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
-    transition: background-color 0.3s, color 0.3s;
-    overflow: hidden;
-  }
-
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
-      Helvetica, Arial, "Microsoft YaHei", "微软雅黑", sans-serif;
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
-    overflow: hidden;
-    /* 移动端触摸优化 */
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    -webkit-user-select: none;
-    user-select: none;
-    /* 防止双击缩放 */
-    -webkit-touch-callout: none;
-  }
-
-  /* 触摸友好的最小点击区域 */
-  button, input[type="button"], input[type="checkbox"], input[type="radio"] {
-    min-height: var(--touch-target-min);
-    min-width: var(--touch-target-min);
-  }
-
-  /* 防止输入框自动缩放 */
-  input, select, textarea {
-    font-size: 16px;
-  }
-
-  /* 禁用默认点击反馈 */
-  a, button {
-    -webkit-tap-highlight-color: transparent;
-  }
-}
-
-@layer components {
-  .btn-primary {
-    @apply px-4 sm:px-6 py-2 sm:py-3 rounded-xl font-medium text-sm sm:text-sm cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 border-none;
-    background-color: var(--accent-color);
-    color: #ffffff;
-    min-height: var(--touch-target-min);
-  }
-
-  .btn-primary:hover {
-    opacity: 0.85;
-    transform: translateY(-2px) scale(1.02);
-  }
-
-  .btn-primary:active {
-    opacity: 0.7;
-    transform: translateY(0) scale(0.98);
-  }
-
-  .btn-secondary {
-    @apply px-4 sm:px-6 py-2 sm:py-3 rounded-xl font-medium text-sm sm:text-sm cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 border;
-    background-color: transparent;
-    color: var(--text-secondary);
-    border-color: var(--border-color);
-    min-height: var(--touch-target-min);
-  }
-
-  .btn-secondary:hover {
-    background-color: var(--bg-secondary);
-    color: var(--text-primary);
-    border-color: var(--accent-color);
-    transform: scale(1.02);
-  }
-
-  .btn-secondary:active {
-    background-color: var(--bg-tertiary);
-    transform: scale(0.98);
-  }
-
-  /* 响应式容器 */
-  .container-responsive {
-    @apply px-4 sm:px-6 md:px-8;
-  }
-
-  /* 响应式网格 */
-  .grid-responsive {
-    @apply grid gap-3 sm:gap-4 md:gap-6;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  }
-
-  /* 触摸友好的表单元素 */
-  .form-input, .form-select, .form-textarea {
-    @apply min-h-[44px] px-3 sm:px-4 py-2 sm:py-3;
-    font-size: 16px;
-  }
-}
-
-/* 响应式媒体查询优化 */
-@media (max-width: 480px) {
-  @layer components {
-    .text-responsive-lg {
-      @apply text-2xl sm:text-3xl;
-    }
-
-    .text-responsive-title {
-      @apply text-lg sm:text-xl;
-    }
-
-    .text-responsive-body {
-      @apply text-sm sm:text-base;
-    }
-  }
-}
-
-@media (min-width: 768px) {
-  @layer components {
-    .text-responsive-lg {
-      @apply text-5xl lg:text-7xl;
-    }
-
-    .text-responsive-title {
-      @apply text-2xl lg:text-3xl;
-    }
-
-    .text-responsive-body {
-      @apply text-base lg:text-lg;
-    }
-  }
-}
-
-/* 隐藏滚动条但保留功能（跨浏览器） */
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
-
-/* 自定义滚动条样式（可选） */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background-color: var(--border-color);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background-color: var(--text-secondary);
-}
-
-/* 移动端触摸友好的链接 */
-@media (hover: none) and (pointer: coarse) {
-  button, a, input[type="button"], input[type="checkbox"], input[type="radio"] {
-    padding: 0.5rem;
-  }
-
-  /* 增加点击反馈延迟 */
-  button, a {
-    transition-duration: 100ms;
-  }
-}
-
-/* 错误通知和动画 */
-@keyframes slideDown {
-  from {
-    transform: translateY(-100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes slideUp {
-  from {
-    transform: translateY(20px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
+  .btn,
+  .timer-option-control {
+    transition: none !important;
   }
 }
 
@@ -259,24 +32,341 @@
   }
 }
 
-/* 时间数字更新平滑过渡 */
+@keyframes ambientPulse {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.68;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes ambientFlowDark {
+  0%,
+  100% {
+    background-position: 0% 30%;
+  }
+  50% {
+    background-position: 100% 70%;
+  }
+}
+
+@keyframes ambientFlowLight {
+  0%,
+  100% {
+    background-position: 10% 20%;
+  }
+  50% {
+    background-position: 90% 75%;
+  }
+}
+
+@keyframes timeValueSwap {
+  0% {
+    opacity: 0.92;
+    transform: translateY(3px) scale(0.996);
+    filter: blur(0.9px) saturate(1.02);
+  }
+  65% {
+    opacity: 0.98;
+    transform: translateY(0) scale(1);
+    filter: blur(0.2px) saturate(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes nixieBreath {
+  0%,
+  100% {
+    text-shadow:
+      0 0 4px rgba(255, 178, 100, 0.14),
+      0 0 12px rgba(255, 140, 52, 0.09),
+      0 0 24px rgba(255, 110, 35, 0.05);
+    filter: saturate(1.01);
+  }
+  50% {
+    text-shadow:
+      0 0 6px rgba(255, 182, 108, 0.18),
+      0 0 16px rgba(255, 146, 58, 0.12),
+      0 0 30px rgba(255, 114, 36, 0.07);
+    filter: saturate(1.03);
+  }
+}
+
 .time-transition {
   display: inline-block;
-  will-change: transform, opacity;
 }
 
 .time-transition--active {
-  animation: timeTick 180ms ease-out;
+  will-change: transform;
 }
 
-@keyframes timeTick {
-  from {
-    opacity: 0.65;
-    transform: translateY(4px) scale(0.98);
+.time-value-swap {
+  display: inline-block;
+  animation: none;
+}
+
+.time-style-classic {
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklab, var(--accent-color) 72%, var(--my-on-surface) 28%);
+}
+
+.time-state-active.time-style-classic {
+  color: color-mix(in oklab, var(--accent-color) 72%, var(--my-on-surface) 28%);
+}
+
+.time-state-rest.time-style-classic {
+  color: color-mix(in oklab, var(--my-on-surface) 86%, var(--my-on-surface-variant) 14%);
+}
+
+.time-state-finished.time-style-classic {
+  color: color-mix(in oklab, var(--my-on-primary-container) 72%, var(--my-on-surface) 28%);
+}
+
+.time-style-seven-segment {
+  --segment-on: color-mix(in oklab, var(--accent-color) 74%, var(--my-on-surface) 26%);
+  --segment-hot: var(--my-on-surface);
+  --segment-off: color-mix(in oklab, var(--my-outline) 36%, transparent);
+  --segment-glow-tight: color-mix(in oklab, var(--my-on-surface) 26%, transparent);
+  --segment-glow-mid: color-mix(in oklab, var(--my-on-surface) 16%, transparent);
+  --segment-glow-wide: color-mix(in oklab, var(--my-on-surface) 8%, transparent);
+  --segment-backlight: rgba(0, 0, 0, 0);
+}
+
+.time-state-active.time-style-seven-segment {
+  --segment-on: color-mix(in oklab, var(--accent-color) 74%, var(--my-on-surface) 26%);
+  --segment-hot: var(--my-on-surface);
+  --segment-glow-tight: color-mix(in oklab, var(--my-on-surface) 26%, transparent);
+  --segment-glow-mid: color-mix(in oklab, var(--my-on-surface) 16%, transparent);
+  --segment-glow-wide: color-mix(in oklab, var(--my-on-surface) 8%, transparent);
+  --segment-backlight: color-mix(in oklab, var(--my-primary-container) 20%, transparent);
+}
+
+.time-state-rest.time-style-seven-segment {
+  --segment-on: color-mix(in oklab, var(--my-on-surface) 84%, var(--my-on-surface-variant) 16%);
+  --segment-hot: var(--my-on-surface);
+  --segment-glow-tight: color-mix(in oklab, var(--my-on-surface) 22%, transparent);
+  --segment-glow-mid: color-mix(in oklab, var(--my-on-surface) 14%, transparent);
+  --segment-glow-wide: color-mix(in oklab, var(--my-on-surface) 7%, transparent);
+  --segment-backlight: color-mix(in oklab, var(--my-primary-container) 16%, transparent);
+}
+
+.time-state-finished.time-style-seven-segment {
+  --segment-on: color-mix(in oklab, var(--my-on-primary-container) 76%, var(--my-on-surface) 24%);
+  --segment-hot: var(--my-on-surface);
+  --segment-glow-tight: color-mix(in oklab, var(--my-on-surface) 24%, transparent);
+  --segment-glow-mid: color-mix(in oklab, var(--my-on-surface) 15%, transparent);
+  --segment-glow-wide: color-mix(in oklab, var(--my-on-surface) 8%, transparent);
+  --segment-backlight: color-mix(in oklab, var(--my-primary-container) 18%, transparent);
+}
+
+.seven-segment-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.16em;
+  line-height: 1;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.seven-segment-char {
+  position: relative;
+  display: inline-block;
+  width: 0.68em;
+  height: 1.1em;
+  flex: 0 0 auto;
+  overflow: hidden;
+  --segment-stroke: 0.112em;
+  --segment-h-pad: 0.1em;
+  --segment-v-pad: 0.085em;
+  --segment-joint-overlap: 0.01em;
+}
+
+.seven-segment-char::before {
+  content: none;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  background: none;
+  mix-blend-mode: normal;
+  opacity: 0;
+}
+
+.seven-segment-char::after {
+  content: none;
+  position: absolute;
+  inset: 18% 16%;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 999px;
+  background: none;
+  filter: none;
+}
+
+.seven-segment-seg {
+  position: absolute;
+  z-index: 2;
+  border-radius: 3px;
+  background: var(--segment-off);
+  opacity: 0.45;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.02),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+}
+
+.seven-segment-seg.is-on {
+  background: var(--segment-on, #ffffff) !important;
+  background-image: none !important;
+  filter: none !important;
+  opacity: 1 !important;
+  box-shadow:
+    inset 0 0 1px var(--segment-on, #ffffff),
+    0 0 3px var(--segment-glow-tight, rgba(255, 255, 255, 0.8)),
+    0 0 8px var(--segment-glow-mid, rgba(255, 255, 255, 0.6)),
+    0 0 16px var(--segment-glow-wide, rgba(255, 255, 255, 0.4));
+}
+
+.seven-segment-a,
+.seven-segment-d,
+.seven-segment-g {
+  left: var(--segment-h-pad);
+  width: calc(100% - (var(--segment-h-pad) * 2));
+  height: var(--segment-stroke);
+  clip-path: inset(0 round 3px);
+}
+
+.seven-segment-a {
+  top: var(--segment-v-pad);
+}
+
+.seven-segment-g {
+  top: calc(50% - (var(--segment-stroke) / 2));
+}
+
+.seven-segment-d {
+  top: calc(100% - var(--segment-v-pad) - var(--segment-stroke));
+}
+
+.seven-segment-b,
+.seven-segment-c,
+.seven-segment-e,
+.seven-segment-f {
+  width: var(--segment-stroke);
+  height: calc(50% - var(--segment-v-pad) - (var(--segment-stroke) * 1.5) + (var(--segment-joint-overlap) * 2));
+  clip-path: inset(0 round 3px);
+}
+
+.seven-segment-b,
+.seven-segment-c {
+  left: calc(100% - var(--segment-h-pad) - var(--segment-stroke));
+}
+
+.seven-segment-e,
+.seven-segment-f {
+  left: var(--segment-h-pad);
+}
+
+.seven-segment-b,
+.seven-segment-f {
+  position: absolute;
+  z-index: 4;
+  top: var(--segment-v-pad);
+  height: calc(50% - var(--segment-v-pad) + var(--segment-stroke) / 2);
+}
+
+.seven-segment-c,
+.seven-segment-e {
+  position: absolute;
+  z-index: 4;
+  top: calc(50% - var(--segment-stroke) / 2);
+  height: calc(50% - var(--segment-v-pad) + var(--segment-stroke) / 2);
+}
+
+.seven-segment-colon {
+  width: 0.18em;
+}
+
+.seven-segment-dot {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  width: 0.11em;
+  height: 0.11em;
+  margin-left: -0.055em;
+  border-radius: 999px;
+  background: var(--segment-on, #e8e8e8) !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  box-shadow:
+    0 0 3px var(--segment-glow-tight, rgba(255, 255, 255, 0.35)),
+    0 0 7px var(--segment-glow-mid, rgba(255, 255, 255, 0.2)),
+    0 0 14px var(--segment-glow-wide, rgba(255, 255, 255, 0.1));
+}
+
+.seven-segment-dot-top {
+  top: 31%;
+}
+
+.seven-segment-dot-bottom {
+  top: 63%;
+}
+
+.time-running-glow {
+  animation: nixieBreath 4.6s ease-in-out infinite;
+}
+
+.time-running-segment {
+  animation: segmentBreath 7.8s ease-in-out infinite;
+}
+
+.apexcharts-tooltip,
+.apexcharts-xaxistooltip,
+.apexcharts-yaxistooltip {
+  z-index: 120 !important;
+  background: color-mix(in oklab, var(--my-surface-strong) 96%, transparent) !important;
+  color: var(--my-on-surface) !important;
+  border: 1px solid color-mix(in oklab, var(--my-outline) 58%, transparent) !important;
+  box-shadow: var(--my-elevation-2, 0 8px 22px rgba(0, 0, 0, 0.2)) !important;
+}
+
+.apexcharts-tooltip * {
+  color: var(--my-on-surface) !important;
+}
+
+html.light-mode .apexcharts-tooltip,
+html.light-mode .apexcharts-xaxistooltip,
+html.light-mode .apexcharts-yaxistooltip {
+  background: color-mix(in oklab, var(--my-surface-strong) 98%, #ffffff 2%) !important;
+  color: var(--my-on-surface) !important;
+  border: 1px solid color-mix(in oklab, var(--my-outline) 72%, transparent) !important;
+}
+
+@keyframes segmentBreath {
+  0%,
+  100% {
+    filter: brightness(1.03);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
+  50% {
+    filter: brightness(1.1);
+  }
+}
+
+@keyframes glow {
+  0%, 100% {
+    text-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+  }
+  50% {
+    text-shadow: 0 0 40px rgba(99, 102, 241, 0.6), 0 0 80px rgba(99, 102, 241, 0.3);
   }
 }
 
@@ -284,12 +374,29 @@
   .animate-slideDown {
     animation: slideDown 0.3s ease-out forwards;
   }
-
   .animate-slideUp {
     animation: slideUp 0.4s ease-out forwards;
   }
-
   .animate-fadeIn {
     animation: fadeIn 0.3s ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html,
+  html.light-mode,
+  body::before,
+  .time-value-swap,
+  .time-running-glow,
+  .animate-slideDown,
+  .animate-slideUp,
+  .animate-fadeIn {
+    animation: none !important;
+  }
+
+  .btn,
+  .btn-primary,
+  .btn-secondary {
+    transition: none !important;
   }
 }

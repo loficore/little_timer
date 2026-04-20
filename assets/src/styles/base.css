@@ -1,0 +1,275 @@
+@layer base {
+  :root {
+    --bg-primary: #121212;
+    --bg-secondary: #1f1f1f;
+    --bg-tertiary: #2a2a2a;
+    --text-primary: #ffffff;
+    --text-secondary: #9CA3AF;
+    --border-color: #2a2a2a;
+    --accent-color: #515BD4;
+    --spacing-xs: 0.5rem;
+    --spacing-sm: 0.75rem;
+    --spacing-md: 1rem;
+    --spacing-lg: 1.5rem;
+    --spacing-xl: 2rem;
+    --font-size-time: 3rem;
+    --font-size-label: 0.875rem;
+    --touch-target-min: 44px;
+    --layout-px: 1.25rem;
+    --layout-py: 2rem;
+    --layout-control-mb: 1.5rem;
+    --layout-control-gap: 0.75rem;
+    --my-surface: rgba(24, 24, 28, 0.9);
+    --my-surface-strong: rgba(32, 32, 38, 0.96);
+    --my-outline: rgba(255, 255, 255, 0.18);
+    --my-on-surface: rgba(255, 255, 255, 0.92);
+    --my-on-surface-variant: rgba(255, 255, 255, 0.7);
+    --my-primary-container: rgba(81, 91, 212, 0.25);
+    --my-on-primary-container: #dce1ff;
+    --my-field-bg: #1b1f2a;
+    --my-field-bg-hover: #232837;
+    --my-field-bg-focus: #2a3042;
+    --my-glass-highlight: rgba(255, 255, 255, 0.22);
+    --my-glass-highlight-strong: rgba(255, 255, 255, 0.34);
+    --my-glass-shadow: rgba(0, 0, 0, 0.18);
+  }
+
+  @media (max-width: 480px) {
+    :root {
+      --spacing-xs: 0.25rem;
+      --spacing-sm: 0.5rem;
+      --spacing-md: 0.75rem;
+      --spacing-lg: 1rem;
+      --spacing-xl: 1.5rem;
+      --font-size-time: 2rem;
+      --font-size-label: 0.75rem;
+    }
+  }
+
+  @media (min-width: 768px) {
+    :root {
+      --spacing-xs: 0.75rem;
+      --spacing-sm: 1rem;
+      --spacing-md: 1.5rem;
+      --spacing-lg: 2rem;
+      --spacing-xl: 2.5rem;
+      --font-size-time: 5rem;
+      --font-size-label: 1rem;
+    }
+  }
+
+  html.light-mode {
+    --bg-primary: #e8dcc8;
+    --bg-secondary: #dccec0;
+    --bg-tertiary: #cfc1a8;
+    --text-primary: #2a1f14;
+    --text-secondary: #6b5d4f;
+    --border-color: #cbb8a0;
+    --accent-color: #8b6b42;
+    --my-surface: rgba(238, 227, 207, 0.96);
+    --my-surface-strong: rgba(231, 218, 195, 0.985);
+    --my-outline: rgba(89, 72, 54, 0.2);
+    --my-on-surface: rgba(42, 31, 20, 0.94);
+    --my-on-surface-variant: rgba(72, 61, 47, 0.78);
+    --my-primary-container: rgba(139, 107, 66, 0.12);
+    --my-on-primary-container: #4a321c;
+    --my-field-bg: #ede5d3;
+    --my-field-bg-hover: #e2dac8;
+    --my-field-bg-focus: #d6cdb8;
+    --my-glass-highlight: rgba(245, 230, 204, 0.16);
+    --my-glass-highlight-strong: rgba(239, 222, 194, 0.24);
+    --my-glass-shadow: rgba(76, 60, 40, 0.12);
+    /* Daisy 语义色在浅色主题下的对比度映射 */
+    --bc: 28% 0.02 52;
+    --pc: 98% 0.01 90;
+    --sc: 98% 0.01 90;
+    --nc: 22% 0.01 50;
+    --my-elevation-1: 0 1px 2px rgba(72, 56, 38, 0.1);
+    --my-elevation-2: 0 4px 10px rgba(72, 56, 38, 0.14);
+    --my-elevation-3: 0 10px 22px rgba(72, 56, 38, 0.2);
+    background: var(--bg-primary);
+    background-size: auto;
+    animation: none;
+  }
+
+  html.light-mode.light-style-mist {
+    --bg-primary: #e2ddd4;
+    --bg-secondary: #d7d0c4;
+    --bg-tertiary: #cac0b3;
+    --text-primary: #232d32;
+    --text-secondary: #5d6a72;
+    --border-color: #b8aaa0;
+    --accent-color: #4d7a8b;
+    --my-surface: rgba(233, 229, 220, 0.95);
+    --my-surface-strong: rgba(223, 216, 204, 0.98);
+    --my-outline: rgba(59, 72, 80, 0.2);
+    --my-on-surface: rgba(35, 45, 52, 0.95);
+    --my-on-surface-variant: rgba(58, 68, 76, 0.8);
+    --my-primary-container: rgba(77, 122, 139, 0.14);
+    --my-on-primary-container: #234450;
+    --my-field-bg: #e6e1d8;
+    --my-field-bg-hover: #ddd6cc;
+    --my-field-bg-focus: #d0c7ba;
+    --my-glass-highlight: rgba(238, 230, 216, 0.16);
+    --my-glass-highlight-strong: rgba(230, 221, 205, 0.24);
+    --my-glass-shadow: rgba(49, 60, 69, 0.14);
+    /* Daisy 语义色在 mist 浅色主题下的对比度映射 */
+    --bc: 26% 0.02 230;
+    --pc: 98% 0.01 250;
+    --sc: 98% 0.01 250;
+    --nc: 21% 0.01 220;
+    --my-elevation-1: 0 1px 2px rgba(54, 64, 70, 0.1);
+    --my-elevation-2: 0 4px 10px rgba(54, 64, 70, 0.14);
+    --my-elevation-3: 0 10px 22px rgba(54, 64, 70, 0.2);
+    background: var(--bg-primary);
+    background-size: auto;
+    animation: none;
+  }
+
+  html {
+    background: linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 50%, #0d0d0d 100%);
+    background-size: 140% 140%;
+    animation: ambientFlowDark 9s ease-in-out infinite;
+    background-attachment: fixed;
+    color: var(--text-primary);
+    transition: background-color 0.3s, color 0.3s;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+      Helvetica, Arial, "Microsoft YaHei", "微软雅黑", sans-serif;
+    background: transparent;
+    color: var(--text-primary);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    position: relative;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -15%;
+    pointer-events: none;
+    z-index: 0;
+    backdrop-filter: blur(26px) saturate(120%);
+    -webkit-backdrop-filter: blur(26px) saturate(120%);
+    background:
+      radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.16) 0 2px, transparent 2px 100%),
+      radial-gradient(circle at 78% 28%, rgba(255, 255, 255, 0.12) 0 1.5px, transparent 1.5px 100%),
+      radial-gradient(circle at 34% 76%, rgba(255, 255, 255, 0.1) 0 1.25px, transparent 1.25px 100%),
+      linear-gradient(115deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.06) 42%, rgba(255, 255, 255, 0.12) 58%, rgba(255, 255, 255, 0.05) 100%),
+      radial-gradient(42% 38% at 18% 22%, rgba(74, 158, 255, 0.18) 0%, rgba(74, 158, 255, 0.02) 70%),
+      radial-gradient(35% 32% at 80% 76%, rgba(255, 179, 71, 0.14) 0%, rgba(255, 179, 71, 0.02) 72%);
+    background-color: rgba(10, 12, 18, 0.36);
+    animation: ambientPulse 7.5s ease-in-out infinite;
+  }
+
+  html.light-mode body::before {
+    backdrop-filter: blur(26px) saturate(100%);
+    -webkit-backdrop-filter: blur(26px) saturate(100%);
+    background:
+      radial-gradient(42% 34% at 18% 22%, rgba(122, 90, 62, 0.05) 0%, rgba(122, 90, 62, 0.01) 70%),
+      radial-gradient(32% 28% at 80% 76%, rgba(105, 80, 56, 0.04) 0%, rgba(105, 80, 56, 0.01) 72%);
+    background-color: rgba(188, 166, 136, 0.1);
+    animation: none;
+    opacity: 0.62;
+  }
+
+  html.light-mode.light-style-mist body::before {
+    background:
+      radial-gradient(42% 34% at 18% 22%, rgba(95, 114, 122, 0.05) 0%, rgba(95, 114, 122, 0.01) 70%),
+      radial-gradient(32% 28% at 80% 76%, rgba(110, 118, 122, 0.04) 0%, rgba(110, 118, 122, 0.01) 72%);
+    background-color: rgba(170, 178, 184, 0.1);
+    animation: none;
+    opacity: 0.58;
+  }
+
+  html.webview-stats-lite {
+    animation: none;
+  }
+
+  html.webview-stats-lite body::before {
+    animation: none;
+    backdrop-filter: blur(8px) saturate(108%);
+    -webkit-backdrop-filter: blur(8px) saturate(108%);
+    opacity: 0.58;
+  }
+
+  button, input[type="button"], input[type="checkbox"], input[type="radio"] {
+    min-height: var(--touch-target-min);
+    min-width: var(--touch-target-min);
+  }
+
+  input, select, textarea {
+    font-size: 16px;
+  }
+
+  a, button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 深色模式（默认）下的文字颜色 - 确保在深色背景上清晰可见 */
+  .text-base-content {
+    color: #ffffff !important;
+  }
+
+  .text-base-content\/70 {
+    color: rgba(255, 255, 255, 0.76) !important;
+  }
+
+  .text-base-content\/60 {
+    color: rgba(255, 255, 255, 0.68) !important;
+  }
+
+  .text-base-content\/50 {
+    color: rgba(255, 255, 255, 0.60) !important;
+  }
+
+  .text-base-content\/30 {
+    color: rgba(255, 255, 255, 0.45) !important;
+  }
+
+  /* 浅色模式下，常用语义文本类统一提升可读性 */
+  html.light-mode .text-base-content {
+    color: var(--my-on-surface) !important;
+  }
+
+  html.light-mode .text-base-content\/70 {
+    color: color-mix(in oklab, var(--my-on-surface) 76%, transparent) !important;
+  }
+
+  html.light-mode .text-base-content\/60 {
+    color: color-mix(in oklab, var(--my-on-surface) 68%, transparent) !important;
+  }
+
+  html.light-mode .text-base-content\/50 {
+    color: color-mix(in oklab, var(--my-on-surface) 60%, transparent) !important;
+  }
+
+  html.light-mode .text-base-content\/30 {
+    color: color-mix(in oklab, var(--my-on-surface) 45%, transparent) !important;
+  }
+
+  html.light-mode .text-primary {
+    color: color-mix(in oklab, var(--accent-color) 78%, var(--my-on-surface) 22%) !important;
+  }
+
+  html.light-mode .text-secondary {
+    color: color-mix(in oklab, var(--my-on-surface-variant) 90%, var(--my-on-surface) 10%) !important;
+  }
+}
+
+@keyframes ambientFlowDark {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes ambientPulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}

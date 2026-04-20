@@ -28,7 +28,7 @@ jobs:
           git-cliff --config cliff-release.toml --latest --strip header > release_notes.md
 
       - name: Setup Bun (frontend build)
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.x"
 

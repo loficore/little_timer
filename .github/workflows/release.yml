@@ -28,7 +28,7 @@ jobs:
           git-cliff --config cliff-release.toml --latest --strip header > release_notes.md
 
       - name: Setup Bun (frontend build)
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.x"
 
@@ -42,6 +42,13 @@ jobs:
       - name: Make scripts executable
         run: |
           chmod +x scripts/*.sh || true
+
+      - name: Ensure apt universe and helper packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common ca-certificates || true
+          sudo add-apt-repository universe || true
+          sudo apt-get update
 
       - name: Run packaging script (Linux)
         run: |

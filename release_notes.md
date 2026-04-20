@@ -1,6 +1,6 @@
+## [1.0.0] - 2026-04-20
 
 ### ✨ Features
-
 
 - 添加基于 GTK4 的 Zig 图形界面定时器应用 (b589a88)
 
@@ -32,22 +32,14 @@
 
 - 实现预设管理模块与设置验证体系，支持动态预设增删查改及持久化 (9ef0a2c)
 
-
 ### 🐛 Bug Fixes
-
 
 - 修正 .gitignore 中 zig-out 目录的忽略规则 (81d6c42)
 
-
 ### 🎉 Initial
-
 
 - Initial commit (cff8a0f)
 
-
 ### ⚙️ Miscellaneous Tasks
 
-
 - 从版本控制中移除 zig-out 目录下的二进制文件并修正 .gitignore 规则 (54a9bdc)
-
-

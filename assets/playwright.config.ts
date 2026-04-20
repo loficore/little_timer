@@ -1,4 +1,24 @@
 import { defineConfig } from "@playwright/test";
+import { execSync } from "child_process";
+import { existsSync, mkdirSync, rmSync } from "fs";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const testDbPath = resolve(__dirname, "../test_tmp/e2e.db");
+
+function cleanupTestDatabase() {
+  const testTmpDir = resolve(__dirname, "../test_tmp");
+  if (!existsSync(testTmpDir)) {
+    mkdirSync(testTmpDir, { recursive: true });
+  }
+  if (existsSync(testDbPath)) {
+    rmSync(testDbPath);
+  }
+  console.log("✅ Test database cleaned up");
+}
 
 export default defineConfig({
   testDir: "./src/test/visual",
@@ -19,12 +39,22 @@ export default defineConfig({
       maxDiffPixels: 100,
     },
   },
-  webServer: {
-    command: "bun run dev --host 127.0.0.1 --port 5173",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120000,
-  },
+  globalSetup: "./src/test/visual/globalSetup.ts",
+  webServer: [
+    {
+      command: "bun run dev --host 127.0.0.1 --port 5173",
+      url: "http://127.0.0.1:5173",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+    },
+    {
+      command: "cd .. && zig build -Doptimize=Debug run",
+      url: "http://127.0.0.1:8080",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+      stderr: "pipe",
+    },
+  ],
   projects: [
     {
       name: "mobile-390",

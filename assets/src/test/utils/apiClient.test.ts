@@ -284,4 +284,105 @@ describe("APIClient", () => {
       expect(result.id).toBe(1);
     });
   });
+
+  describe("错误处理", () => {
+    describe("网络错误", () => {
+      it("网络断开时应该抛出网络错误", async () => {
+        mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+        await expect(client.getState()).rejects.toThrow("Failed to fetch");
+      });
+
+      it("请求超时时应该抛出超时错误", async () => {
+        mockFetch.mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError"));
+
+        await expect(client.getState()).rejects.toThrow();
+      });
+    });
+
+    describe("4xx 客户端错误", () => {
+      it("400 错误时应该抛出详细错误信息", async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+        });
+
+        await expect(client.getState()).rejects.toThrow("Error fetching state: Bad Request");
+      });
+
+      it("401 错误时应该抛出认证错误", async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          statusText: "Unauthorized",
+        });
+
+        await expect(client.getState()).rejects.toThrow("Error fetching state: Unauthorized");
+      });
+
+      it("403 错误时应该抛出禁止错误", async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          statusText: "Forbidden",
+        });
+
+        await expect(client.getSettings()).rejects.toThrow("Error fetching settings: Forbidden");
+      });
+    });
+
+    describe("5xx 服务器错误", () => {
+      it("500 错误时应该抛出服务器错误", async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error",
+        });
+
+        await expect(client.getSettings()).rejects.toThrow("Error fetching settings: Internal Server Error");
+      });
+
+      it("502 错误时应该抛出网关错误", async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 502,
+          statusText: "Bad Gateway",
+        });
+
+        await expect(client.getHabitSets()).rejects.toThrow("Error fetching habit sets: Bad Gateway");
+      });
+
+      it("503 错误时应该抛出服务不可用", async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          statusText: "Service Unavailable",
+        });
+
+        await expect(client.getHabits()).rejects.toThrow("Error fetching habits: Service Unavailable");
+      });
+    });
+
+    describe("JSON 解析错误", () => {
+      it("响应不是有效 JSON 时应该抛出解析错误", async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: async () => {
+            throw new SyntaxError("Unexpected token } in JSON at position 10");
+          },
+        });
+
+        await expect(client.getState()).rejects.toThrow();
+      });
+    });
+
+    describe("请求取消", () => {
+      it("请求被取消时应该抛出错误", async () => {
+        mockFetch.mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError"));
+
+        await expect(client.startTimer()).rejects.toThrow();
+      });
+    });
+  });
 });

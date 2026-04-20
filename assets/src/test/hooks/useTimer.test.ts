@@ -12,6 +12,11 @@ vi.mock("../../utils/apiClientSingleton", () => ({
   })),
 }));
 
+vi.mock("../../utils/logger", () => ({
+  logSuccess: vi.fn(),
+  logError: vi.fn(),
+}));
+
 describe("useTimer Hook", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -211,6 +216,63 @@ describe("useTimer Hook", () => {
 
       expect(result.current.elapsedSeconds).toBe(0);
       expect(result.current.isRunning).toBe(false);
+    });
+  });
+
+  describe("错误处理", () => {
+    it("start API 失败时应该捕获错误不抛出", async () => {
+      const { result } = renderHook(() => useTimer());
+
+      await expect(
+        act(async () => {
+          await result.current.start();
+        })
+      ).resolves.not.toThrow();
+      expect(result.current.isRunning).toBe(true);
+    });
+
+    it("pause API 失败时应该捕获错误不抛出", async () => {
+      const { result } = renderHook(() => useTimer());
+
+      await act(async () => {
+        await result.current.start();
+      });
+
+      await expect(
+        act(async () => {
+          await result.current.pause();
+        })
+      ).resolves.not.toThrow();
+      expect(result.current.isPaused).toBe(true);
+    });
+
+    it("reset API 失败时应该捕获错误不抛出", async () => {
+      const { result } = renderHook(() => useTimer());
+
+      await act(async () => {
+        await result.current.start();
+      });
+
+      await expect(
+        act(async () => {
+          await result.current.reset();
+        })
+      ).resolves.not.toThrow();
+      expect(result.current.isRunning).toBe(false);
+    });
+
+    it("finish API 失败时应该捕获错误不抛出", async () => {
+      const { result } = renderHook(() => useTimer());
+
+      await act(async () => {
+        await result.current.start();
+      });
+
+      await expect(
+        act(async () => {
+          await result.current.finish();
+        })
+      ).resolves.not.toThrow();
     });
   });
 });

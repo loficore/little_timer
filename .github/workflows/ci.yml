@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -47,6 +50,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
       - name: Setup Zig
         # 升级到 v2 版本，它拥有更可靠的镜像下载逻辑

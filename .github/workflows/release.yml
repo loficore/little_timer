@@ -12,6 +12,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Install Rust toolchain (for git-cliff)
         uses: actions-rs/toolchain@v1

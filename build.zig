@@ -77,10 +77,8 @@ pub fn build(b: *std.Build) void {
 
     // 构建选项：是否将前端 HTML 内嵌到可执行文件
     const embed_ui = b.option(bool, "embed_ui", "Embed UI HTML into binary") orelse false;
-    const use_std_http = b.option(bool, "use_std_http", "Use std.http.Server instead of httpx") orelse false;
     const build_options = b.addOptions();
     build_options.addOption(bool, "embed_ui", embed_ui);
-    build_options.addOption(bool, "use_std_http", use_std_http);
     // 当内嵌 UI 时，把 HTML 内容注入到 build_options 中
     // 这样避免 @embedFile 访问包外路径的问题
     if (embed_ui) {
@@ -98,12 +96,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main_entry.zig"),
         .target = root_target,
     });
-
-    const httpx_dep = b.dependency("httpx", .{
-        .target = root_target,
-        .optimize = optimize,
-    });
-    mod.addImport("httpx", httpx_dep.module("httpx"));
 
     // 添加 build_options 到模块（供 HTTP Server 使用）
     mod.addOptions("build_options", build_options);

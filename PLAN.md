@@ -1,73 +1,121 @@
-# Little Timer 开发计划
+# 测试计划
 
-## Phase 20: 统计页面过滤栏按钮 Hover 样式修复
+## 测试统计
 
-### 问题
-
-统计页面过滤栏的按钮在鼠标悬浮时，已选中状态的强调色被 hover 样式覆盖，导致用户无法立即判断按钮是否被点击。
-
-### 根因分析
-
-`controls.css` 中：
-- `.my-filter-btn-active` 定义选中状态样式
-- `.my-filter-btn:hover:not(:disabled)` 定义 hover 状态样式
-- CSS 优先级：class + pseudo-class (hover) > 单个 class (active)
-- 导致 hover 时 active 样式被覆盖
-
-### 修复方案
-
-在 `.my-filter-btn-active` 后添加 `.my-filter-btn-active:hover` 规则，保持选中状态在 hover 时的视觉样式。
-
-### 实现步骤
-
-1. 修改 `assets/src/styles/components/controls.css`
-2. 添加 `.my-filter-btn-active:hover` 样式规则
-3. 构建并验证前端
+| 类型 | 测试数 | 状态 |
+|------|--------|------|
+| Zig 后端单元测试 | ~200 | ✅ |
+| 前端单元测试 | 460+ | ✅ |
+| 前端 E2E 测试 | 12 | ✅ |
+| **总计** | **~672** | ✅ |
 
 ---
 
-## Phase 19: HTTP 库迁移 (httpx → std.http.Server) ⏳
+## 测试文件清单
 
-### 背景
+### Zig 后端测试 (`src/test/`)
 
-- 项目当前使用 httpx 作为 HTTP 服务器
-- httpx 不支持长期 SSE 流式连接（只能一次性发送）
-- 需要 SSE 功能实现实时计时器状态推送
+1. `test_clock.zig` - ClockManager 核心逻辑
+2. `test_app.zig` - MainApplication
+3. `test_http_server.zig` - HTTP 服务器
+4. `test_storage.zig` - Storage CRUD
+5. `test_settings.zig` - Settings 管理
+6. `test_boundary_conditions.zig` - 边界条件
+7. `test_error_recovery.zig` - 错误恢复
+8. `test_migration.zig` - 数据库迁移
+9. `test_storage_backup.zig` - 备份功能
+10. `test_storage_health.zig` - 健康检查
+11. `test_settings_validator.zig` - 设置验证
+12. `test_logger.zig` - 日志模块
+13. `test_habit_crud.zig` - Habit CRUD
+14. `test_http_edge.zig` - HTTP 边界
+15. `test_timer_transition.zig` - Timer 状态转换
+16. `test_sse_edge.zig` - SSE/ClockManager
+17. `test_storage_error.zig` - 存储错误处理
+18. `test_migration_edge.zig` - 迁移边界
+19. `test_session_edge.zig` - Session 边界
 
-### 迁移目标
+### 前端组件测试 (`assets/src/test/components/`)
 
-使用 Zig 标准库 `std.http.Server` 替代 httpx：
-- 统一处理所有 HTTP 请求
-- 原生支持 SSE 流式响应（通过 `respondStreaming`）
-- 无外部依赖
+1. `BasicSettings.test.tsx`
+2. `Button.test.tsx`
+3. `CheckboxInput.test.tsx`
+4. `ControlPanel.test.tsx`
+5. `CountdownSettings.test.tsx`
+6. `DropdownSelect.test.tsx`
+7. `ErrorNotification.test.tsx`
+8. `FormGroup.test.tsx`
+9. `FormSection.test.tsx`
+10. `HabitPicker.test.tsx`
+11. `Header.test.tsx`
+12. `ModeSelector.test.tsx`
+13. `NumberInput.test.tsx`
+14. `PickerNumberInput.test.tsx` ⭐ 新增
+15. `SelectInput.test.tsx`
+16. `SevenSegmentDisplay.test.tsx`
+17. `SettingItem.test.tsx`
+18. `Sidebar.test.tsx`
+19. `StatusBadge.test.tsx`
+20. `TabPanel.test.tsx`
+21. `TimeDisplay.test.tsx`
+22. `TimerConfig.test.tsx`
+23. `TimerControls.test.tsx`
+24. `TimerProgress.test.tsx`
+25. `WallpaperSelector.test.tsx` ⭐ 新增
+26. `WorldClockSettings.test.tsx` ⭐ 新增
+27. `StopwatchSettings.test.tsx` ⭐ 新增
+28. `HabitModal.test.tsx` ⭐ 新增
 
-### 保留策略
+### 前端页面测试 (`assets/src/test/`)
 
-**先保留 httpx 实现，确认 std.http.Server 方案无误后再删除**
+1. `App.test.tsx` ⭐ 新增
+2. `TimerPage.test.tsx` ⭐ 新增
+3. `HabitsPage.test.tsx` ⭐ 新增
+4. `SettingsPage.test.tsx` ⭐ 新增
 
-### 实现步骤
+### 前端 Hook 测试 (`assets/src/test/hooks/`)
 
-1. **新增 std.http.Server 实现** (`src/core/http/std_server.zig`)
-   - 实现所有现有 API 路由
-   - 实现 SSE 流式响应
-   - 与现有 httpx 版本并存
+1. `useHabits.test.ts`
+2. `useHabitsExtension.test.ts`
+3. `useSSE.test.ts`
+4. `useSSEExtension.test.ts`
+5. `useSettings.test.ts`
+6. `useTimer.test.ts`
+7. `useTimerExtension.test.ts`
 
-2. **配置切换机制**
-   - 通过 build option 切换使用哪个服务器实现
-   - 验证两种实现功能一致
+### 前端工具测试 (`assets/src/test/utils/`)
 
-3. **验收测试**
-   - 对比两种实现的 API 响应
-   - 测试 SSE 实时推送
+1. `apiClient.test.ts`
+2. `audio.test.ts`
+3. `formatters.test.ts`
+4. `i18n.test.ts`
+5. `logger.test.ts`
+6. `constants.test.ts`
+7. `sseClient.test.ts`
+8. `utils.test.ts`
 
-4. **清理**
-   - 确认 std.http.Server 版本稳定后
-   - 删除 httpx 相关代码
-   - 清理 build.zig 中的 httpx 依赖
+### 前端集成测试 (`assets/src/test/`)
+
+1. `timer-flow.test.ts`
+
+### 前端 E2E 测试 (`assets/src/test/visual/`)
+
+1. `timer.spec.ts`
+2. `habits.spec.ts`
+3. `navigation.spec.ts`
+4. `settings.spec.ts`
+5. `habits_crud.spec.ts`
 
 ---
 
-## 参考项目
+## 待改进项目
 
-- 番茄TODO类应用的功能设计
-- 习惯追踪的核心指标：累计时长、连续天数、完成率
+### 页面级测试 Mock 优化
+
+App、TimerPage、HabitsPage、SettingsPage 的测试存在 mock 复杂性导致的失败。需要优化 mock 策略或使用更轻量的集成测试方法。
+
+### 待完成项目
+
+- [ ] 设置保存与加载 E2E 测试
+- [ ] 设置页面 VRT 快照
+- [ ] i18n 完整覆盖测试

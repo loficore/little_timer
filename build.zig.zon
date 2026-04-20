@@ -40,10 +40,6 @@
             .url = "git+https://github.com/karlseguin/http.zig?ref=master#5d160ba8675aeed9dd5071fdb307fab66702ca28",
             .hash = "httpz-0.0.0-PNVzrH5LBwA1XI4tiije77J8S9DkfNZXSkx2H93VwJl9",
         },
-        .httpx = .{
-            .url = "https://github.com/muhammad-fiaz/httpx.zig/archive/refs/tags/0.0.7.tar.gz",
-            .hash = "httpx-0.0.7-8qj2evX4CQDJRRmwgwJtbWrABhBbhWoXprzRM7Xqir5z",
-        },
     },
     .paths = .{
         "build.zig",

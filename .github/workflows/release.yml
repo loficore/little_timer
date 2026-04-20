@@ -1,0 +1,56 @@
+name: Release CI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  package-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain (for git-cliff)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install git-cliff
+        run: |
+          cargo install git-cliff
+
+      - name: Generate release changelog
+        run: |
+          git-cliff --config cliff-release.toml --latest --strip header > release_notes.md
+
+      - name: Setup Bun (frontend build)
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: "1.x"
+
+      - name: Setup Zig
+        # 升级到 v2 版本，它拥有更可靠的镜像下载逻辑
+        uses: mlugg/setup-zig@v2
+        with:
+          # 使用 'latest' 自动匹配最新的 0.16.0，或者保留 '0.15.2'
+          version: 0.15.2
+
+      - name: Make scripts executable
+        run: |
+          chmod +x scripts/*.sh || true
+
+      - name: Run packaging script (Linux)
+        run: |
+          ./scripts/package_linux.sh --release --embed-html
+
+      - name: Create GitHub Release and attach artifacts
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.event.release.tag_name }}
+          release_name: ${{ github.event.release.name }}
+          body_path: release_notes.md
+          files: dist/*.tar.gz

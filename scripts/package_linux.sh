@@ -12,7 +12,8 @@ TAR_NAME="${APP_NAME}_${VERSION}_linux_x64.tar.gz"
 ZIG_CMD="${ZIG_CMD:-zig}"
 PKG_CMD="${PKG_CMD:-bun}"
 EMBED_UI="${EMBED_UI:-false}"
-OPTIMIZE_MODE="${OPTIMIZE_MODE:-Release}"
+# Zig 0.15+ 使用具体 OptimizeMode：ReleaseFast/ReleaseSafe/ReleaseSmall/Debug
+OPTIMIZE_MODE="${OPTIMIZE_MODE:-ReleaseFast}"
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -43,7 +44,7 @@ show_help() {
 for arg in "$@"; do
   case "$arg" in
     --release)
-      OPTIMIZE_MODE="Release"
+      OPTIMIZE_MODE="ReleaseFast"
       ;;
     --debug)
       OPTIMIZE_MODE="Debug"

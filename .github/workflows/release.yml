@@ -43,6 +43,13 @@ jobs:
         run: |
           chmod +x scripts/*.sh || true
 
+      - name: Ensure apt universe and helper packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common ca-certificates || true
+          sudo add-apt-repository universe || true
+          sudo apt-get update
+
       - name: Run packaging script (Linux)
         run: |
           ./scripts/package_linux.sh --release --embed-html

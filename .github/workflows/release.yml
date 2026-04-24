@@ -46,9 +46,10 @@ jobs:
 
       - name: Ensure apt universe and helper packages
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update
           sudo apt-get install -y software-properties-common ca-certificates || true
-          sudo add-apt-repository universe || true
+          sudo add-apt-repository -y universe || true
           sudo apt-get update
           # 查看可用的 webkit 包以确认精确名称
           apt-cache search libwebkit | sed -n '1,200p' || true

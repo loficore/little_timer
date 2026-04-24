@@ -7,7 +7,8 @@ DIST_DIR="$ROOT_DIR/dist"
 STAGE_DIR="$DIST_DIR/stage"
 APP_NAME="little_timer"
 VERSION="$(date +%Y%m%d)"
-TAR_NAME="${APP_NAME}_${VERSION}_windows_x64.tar.gz"
+# 支持通过 --version <ver> 或 --version=<ver> 指定版本号
+TAR_NAME="${APP_NAME}-${VERSION}-windows-x64.tar.gz"
 
 ZIG_CMD="${ZIG_CMD:-zig}"
 PKG_CMD="${PKG_CMD:-bun}"
@@ -32,6 +33,7 @@ show_help() {
   echo "  --release         发布构建（优化级别设为 ReleaseFast）"
   echo "  --debug           调试构建（仅设置优化级别）"
   echo "  --target <triple> 目标三元组（默认: $TARGET_TRIPLE）"
+  echo "  --version <ver>   指定版本号，文件名将使用该版本（默认为日期）"
   echo "  --embed-html      内嵌前端 HTML 到后端二进制（默认）"
   echo "  --no-embed-html   不内嵌前端 HTML"
   echo "  --help, -h        显示此帮助"
@@ -57,6 +59,17 @@ while [[ $# -gt 0 ]]; do
       fi
       TARGET_TRIPLE="$2"
       shift
+      ;;
+    --version)
+      if [[ $# -lt 2 ]]; then
+        echo "错误: --version 需要一个值" >&2
+        exit 1
+      fi
+      VERSION="$2"
+      shift
+      ;;
+    --version=*)
+      VERSION="${1#--version=}"
       ;;
     --embed-html|--embed-ui)
       EMBED_UI="true"
@@ -125,6 +138,10 @@ cat >"$STAGE_DIR/start_cli.bat" <<'EOF'
 setlocal
 "%~dp0little_timer_cli.exe" %*
 EOF
+
+# 规范化版本字符串，移除不安全字符
+SANITIZED_VERSION="$(echo "$VERSION" | sed -E 's/[^A-Za-z0-9._-]/_/g')"
+TAR_NAME="${APP_NAME}-${SANITIZED_VERSION}-windows-x64.tar.gz"
 
 mkdir -p "$DIST_DIR"
 tar -czf "$DIST_DIR/$TAR_NAME" -C "$STAGE_DIR" .

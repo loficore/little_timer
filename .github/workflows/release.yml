@@ -3,6 +3,16 @@ name: Release CI
 on:
   release:
     types: [published]
+  # 临时增加手动触发以便在修复后重试一次 workflow
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to use when manually running the workflow'
+        required: false
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
 
 jobs:
   package-and-release:
@@ -14,15 +24,26 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Install Rust toolchain (for git-cliff)
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-
       - name: Install git-cliff
+        env:
+          GIT_CLIFF_VERSION: v2.12.0
         run: |
-          cargo install git-cliff
+          set -eux
+          VERSION="${GIT_CLIFF_VERSION#v}"
+          ARCH="x86_64-unknown-linux-gnu"
+          URL="https://github.com/orhun/git-cliff/releases/download/${GIT_CLIFF_VERSION}/git-cliff-${VERSION}-${ARCH}.tar.gz"
+          TMPDIR=$(mktemp -d)
+          wget -qO - "$URL" | tar -xz -C "$TMPDIR"
+          BIN=$(find "$TMPDIR" -type f -name git-cliff | head -n 1 || true)
+          if [ -z "$BIN" ]; then
+            echo "git-cliff binary not found in archive" >&2
+            ls -R "$TMPDIR" >&2 || true
+            exit 1
+          fi
+          sudo mv "$BIN" /usr/bin/git-cliff
+          sudo chmod +x /usr/bin/git-cliff
+          rm -rf "$TMPDIR"
+          /usr/bin/git-cliff --version
 
       - name: Generate release changelog
         run: |
@@ -59,13 +80,56 @@ jobs:
             libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Run packaging script (Linux)
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
         run: |
-          ./scripts/package_linux.sh --release --embed-html
+          set -eux
+          # prefer explicit release tag, then GITHUB_REF tag, then git tag, then fallback to commit short sha
+          VERSION="${RELEASE_TAG#v}"
+          if [ -z "$VERSION" ]; then
+            if [[ "${GITHUB_REF:-}" =~ refs/tags/(.*) ]]; then
+              VERSION="${BASH_REMATCH[1]}"
+            fi
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git describe --tags --exact-match 2>/dev/null || true)
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git rev-parse --short HEAD)
+          fi
+          VERSION="${VERSION#v}"
+          echo "Using VERSION=$VERSION"
+          ./scripts/package_linux.sh --release --embed-html --version "$VERSION"
+
+      - name: Run packaging script (Windows x64) (cross-build)
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          set -eux
+          VERSION="${RELEASE_TAG#v}"
+          if [ -z "$VERSION" ]; then
+            if [[ "${GITHUB_REF:-}" =~ refs/tags/(.*) ]]; then
+              VERSION="${BASH_REMATCH[1]}"
+            fi
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git describe --tags --exact-match 2>/dev/null || true)
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git rev-parse --short HEAD)
+          fi
+          VERSION="${VERSION#v}"
+          echo "Using VERSION=$VERSION"
+          ./scripts/package_mingw64.sh --release --embed-html --version "$VERSION" || true
+        # allow failure here to see logs; release step will still run and attach any produced artifacts
 
       - name: Create GitHub Release and attach artifacts
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ github.event.release.tag_name }}
-          release_name: ${{ github.event.release.name }}
-          body_path: release_notes.md
-          files: dist/*.tar.gz
+          tag: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          name: ${{ github.event.release.name || github.event.inputs.tag }}
+          bodyFile: release_notes.md
+          artifacts: dist/*.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
+          replacesArtifacts: true
+          allowUpdates: true

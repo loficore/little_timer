@@ -3,24 +3,38 @@
 const std = @import("std");
 const zqlite = @import("zqlite");
 const logger = @import("../core/logger.zig");
+const interface = @import("../core/interface.zig");
+const backup = @import("backup/BackupAdapter.zig");
 
-/// 备份恢复错误类型
 pub const BackupError = error{
-    BackupFailed, // 备份失败
-    RestoreFailed, // 恢复失败
-    InvalidBackupPath, // 无效的备份路径
-    DatabaseOpenFailed, // 数据库打开失败
+    BackupFailed,
+    RestoreFailed,
+    InvalidBackupPath,
+    DatabaseOpenFailed,
 };
 
-/// 备份管理器
+const BackupEntry = struct { name: []const u8, timestamp: i64 };
+
+const BackupListItem = struct {
+    name: []const u8,
+    timestamp: i64,
+    size_bytes: u64,
+};
+
+fn makeBackupList() std.ArrayListUnmanaged(BackupListItem) {
+    return .{};
+}
+
 pub const BackupManager = struct {
     db: ?zqlite.Conn,
     allocator: std.mem.Allocator,
-    db_path: [:0]const u8, // 数据库文件路径（以 null 结尾）
-    backup_dir: []const u8, // 备份目录路径
-    max_backups: u32 = 10, // 最大备份文件数量
+    db_path: [:0]const u8,
+    backup_dir: []const u8,
+    max_backups: u32 = 10,
+    adapter: *backup.BackupAdapter = undefined,
+    target_type: interface.BackupTargetType = .local,
+    has_adapter: bool = false,
 
-    /// 创建备份管理器实例
     pub fn init(allocator: std.mem.Allocator, db: ?zqlite.Conn, db_path: [:0]const u8, backup_dir: []const u8) BackupManager {
         return .{
             .db = db,
@@ -30,56 +44,84 @@ pub const BackupManager = struct {
         };
     }
 
-    /// 创建数据库备份
-    ///
-    /// 返回:
-    /// - ![]const u8: 备份文件路径
+    pub fn initWithConfig(allocator: std.mem.Allocator, db: ?zqlite.Conn, db_path: [:0]const u8, backup_dir: []const u8, config: *const interface.BackupConfig) !BackupManager {
+        var self = BackupManager.init(allocator, db, db_path, backup_dir);
+        self.target_type = config.target_type;
+        self.adapter = try self.createAdapter(config);
+        self.has_adapter = true;
+        return self;
+    }
+
+    pub fn createAdapter(self: *BackupManager, config: *const interface.BackupConfig) !backup.BackupAdapter {
+        switch (config.target_type) {
+            .local => {
+                const local_path = if (config.local_path.len > 0) config.local_path else self.backup_dir;
+                return backup.createLocalAdapter(self.allocator, .{ .path = local_path });
+            },
+            .webdav => {
+                const webdav_config = backup.WebDAVConfig{
+                    .url = config.webdav_url,
+                    .username = config.webdav_username,
+                    .password = config.webdav_password,
+                    .base_path = "/",
+                };
+                return backup.createWebDAVAdapter(self.allocator, webdav_config);
+            },
+            .s3 => {
+                const s3_config = backup.S3Config{
+                    .endpoint = config.s3_endpoint,
+                    .bucket = config.s3_bucket,
+                    .region = config.s3_region,
+                    .access_key = config.s3_access_key,
+                    .secret_key = config.s3_secret_key,
+                    .path_prefix = if (config.s3_path_prefix.len > 0) config.s3_path_prefix else "little_timer/",
+                };
+                return backup.createS3Adapter(self.allocator, s3_config);
+            },
+        }
+    }
+
     pub fn createBackup(self: *BackupManager) ![]const u8 {
         if (self.db == null) {
             return BackupError.DatabaseOpenFailed;
         }
 
-        // 生成带时间戳的备份文件名
         const timestamp = std.time.timestamp();
         var backup_buf: [512]u8 = undefined;
         const backup_filename = try std.fmt.bufPrint(&backup_buf, "presets_backup_{}.db", .{timestamp});
 
-        // 构建完整的备份路径
-        const backup_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.backup_dir, backup_filename });
-        errdefer self.allocator.free(backup_path);
+        if (self.has_adapter) {
+            try self.closeDbForBackup();
+            errdefer self.reopenDb() catch {};
 
-        // 执行文件备份
-        try self.performFileBackup(backup_path);
+            try self.adapter.push(self.db_path, backup_filename);
 
-        // 清理旧备份
-        try self.cleanupOldBackups();
+            try self.reopenDb();
+            try self.cleanupOldBackupsViaAdapter();
 
-        logger.global_logger.info("✓ 数据库备份已创建: {s}", .{backup_path});
-        return backup_path;
+            logger.global_logger.info("✓ 数据库备份已创建: {s}", .{backup_filename});
+            return try self.allocator.dupe(u8, backup_filename);
+        } else {
+            const backup_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.backup_dir, backup_filename });
+            errdefer self.allocator.free(backup_path);
+
+            try self.performFileBackup(backup_path);
+            try self.cleanupOldBackups();
+
+            logger.global_logger.info("✓ 数据库备份已创建: {s}", .{backup_path});
+            return backup_path;
+        }
     }
 
-    /// 执行文件备份
-    fn performFileBackup(self: *BackupManager, backup_path: []const u8) !void {
-        // 确保备份目录存在
-        std.fs.cwd().access(self.backup_dir, .{}) catch {
-            try std.fs.cwd().makeDir(self.backup_dir);
-        };
-
-        // 关闭数据库连接以确保数据一致性
-        self.db = null;
-
-        // 恢复函数：出错时重新打开数据库
-        errdefer {
-            // 恢复数据库连接
-            const flags = zqlite.OpenFlags.ReadWrite;
-            self.db = zqlite.open(self.db_path, flags) catch {
-                logger.global_logger.err("❌ 无法重新打开数据库", .{});
-            };
+    fn closeDbForBackup(self: *BackupManager) !void {
+        if (self.db) |conn| {
+            conn.close();
+            self.db = null;
+            logger.global_logger.debug("✓ 数据库连接已关闭（备份操作）", .{});
         }
+    }
 
-        try std.fs.cwd().copyFile(self.db_path, std.fs.cwd(), backup_path, .{});
-
-        // 重新打开数据库
+    fn reopenDb(self: *BackupManager) !void {
         const flags = zqlite.OpenFlags.ReadWrite;
         self.db = zqlite.open(self.db_path, flags) catch |err| {
             logger.global_logger.err("❌ 重新打开数据库失败: {any}", .{err});
@@ -87,64 +129,106 @@ pub const BackupManager = struct {
         };
     }
 
-    /// 从备份恢复数据库
-    ///
-    /// 参数:
-    /// - **backup_path**: 备份文件路径
-    /// - **reopen_callback**: 重新打开数据库的回调函数
-    ///
-    /// 返回:
-    /// - !void: 如果恢复失败则返回错误
-    pub fn restoreFromBackup(self: *BackupManager, backup_path: []const u8, reopen_callback: fn (*BackupManager) anyerror!void) !void {
-        // 检查备份文件是否存在
-        std.fs.cwd().access(backup_path, .{}) catch {
-            logger.global_logger.err("❌ 备份文件不存在: {s}", .{backup_path});
-            return BackupError.InvalidBackupPath;
+    fn cleanupOldBackupsViaAdapter(self: *BackupManager) !void {
+        if (self.has_adapter) {
+            const backups = self.adapter.list() catch |err| {
+                logger.global_logger.warn("⚠️ 获取备份列表失败: {any}", .{err});
+                return;
+            };
+            defer self.adapter.freeList(backups);
+
+            if (backups.len > self.max_backups) {
+                const to_delete = backups.len - self.max_backups;
+                for (backups[0..to_delete]) |b| {
+                    self.adapter.delete(b.name) catch |delete_err| {
+                        logger.global_logger.warn("⚠️ 删除旧备份失败: {any}", .{delete_err});
+                    };
+                    logger.global_logger.info("✓ 已删除旧备份: {s}", .{b.name});
+                }
+            }
+        }
+    }
+
+    fn performFileBackup(self: *BackupManager, backup_path: []const u8) !void {
+        std.fs.cwd().access(self.backup_dir, .{}) catch {
+            try std.fs.cwd().makeDir(self.backup_dir);
         };
 
-        // 关闭当前数据库
-        self.close();
+        const old_db = self.db;
+        self.db = null;
 
-        // 复制备份文件到原位置
-        try std.fs.cwd().copyFile(backup_path, std.fs.cwd(), self.db_path, .{});
+        errdefer {
+            const flags = zqlite.OpenFlags.ReadWrite;
+            if (zqlite.open(self.db_path, flags)) |new_conn| {
+                self.db = new_conn;
+            } else |err| {
+                logger.global_logger.err("❌ 无法重新打开数据库: {any}", .{err});
+                self.db = old_db;
+            }
+        }
 
-        // 重新打开数据库
-        try reopen_callback(self);
+        try std.fs.cwd().copyFile(self.db_path, std.fs.cwd(), backup_path, .{});
 
-        logger.global_logger.info("✓ 数据库已从备份恢复: {s}", .{backup_path});
+        const flags = zqlite.OpenFlags.ReadWrite;
+        self.db = zqlite.open(self.db_path, flags) catch |err| {
+            logger.global_logger.err("❌ 重新打开数据库失败: {any}", .{err});
+            return BackupError.BackupFailed;
+        };
     }
 
-    /// 关闭数据库连接
-    fn close(self: *BackupManager) void {
-        if (self.db != null) {
-            self.db.?.close();
-            self.db = null;
-            logger.global_logger.debug("✓ 数据库连接已关闭（备份操作）", .{});
+    pub fn restoreFromBackup(self: *BackupManager, backup_name: []const u8) !void {
+        if (self.has_adapter) {
+            var temp_path_buf: [512]u8 = undefined;
+            const temp_path = try std.fmt.bufPrint(&temp_path_buf, "/tmp/{s}", .{backup_name});
+
+            try self.closeDbForBackup();
+            errdefer self.reopenDb() catch {};
+
+            try self.adapter.pull(backup_name, temp_path);
+
+            try std.fs.cwd().copyFile(temp_path, std.fs.cwd(), self.db_path, .{});
+            std.fs.cwd().deleteFile(temp_path) catch {};
+
+            try self.reopenDb();
+
+            logger.global_logger.info("✓ 数据库已从备份恢复: {s}", .{backup_name});
+        } else {
+            const backup_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.backup_dir, backup_name });
+            defer self.allocator.free(backup_path);
+
+            std.fs.cwd().access(backup_path, .{}) catch {
+                logger.global_logger.err("❌ 备份文件不存在: {s}", .{backup_path});
+                return BackupError.InvalidBackupPath;
+            };
+
+            try self.closeDbForBackup();
+            errdefer self.reopenDb() catch {};
+
+            try std.fs.cwd().copyFile(backup_path, std.fs.cwd(), self.db_path, .{});
+
+            try self.reopenDb();
+
+            logger.global_logger.info("✓ 数据库已从备份恢复: {s}", .{backup_path});
         }
     }
 
-    /// 清理旧备份文件
     fn cleanupOldBackups(self: *BackupManager) !void {
-        // 获取备份目录中的所有备份文件
-        const backup_dir = try std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true });
+        var backup_dir = try std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true });
         defer backup_dir.close();
 
-        var backups = std.ArrayList(struct {
-            name: []const u8,
-            timestamp: i64,
-        }).init(self.allocator);
+        var backup_count: usize = 0;
+        var backup_capacity: usize = 16;
+        var backup_storage = try self.allocator.alloc(BackupEntry, backup_capacity);
         defer {
-            for (backups.items) |backup| {
-                self.allocator.free(backup.name);
+            for (backup_storage[0..backup_count]) |b| {
+                self.allocator.free(b.name);
             }
-            backups.deinit();
+            self.allocator.free(backup_storage);
         }
 
-        // 收集所有备份文件
         var iter = backup_dir.iterate();
         while (try iter.next()) |entry| {
             if (entry.kind == .file and std.mem.startsWith(u8, entry.name, "presets_backup_") and std.mem.endsWith(u8, entry.name, ".db")) {
-                // 提取时间戳
                 const name_prefix = "presets_backup_";
                 const name_suffix = ".db";
                 const timestamp_start = name_prefix.len;
@@ -154,43 +238,48 @@ pub const BackupManager = struct {
                     const timestamp_str = entry.name[timestamp_start..timestamp_end];
                     const timestamp = std.fmt.parseInt(i64, timestamp_str, 10) catch continue;
 
-                    const name_copy = try self.allocator.dupe(u8, entry.name);
-                    try backups.append(.{ .name = name_copy, .timestamp = timestamp });
+                    if (backup_count >= backup_capacity) {
+                        backup_capacity *= 2;
+                        const new_storage = try self.allocator.realloc(backup_storage, backup_capacity);
+                        backup_storage = new_storage;
+                    }
+
+                    backup_storage[backup_count] = .{
+                        .name = try self.allocator.dupe(u8, entry.name),
+                        .timestamp = timestamp,
+                    };
+                    backup_count += 1;
                 }
             }
         }
 
-        // 按时间戳排序并删除旧备份
-        std.mem.sort(struct { name: []const u8, timestamp: i64 }, backups.items, struct {
-            fn less(a: struct { name: []const u8, timestamp: i64 }, b: struct { name: []const u8, timestamp: i64 }) bool {
+        std.mem.sort(BackupEntry, backup_storage[0..backup_count], {}, struct {
+            fn less(_: void, a: BackupEntry, b: BackupEntry) bool {
                 return a.timestamp < b.timestamp;
             }
         }.less);
 
-        // 删除超出限制的旧备份
-        if (backups.items.len > self.max_backups) {
-            const to_delete = backups.items[0 .. backups.items.len - self.max_backups];
-            for (to_delete) |backup| {
-                const backup_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.backup_dir, backup.name });
+        if (backup_count > self.max_backups) {
+            const to_delete = backup_count - self.max_backups;
+            for (0..to_delete) |i| {
+                const backup_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.backup_dir, backup_storage[i].name });
                 std.fs.cwd().deleteFile(backup_path) catch {
                     logger.global_logger.warn("⚠️ 删除旧备份失败: {s}", .{backup_path});
                 };
                 self.allocator.free(backup_path);
-                logger.global_logger.info("✓ 已删除旧备份: {s}", .{backup.name});
+                self.allocator.free(backup_storage[i].name);
+                logger.global_logger.info("✓ 已删除旧备份: {s}", .{backup_storage[i].name});
             }
         }
-
-        logger.global_logger.debug("✓ 备份清理完成，保留最新 {} 个备份", .{self.max_backups});
     }
 
-    /// 获取备份目录信息
     pub fn getBackupInfo(self: *BackupManager) !struct {
         total_backups: u32,
         total_size_bytes: u64,
         oldest_backup: ?[]const u8,
         newest_backup: ?[]const u8,
     } {
-        const backup_dir = try std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true });
+        var backup_dir = try std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true });
         defer backup_dir.close();
 
         var total_size: u64 = 0;
@@ -203,16 +292,14 @@ pub const BackupManager = struct {
         var iter = backup_dir.iterate();
         while (try iter.next()) |entry| {
             if (entry.kind == .file and std.mem.startsWith(u8, entry.name, "presets_backup_") and std.mem.endsWith(u8, entry.name, ".db")) {
-                // 获取文件信息
                 const file = try backup_dir.openFile(entry.name, .{});
                 defer file.close();
 
                 const stat = try file.stat();
-                total_size += @intCast(stat.size);
+                total_size += stat.size;
 
                 backup_count += 1;
 
-                // 提取时间戳
                 const name_prefix = "presets_backup_";
                 const name_suffix = ".db";
                 const timestamp_start = name_prefix.len;
@@ -242,7 +329,6 @@ pub const BackupManager = struct {
         };
     }
 
-    /// 清理已分配的备份名称
     pub fn freeBackupInfo(self: *BackupManager, info: struct {
         total_backups: u32,
         total_size_bytes: u64,
@@ -255,5 +341,75 @@ pub const BackupManager = struct {
         if (info.newest_backup) |name| {
             self.allocator.free(name);
         }
+    }
+
+    pub fn deleteBackup(self: *BackupManager, backup_name: []const u8) !void {
+        if (self.has_adapter) {
+            try self.adapter.delete(backup_name);
+            logger.global_logger.info("✓ 已删除备份: {s}", .{backup_name});
+        } else {
+            const backup_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.backup_dir, backup_name });
+            defer self.allocator.free(backup_path);
+
+            std.fs.cwd().deleteFile(backup_path) catch {
+                logger.global_logger.err("❌ 删除备份文件失败: {s}", .{backup_path});
+                return BackupError.BackupFailed;
+            };
+
+            logger.global_logger.info("✓ 已删除备份: {s}", .{backup_name});
+        }
+    }
+
+    pub fn listBackups(self: *BackupManager) ![]BackupListItem {
+        if (self.has_adapter) {
+            const items = try self.adapter.list();
+            const result = try self.allocator.alloc(BackupListItem, items.len);
+            for (items, 0..) |item, i| {
+                result[i] = .{ .name = item.name, .timestamp = item.timestamp, .size_bytes = item.size_bytes };
+            }
+            self.adapter.freeList(items);
+            return result;
+        } else {
+            var backup_dir = try std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true });
+            defer backup_dir.close();
+
+            var list = makeBackupList();
+            defer list.deinit(self.allocator);
+
+            var iter = backup_dir.iterate();
+            while (try iter.next()) |entry| {
+                if (entry.kind == .file and std.mem.startsWith(u8, entry.name, "presets_backup_") and std.mem.endsWith(u8, entry.name, ".db")) {
+                    const file = try backup_dir.openFile(entry.name, .{});
+                    defer file.close();
+
+                    const stat = try file.stat();
+
+                    const name_prefix = "presets_backup_";
+                    const name_suffix = ".db";
+                    const timestamp_start = name_prefix.len;
+                    const timestamp_end = entry.name.len - name_suffix.len;
+
+                    if (timestamp_end > timestamp_start) {
+                        const timestamp_str = entry.name[timestamp_start..timestamp_end];
+                        const timestamp = std.fmt.parseInt(i64, timestamp_str, 10) catch continue;
+
+                        try list.append(self.allocator, .{
+                            .name = try self.allocator.dupe(u8, entry.name),
+                            .timestamp = timestamp,
+                            .size_bytes = stat.size,
+                        });
+                    }
+                }
+            }
+
+            return try list.toOwnedSlice(self.allocator);
+        }
+    }
+
+    pub fn freeBackupList(self: *BackupManager, items: []BackupListItem) void {
+        for (items) |item| {
+            self.allocator.free(item.name);
+        }
+        self.allocator.free(items);
     }
 };

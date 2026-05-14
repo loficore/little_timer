@@ -72,8 +72,8 @@ describe("TimerProgress", () => {
       />
     );
 
-    const progress = container.querySelector("progress");
-    expect(progress?.className).toContain("progress-success");
+    const progressBar = container.querySelector(".progress-bar");
+    expect(progressBar?.className).toContain("from-success");
   });
 
   it("未结束时应该显示主题进度条样式", () => {
@@ -86,8 +86,8 @@ describe("TimerProgress", () => {
       />
     );
 
-    const progress = container.querySelector("progress");
-    expect(progress?.className).toContain("progress-primary");
+    const progressBar = container.querySelector(".progress-bar");
+    expect(progressBar?.className).toContain("from-[var(--accent-color)]");
   });
 
   it("有连胜时应该显示连胜信息", () => {

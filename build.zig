@@ -16,6 +16,8 @@ fn pkgConfigModuleExists(allocator: std.mem.Allocator, module: []const u8) bool 
 
 fn linkWebviewDesktopDeps(b: *std.Build, exe: *std.Build.Step.Compile, target: std.Build.ResolvedTarget) void {
     exe.addIncludePath(b.path("third_party/webview/core/include"));
+    // Also add project src so local shim headers are discoverable by clang used by ZLS
+    exe.addIncludePath(b.path("src"));
     exe.addCSourceFile(.{
         .file = b.path("third_party/webview/core/src/webview.cc"),
         .flags = &.{ "-std=c++17", "-DWEBVIEW_STATIC" },
@@ -54,6 +56,12 @@ fn linkWebviewDesktopDeps(b: *std.Build, exe: *std.Build.Step.Compile, target: s
             }
 
             exe.root_module.linkSystemLibrary("dl", .{ .use_pkg_config = .no });
+            // 添加libsecret的链接 (可选，如果不可用则跳过)
+            if (pkgConfigModuleExists(b.allocator, "libsecret-1")) {
+                exe.root_module.linkSystemLibrary("secret-1", .{ .use_pkg_config = .force });
+            } else {
+                std.debug.print("⚠️ libsecret-1 未安装，Linux密钥存储将使用内存模式\n", .{});
+            }
         },
         .macos => {
             exe.root_module.linkFramework("WebKit", .{});
@@ -96,6 +104,9 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main_entry.zig"),
         .target = root_target,
     });
+
+    // Ensure ZLS and compiler know where to find local C headers (wincred_shim.h)
+    mod.addIncludePath(b.path("src"));
 
     // 添加 build_options 到模块（供 HTTP Server 使用）
     mod.addOptions("build_options", build_options);
@@ -198,6 +209,8 @@ pub fn build(b: *std.Build) void {
         });
 
         lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sysroot_path}) });
+        // Also tell the Android library target where local C headers live
+        lib.addIncludePath(b.path("src"));
         lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/aarch64-linux-android", .{sysroot_path}) });
 
         // 核心修正：显式添加 Android 系统库搜索路径，避免链接阶段找不到 liblog/libandroid

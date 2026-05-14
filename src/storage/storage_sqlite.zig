@@ -202,7 +202,7 @@ pub const SqliteManager = struct {
 
     /// 从备份恢复数据库
     pub fn restoreFromBackup(self: *SqliteManager, backup_path: []const u8) !void {
-        try self.backup_manager.restoreFromBackup(backup_path, reopenDb);
+        try self.backup_manager.restoreFromBackup(backup_path);
     }
 
     /// 获取备份目录信息
@@ -213,6 +213,16 @@ pub const SqliteManager = struct {
     /// 清理已分配的备份信息
     pub fn freeBackupInfo(self: *SqliteManager, info: backup.BackupInfo) void {
         self.backup_manager.freeBackupInfo(info);
+    }
+
+    /// 保存备份配置
+    pub fn saveBackupConfig(self: *SqliteManager, config: interface.BackupConfig) !void {
+        try self.crud_manager.saveBackupConfig(config);
+    }
+
+    /// 加载备份配置
+    pub fn loadBackupConfig(self: *SqliteManager, allocator: std.mem.Allocator) !interface.BackupConfig {
+        return self.crud_manager.loadBackupConfig(allocator);
     }
 
     // === 内部方法 ===

@@ -412,51 +412,6 @@ pub const HabitCrudManager = struct {
         return 0;
     }
 
-    /// 获取指定习惯的连续完成天数（习惯连胜）
-    /// 参数：
-    /// - **habit_id**：习惯 ID
-    /// - **goal_seconds**：完成目标时长（秒）
-    /// 返回：
-    /// - **i64**：指定习惯的连续完成天数
-    /// 错误：
-    /// - **HabitError.QueryFailed**：如果数据库查询失败
-    pub fn getHabitStreak(self: *HabitCrudManager, habit_id: i64, goal_seconds: i64) !i64 {
-        const db = self.db orelse return HabitError.QueryFailed;
-
-        var rows = try db.rows("SELECT date, SUM(duration_seconds) as total_seconds FROM sessions WHERE habit_id = ? GROUP BY date ORDER BY date DESC LIMIT 365;", .{habit_id});
-        defer rows.deinit();
-
-        var streak: i64 = 0;
-        var prev_date: ?[]const u8 = null;
-        _ = std.time.timestamp();
-
-        while (rows.next()) |row| {
-            const date = row.get([]const u8, 0);
-            const total_seconds = row.get(i64, 1);
-
-            if (total_seconds < goal_seconds) break;
-
-            if (prev_date) |pd| {
-                const prev_y = std.fmt.parseInt(i64, pd[0..4], 10) catch break;
-                const prev_m = std.fmt.parseInt(i64, pd[5..7], 10) catch break;
-                const prev_d = std.fmt.parseInt(i64, pd[8..10], 10) catch break;
-
-                const curr_y = std.fmt.parseInt(i64, date[0..4], 10) catch break;
-                const curr_m = std.fmt.parseInt(i64, date[5..7], 10) catch break;
-                const curr_d = std.fmt.parseInt(i64, date[8..10], 10) catch break;
-
-                const prev_days = prev_y * 365 + prev_m * 31 + prev_d;
-                const curr_days = curr_y * 365 + curr_m * 31 + curr_d;
-
-                if (curr_days != prev_days - 1) break;
-            }
-            streak += 1;
-            prev_date = date;
-        }
-
-        return streak;
-    }
-
     // === Timer Session CRUD ===
 
     /// 创建新的计时会话

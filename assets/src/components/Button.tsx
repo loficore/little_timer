@@ -1,38 +1,24 @@
 import type { FunctionalComponent, ComponentChildren, VNode } from "preact";
+import { useState, useRef, useCallback } from "preact/hooks";
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost" | "success" | "warning" | "info";
 type ButtonSize = "xs" | "sm" | "md" | "lg";
 
 interface ButtonProps {
-  /** 按钮样式变体 */
   variant?: ButtonVariant;
-  /** 按钮尺寸 */
   size?: ButtonSize;
-  /** 按钮图标（组件） */
   icon?: VNode;
-  /** 是否禁用 */
   disabled?: boolean;
-  /** 是否加载中 */
   loading?: boolean;
-  /** 按钮内容 */
   children: ComponentChildren;
-  /** 点击回调 */
   onClick?: () => void;
-  /** 自定义 className */
   className?: string;
-  /** 标题提示 */
   title?: string;
-  /** 按钮类型 */
   type?: "button" | "submit" | "reset";
-  /** 是否outline样式 */
   outline?: boolean;
-  /** 是否block样式 */
   block?: boolean;
 }
 
-/**
- * 获取 DaisyUI 变体类名
- */
 const getVariantClasses = (variant: ButtonVariant, outline: boolean): string => {
   const variants: Record<ButtonVariant, string> = {
     primary: outline ? "btn-primary btn-outline" : "btn-primary",
@@ -46,9 +32,6 @@ const getVariantClasses = (variant: ButtonVariant, outline: boolean): string => 
   return variants[variant];
 };
 
-/**
- * 获取 DaisyUI 尺寸类名
- */
 const getSizeClasses = (size: ButtonSize): string => {
   const sizes: Record<ButtonSize, string> = {
     xs: "btn-xs",
@@ -59,9 +42,6 @@ const getSizeClasses = (size: ButtonSize): string => {
   return sizes[size];
 };
 
-/**
- * 统一按钮组件 - 基于 DaisyUI btn
- */
 export const Button: FunctionalComponent<ButtonProps> = ({
   variant = "primary",
   size = "md",
@@ -76,23 +56,49 @@ export const Button: FunctionalComponent<ButtonProps> = ({
   outline = false,
   block = false,
 }) => {
+  const [ripples, setRipples] = useState<{ x: number; y: number; id: number }[]>([]);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const rippleIdRef = useRef(0);
+
+  const handleClick = useCallback((e: MouseEvent) => {
+    if (!disabled && !loading && onClick) {
+      const button = buttonRef.current;
+      if (button) {
+        const rect = button.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const id = ++rippleIdRef.current;
+        setRipples((prev) => [...prev, { x, y, id }]);
+        setTimeout(() => {
+          setRipples((prev) => prev.filter((r) => r.id !== id));
+        }, 600);
+      }
+      onClick();
+    }
+  }, [disabled, loading, onClick]);
+
   const variantClasses = getVariantClasses(variant, outline);
   const sizeClasses = getSizeClasses(size);
 
-  const handleClick = () => {
-    if (!disabled && !loading && onClick) {
-      onClick();
-    }
-  };
-
   return (
     <button
+      ref={buttonRef}
       type={type}
       onClick={handleClick}
       disabled={disabled || loading}
       title={title}
-      className={`btn ${variantClasses} ${sizeClasses} ${block ? "btn-block" : ""} ${className}`}
+      className={`btn ${variantClasses} ${sizeClasses} ${block ? "btn-block" : ""} ${className} relative overflow-hidden`}
     >
+      {ripples.map((ripple) => (
+        <span
+          key={ripple.id}
+          className="ripple-effect"
+          style={{
+            left: `${ripple.x}px`,
+            top: `${ripple.y}px`,
+          }}
+        />
+      ))}
       {loading && <span className="loading loading-spinner loading-sm" />}
       {!loading && icon && <span className="w-4 h-4">{icon}</span>}
       <span>{children}</span>

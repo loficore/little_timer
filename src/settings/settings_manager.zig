@@ -42,6 +42,7 @@ fn getDefaultDatabasePath(allocator: std.mem.Allocator) ![]const u8 {
 
 pub const SettingsManager = struct {
     config: SettingsConfig,
+    backup_config: interface.BackupConfig,
     allocator: std.mem.Allocator,
     db_path: ?[]u8 = null, // SQLite 数据库文件路径
     sqlite_db: ?*settings_sqlite.SqliteManager = null, // SQLite 数据库管理器
@@ -54,6 +55,17 @@ pub const SettingsManager = struct {
     owned_log_level: ?[]u8 = null,
     owned_log_dir: ?[]u8 = null,
     owned_wallpaper: ?[]u8 = null,
+    /// 备份配置动态分配的字符串字段
+    owned_backup_local_path: ?[]u8 = null,
+    owned_backup_webdav_url: ?[]u8 = null,
+    owned_backup_webdav_username: ?[]u8 = null,
+    owned_backup_webdav_password: ?[]u8 = null,
+    owned_backup_s3_endpoint: ?[]u8 = null,
+    owned_backup_s3_bucket: ?[]u8 = null,
+    owned_backup_s3_region: ?[]u8 = null,
+    owned_backup_s3_access_key: ?[]u8 = null,
+    owned_backup_s3_secret_key: ?[]u8 = null,
+    owned_backup_s3_path_prefix: ?[]u8 = null,
 
     /// 设置模块初始化
     ///
@@ -88,6 +100,7 @@ pub const SettingsManager = struct {
             .db_path = db_path_z_slice,
             .sqlite_db = sqlite_db_ptr,
             .config = SettingsConfig{},
+            .backup_config = interface.BackupConfig{},
             .presets = PresetsManager.init(allocator),
         };
         return settings_manager;
@@ -262,6 +275,121 @@ pub const SettingsManager = struct {
         return &self.config;
     }
 
+    pub fn getBackupConfig(self: *const SettingsManager) interface.BackupConfig {
+        return self.backup_config;
+    }
+
+    pub fn updateBackupConfig(self: *SettingsManager, json_str: []const u8) !void {
+        logger.global_logger.debug("updateBackupConfig 收到 JSON: {s}", .{json_str});
+
+        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{});
+        defer parsed.deinit();
+
+        const root = parsed.value;
+
+        if (root.object.get("enabled")) |val| {
+            self.backup_config.enabled = switch (val) {
+                .bool => |b| b,
+                .integer => |i| i != 0,
+                else => false,
+            };
+        }
+
+        if (root.object.get("auto_backup")) |val| {
+            self.backup_config.auto_backup = switch (val) {
+                .bool => |b| b,
+                .integer => |i| i != 0,
+                else => false,
+            };
+        }
+
+        if (root.object.get("auto_backup_interval")) |val| {
+            if (val.integer >= 60 and val.integer <= 31536000) {
+                self.backup_config.auto_backup_interval = @intCast(val.integer);
+            }
+        }
+
+        if (root.object.get("target_type")) |val| {
+            if (std.mem.eql(u8, val.string, "webdav")) {
+                self.backup_config.target_type = .webdav;
+            } else if (std.mem.eql(u8, val.string, "s3")) {
+                self.backup_config.target_type = .s3;
+            } else {
+                self.backup_config.target_type = .local;
+            }
+        }
+
+        if (root.object.get("local_path")) |val| {
+            if (self.owned_backup_local_path) |old| self.allocator.free(old);
+            self.owned_backup_local_path = try self.allocator.dupe(u8, val.string);
+            self.backup_config.local_path = self.owned_backup_local_path.?;
+        }
+
+        if (root.object.get("webdav_url")) |val| {
+            if (self.owned_backup_webdav_url) |old| self.allocator.free(old);
+            self.owned_backup_webdav_url = try self.allocator.dupe(u8, val.string);
+            self.backup_config.webdav_url = self.owned_backup_webdav_url.?;
+        }
+
+        if (root.object.get("webdav_username")) |val| {
+            if (self.owned_backup_webdav_username) |old| self.allocator.free(old);
+            self.owned_backup_webdav_username = try self.allocator.dupe(u8, val.string);
+            self.backup_config.webdav_username = self.owned_backup_webdav_username.?;
+        }
+
+        if (root.object.get("webdav_password")) |val| {
+            if (self.owned_backup_webdav_password) |old| self.allocator.free(old);
+            self.owned_backup_webdav_password = try self.allocator.dupe(u8, val.string);
+            self.backup_config.webdav_password = self.owned_backup_webdav_password.?;
+        }
+
+        if (root.object.get("s3_endpoint")) |val| {
+            if (self.owned_backup_s3_endpoint) |old| self.allocator.free(old);
+            self.owned_backup_s3_endpoint = try self.allocator.dupe(u8, val.string);
+            self.backup_config.s3_endpoint = self.owned_backup_s3_endpoint.?;
+        }
+
+        if (root.object.get("s3_bucket")) |val| {
+            if (self.owned_backup_s3_bucket) |old| self.allocator.free(old);
+            self.owned_backup_s3_bucket = try self.allocator.dupe(u8, val.string);
+            self.backup_config.s3_bucket = self.owned_backup_s3_bucket.?;
+        }
+
+        if (root.object.get("s3_region")) |val| {
+            if (self.owned_backup_s3_region) |old| self.allocator.free(old);
+            self.owned_backup_s3_region = try self.allocator.dupe(u8, val.string);
+            self.backup_config.s3_region = self.owned_backup_s3_region.?;
+        }
+
+        if (root.object.get("s3_access_key")) |val| {
+            if (self.owned_backup_s3_access_key) |old| self.allocator.free(old);
+            self.owned_backup_s3_access_key = try self.allocator.dupe(u8, val.string);
+            self.backup_config.s3_access_key = self.owned_backup_s3_access_key.?;
+        }
+
+        if (root.object.get("s3_secret_key")) |val| {
+            if (self.owned_backup_s3_secret_key) |old| self.allocator.free(old);
+            self.owned_backup_s3_secret_key = try self.allocator.dupe(u8, val.string);
+            self.backup_config.s3_secret_key = self.owned_backup_s3_secret_key.?;
+        }
+
+        if (root.object.get("s3_path_prefix")) |val| {
+            if (self.owned_backup_s3_path_prefix) |old| self.allocator.free(old);
+            self.owned_backup_s3_path_prefix = try self.allocator.dupe(u8, val.string);
+            self.backup_config.s3_path_prefix = self.owned_backup_s3_path_prefix.?;
+        }
+
+        try self.saveBackupConfig();
+
+        logger.global_logger.info("✓ 备份配置已更新", .{});
+    }
+
+    fn saveBackupConfig(self: *SettingsManager) !void {
+        if (self.sqlite_db) |db| {
+            try db.saveBackupConfig(self.backup_config);
+        }
+    }
+
     /// 更新基本设置
     ///
     /// 参数:
@@ -340,9 +468,6 @@ pub const SettingsManager = struct {
 
                 // 简化的JSON处理：只处理基本设置和预设
                 try self.parseSettingsFromJson(new_settings_json);
-
-                // 释放传入的 JSON 字符串内存（由调用者分配）
-                self.allocator.free(new_settings_json);
 
                 logger.global_logger.info("处理完成，当前预设数量: {}", .{self.presets.count()});
 
@@ -511,6 +636,101 @@ pub const SettingsManager = struct {
             }
         }
 
+        // 更新备份设置
+        if (root.object.get("backup")) |backup_val| {
+            if (backup_val.object.get("enabled")) |val| {
+                self.backup_config.enabled = switch (val) {
+                    .bool => |b| b,
+                    .integer => |i| i != 0,
+                    else => false,
+                };
+            }
+
+            if (backup_val.object.get("auto_backup")) |val| {
+                self.backup_config.auto_backup = switch (val) {
+                    .bool => |b| b,
+                    .integer => |i| i != 0,
+                    else => false,
+                };
+            }
+
+            if (backup_val.object.get("auto_backup_interval")) |val| {
+                if (val.integer >= 60 and val.integer <= 31536000) {
+                    self.backup_config.auto_backup_interval = @intCast(val.integer);
+                }
+            }
+
+            if (backup_val.object.get("target_type")) |val| {
+                if (std.mem.eql(u8, val.string, "webdav")) {
+                    self.backup_config.target_type = .webdav;
+                } else if (std.mem.eql(u8, val.string, "s3")) {
+                    self.backup_config.target_type = .s3;
+                } else {
+                    self.backup_config.target_type = .local;
+                }
+            }
+
+            if (backup_val.object.get("local_path")) |val| {
+                if (self.owned_backup_local_path) |old| self.allocator.free(old);
+                self.owned_backup_local_path = try self.allocator.dupe(u8, val.string);
+                self.backup_config.local_path = self.owned_backup_local_path.?;
+            }
+
+            if (backup_val.object.get("webdav_url")) |val| {
+                if (self.owned_backup_webdav_url) |old| self.allocator.free(old);
+                self.owned_backup_webdav_url = try self.allocator.dupe(u8, val.string);
+                self.backup_config.webdav_url = self.owned_backup_webdav_url.?;
+            }
+
+            if (backup_val.object.get("webdav_username")) |val| {
+                if (self.owned_backup_webdav_username) |old| self.allocator.free(old);
+                self.owned_backup_webdav_username = try self.allocator.dupe(u8, val.string);
+                self.backup_config.webdav_username = self.owned_backup_webdav_username.?;
+            }
+
+            if (backup_val.object.get("webdav_password")) |val| {
+                if (self.owned_backup_webdav_password) |old| self.allocator.free(old);
+                self.owned_backup_webdav_password = try self.allocator.dupe(u8, val.string);
+                self.backup_config.webdav_password = self.owned_backup_webdav_password.?;
+            }
+
+            if (backup_val.object.get("s3_endpoint")) |val| {
+                if (self.owned_backup_s3_endpoint) |old| self.allocator.free(old);
+                self.owned_backup_s3_endpoint = try self.allocator.dupe(u8, val.string);
+                self.backup_config.s3_endpoint = self.owned_backup_s3_endpoint.?;
+            }
+
+            if (backup_val.object.get("s3_bucket")) |val| {
+                if (self.owned_backup_s3_bucket) |old| self.allocator.free(old);
+                self.owned_backup_s3_bucket = try self.allocator.dupe(u8, val.string);
+                self.backup_config.s3_bucket = self.owned_backup_s3_bucket.?;
+            }
+
+            if (backup_val.object.get("s3_region")) |val| {
+                if (self.owned_backup_s3_region) |old| self.allocator.free(old);
+                self.owned_backup_s3_region = try self.allocator.dupe(u8, val.string);
+                self.backup_config.s3_region = self.owned_backup_s3_region.?;
+            }
+
+            if (backup_val.object.get("s3_access_key")) |val| {
+                if (self.owned_backup_s3_access_key) |old| self.allocator.free(old);
+                self.owned_backup_s3_access_key = try self.allocator.dupe(u8, val.string);
+                self.backup_config.s3_access_key = self.owned_backup_s3_access_key.?;
+            }
+
+            if (backup_val.object.get("s3_secret_key")) |val| {
+                if (self.owned_backup_s3_secret_key) |old| self.allocator.free(old);
+                self.owned_backup_s3_secret_key = try self.allocator.dupe(u8, val.string);
+                self.backup_config.s3_secret_key = self.owned_backup_s3_secret_key.?;
+            }
+
+            if (backup_val.object.get("s3_path_prefix")) |val| {
+                if (self.owned_backup_s3_path_prefix) |old| self.allocator.free(old);
+                self.owned_backup_s3_path_prefix = try self.allocator.dupe(u8, val.string);
+                self.backup_config.s3_path_prefix = self.owned_backup_s3_path_prefix.?;
+            }
+        }
+
         // 只有明确包含预设时才更新预设
         if (root.object.get("presets")) |presets_val| {
             if (presets_val == .array) {
@@ -668,6 +888,18 @@ pub const SettingsManager = struct {
         if (self.owned_log_level) |s| self.allocator.free(s);
         if (self.owned_log_dir) |s| self.allocator.free(s);
         if (self.owned_wallpaper) |s| self.allocator.free(s);
+
+        // 释放备份配置动态分配的字符串字段
+        if (self.owned_backup_local_path) |s| self.allocator.free(s);
+        if (self.owned_backup_webdav_url) |s| self.allocator.free(s);
+        if (self.owned_backup_webdav_username) |s| self.allocator.free(s);
+        if (self.owned_backup_webdav_password) |s| self.allocator.free(s);
+        if (self.owned_backup_s3_endpoint) |s| self.allocator.free(s);
+        if (self.owned_backup_s3_bucket) |s| self.allocator.free(s);
+        if (self.owned_backup_s3_region) |s| self.allocator.free(s);
+        if (self.owned_backup_s3_access_key) |s| self.allocator.free(s);
+        if (self.owned_backup_s3_secret_key) |s| self.allocator.free(s);
+        if (self.owned_backup_s3_path_prefix) |s| self.allocator.free(s);
 
         // 释放堆上分配的 sqlite_db
         if (self.sqlite_db != null) {

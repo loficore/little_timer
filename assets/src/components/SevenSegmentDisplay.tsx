@@ -56,7 +56,7 @@ export const SevenSegmentDisplay: FunctionalComponent<SevenSegmentDisplayProps> 
   const digits = useMemo(() => Array.from(value), [value]);
 
   return (
-    <span className={`seven-segment-display ${className}`} role="img" aria-label={value}>
+    <span className={`seven-segment-display ${className} is-active`} role="img" aria-label={value}>
       {digits.map((char, index) => {
         const onSegments = useMemo(
           () => DIGIT_SEGMENTS[char] ?? [],

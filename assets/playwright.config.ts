@@ -40,6 +40,7 @@ export default defineConfig({
     },
   },
   globalSetup: "./src/test/visual/globalSetup.ts",
+  globalTeardown: "./src/test/visual/globalTeardown.ts",
   webServer: [
     {
       command: "bun run dev --host 127.0.0.1 --port 5173",
@@ -68,6 +69,13 @@ export default defineConfig({
       use: {
         browserName: "chromium",
         viewport: { width: 412, height: 915 },
+      },
+    },
+    {
+      name: "desktop-1280",
+      use: {
+        browserName: "chromium",
+        viewport: { width: 1280, height: 800 },
       },
     },
   ],

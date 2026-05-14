@@ -5,51 +5,21 @@ import { TabPanel } from "./components/TabPanel";
 import { BasicSettings } from "./components/BasicSettings";
 import { CountdownSettings } from "./components/CountdownSettings";
 import { StopwatchSettings } from "./components/StopwatchSettings";
+import { BackupTab } from "./components/settings/BackupTab";
 import { t, setLanguage } from "./utils/i18n";
 import { getAPIClient } from "./utils/apiClientSingleton";
-import { ClockIconComponent, CheckIconComponent, ResetIcon } from "./utils/icons";
-import {
-  DEFAULT_AUDIO_PREFERENCES,
-  loadAudioPreferences,
-  normalizeAudioPreferences,
-  saveAudioPreferences,
-} from "./utils/audio";
-import { STORAGE_KEYS } from "./utils/constants";
 import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
+import { ClockIconComponent, CheckIconComponent, ResetIcon } from "./utils/icons";
 
-interface SettingsPageProps {
-  onBackClick?: () => void;
-  wallpaper?: string;
-  onWallpaperChange?: (wallpaper: string) => void;
-}
+const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
+  { id: "basic", labelKey: "settings.tabs.basic" },
+  { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
+  { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
+  { id: "backup", labelKey: "settings.tabs.backup" },
+];
 
-interface SettingsConfig {
-  basic: {
-    timezone: number;
-    language: string;
-    default_mode: string;
-    theme_mode: string;
-    wallpaper?: string;
-    sound_enabled: boolean;
-    sound_tick: boolean;
-    sound_finish: boolean;
-    sound_volume: number;
-    layout_density?: string;
-    time_display_style?: string;
-    light_style?: string;
-  };
-  clock_defaults: {
-    countdown: {
-      duration_seconds: number;
-      loop: boolean;
-      loop_count: number;
-      loop_interval_seconds: number;
-    };
-    stopwatch: {
-      max_seconds: number;
-    };
-  };
-}
+const LIGHT_STYLE_STORAGE_KEY = "lt_light_style";
+const THEME_MODE_STORAGE_KEY = "lt_theme_mode";
 
 const DEFAULT_CONFIG: SettingsConfig = {
   basic: {
@@ -58,10 +28,10 @@ const DEFAULT_CONFIG: SettingsConfig = {
     default_mode: "countdown",
     theme_mode: "dark",
     wallpaper: "",
-    sound_enabled: DEFAULT_AUDIO_PREFERENCES.sound_enabled,
-    sound_tick: DEFAULT_AUDIO_PREFERENCES.sound_tick,
-    sound_finish: DEFAULT_AUDIO_PREFERENCES.sound_finish,
-    sound_volume: DEFAULT_AUDIO_PREFERENCES.sound_volume,
+    sound_enabled: true,
+    sound_tick: true,
+    sound_finish: true,
+    sound_volume: 80,
     layout_density: "normal",
     time_display_style: "classic",
     light_style: "paper",
@@ -78,15 +48,6 @@ const DEFAULT_CONFIG: SettingsConfig = {
     },
   },
 };
-
-const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
-  { id: "basic", labelKey: "settings.tabs.basic" },
-  { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
-  { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
-];
-
-const LIGHT_STYLE_STORAGE_KEY = "lt_light_style";
-const THEME_MODE_STORAGE_KEY = "lt_theme_mode";
 
 export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   onBackClick,
@@ -474,6 +435,35 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
                     stopwatch: newStopwatch,
                   },
                 });
+              }}
+            />
+          )}
+          {activeTab === "backup" && (
+            <BackupTab
+              config={config}
+              onChange={async (newConfig) => {
+                setConfig(newConfig);
+                if (apiClientRef.current) {
+                  try {
+                    const backupConfig: any = {
+                      enabled: newConfig.backup_enabled ?? false,
+                      target_type: newConfig.backup_target ?? 'local',
+                      local_path: newConfig.backup_local_path ?? '',
+                      webdav_url: newConfig.backup_webdav_url ?? '',
+                      webdav_username: newConfig.backup_webdav_username ?? '',
+                      webdav_password: newConfig.backup_webdav_password ?? '',
+                      s3_endpoint: newConfig.backup_s3_endpoint ?? '',
+                      s3_bucket: newConfig.backup_s3_bucket ?? '',
+                      s3_region: newConfig.backup_s3_region ?? '',
+                      s3_access_key: newConfig.backup_s3_access_key ?? '',
+                      s3_secret_key: newConfig.backup_s3_secret_key ?? '',
+                      s3_path_prefix: newConfig.backup_s3_path_prefix ?? '',
+                    };
+                    await apiClientRef.current.updateBackupConfig(backupConfig);
+                  } catch (err) {
+                    console.error('Failed to save backup config:', err);
+                  }
+                }
               }}
             />
           )}

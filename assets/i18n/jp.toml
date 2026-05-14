@@ -35,11 +35,12 @@ loop_status = "ラウンド {remaining}/{total}"
 finished_notification = "⏰ 計時完了！"
 
 [settings.tabs]
-basic = "基本"
+basic = "基本設定"
 countdown = "カウントダウン"
 stopwatch = "ストップウォッチ"
-world_clock = "ワールドクロック"
+world_clock = "世界時計"
 presets = "プリセット"
+backup = "バックアップ"
 
 [settings.basic]
 timezone = "タイムゾーン"

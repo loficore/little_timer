@@ -111,6 +111,7 @@ countdown = "倒计时"
 stopwatch = "正计时"
 world_clock = "世界时钟"
 presets = "预设"
+backup = "备份"
 
 [settings.basic]
 timezone = "时区"

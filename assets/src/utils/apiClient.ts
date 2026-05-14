@@ -437,4 +437,75 @@ export class APIClient {
         }
         return await response.json();
     }
+
+    // === 备份 API ===
+
+    async createBackup(): Promise<{ success: boolean; backup_path?: string; error?: string }> {
+        const response = await fetch(`${this.baseUrl}/api/backup/create`, { method: 'POST' });
+        const data = await response.json();
+        return data;
+    }
+
+    async listBackups(): Promise<{ success: boolean; backups: Array<{ name: string; timestamp: number; size_bytes: number }>; error?: string }> {
+        const response = await fetch(`${this.baseUrl}/api/backup/list`);
+        if (!response.ok) {
+            throw new Error(`Error listing backups: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    async restoreBackup(name: string): Promise<{ success: boolean; error?: string }> {
+        const response = await fetch(`${this.baseUrl}/api/backup/restore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        return await response.json();
+    }
+
+    async deleteBackup(name: string): Promise<{ success: boolean; error?: string }> {
+        const response = await fetch(`${this.baseUrl}/api/backup/${encodeURIComponent(name)}`, {
+            method: 'DELETE'
+        });
+        return await response.json();
+    }
+
+    async verifyBackup(): Promise<{ success: boolean; error?: string }> {
+        const response = await fetch(`${this.baseUrl}/api/backup/verify`, { method: 'POST' });
+        return await response.json();
+    }
+
+    async getBackupConfig(): Promise<BackupConfig> {
+        const response = await fetch(`${this.baseUrl}/api/backup/config`);
+        if (!response.ok) {
+            throw new Error(`Error fetching backup config: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    async updateBackupConfig(config: BackupConfig): Promise<{ success: boolean; error?: string }> {
+        const response = await fetch(`${this.baseUrl}/api/backup/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        return await response.json();
+    }
+}
+
+export interface BackupConfig {
+    enabled: boolean;
+    target_type: 'local' | 'webdav' | 's3';
+    local_path?: string;
+    webdav_url?: string;
+    webdav_username?: string;
+    webdav_password?: string;
+    s3_endpoint?: string;
+    s3_bucket?: string;
+    s3_region?: string;
+    s3_access_key?: string;
+    s3_secret_key?: string;
+    s3_path_prefix?: string;
+    auto_interval_hours?: number;
+    max_backups?: number;
 }

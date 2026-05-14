@@ -85,3 +85,42 @@ pub const SettingsEvent = union(enum) {
     get_settings: [:0]u8, // 用于获取设置的缓冲区（哨兵切片）
     change_settings: [:0]u8, // JSON 字符串（可变，便于调用方释放）
 };
+
+/// 备份目标类型
+pub const BackupTargetType = enum {
+    local,
+    webdav,
+    s3,
+};
+
+/// 备份配置
+pub const BackupConfig = struct {
+    enabled: bool = false,
+    auto_backup: bool = false,
+    auto_backup_interval: u64 = 86400, // 秒，默认1天
+
+    target_type: BackupTargetType = .local,
+
+    // Local 专用
+    local_path: []const u8 = "",
+
+    // WebDAV 专用
+    webdav_url: []const u8 = "",
+    webdav_username: []const u8 = "",
+    webdav_password: []const u8 = "", // 加密存储，实际不持久化明文
+
+    // S3 专用
+    s3_endpoint: []const u8 = "",
+    s3_bucket: []const u8 = "",
+    s3_region: []const u8 = "",
+    s3_access_key: []const u8 = "",
+    s3_secret_key: []const u8 = "", // 加密存储，实际不持久化明文
+    s3_path_prefix: []const u8 = "little_timer/",
+};
+
+/// 备份信息
+pub const BackupInfo = struct {
+    name: []const u8,
+    timestamp: i64,
+    size_bytes: u64,
+};

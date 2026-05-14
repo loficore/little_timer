@@ -6,7 +6,7 @@ const interface = @import("../core/interface.zig");
 const logger = @import("../core/logger.zig");
 
 /// 数据库模式版本常量
-pub const CURRENT_SCHEMA_VERSION = 6;
+pub const CURRENT_SCHEMA_VERSION = 7;
 
 /// SQLite 错误类型
 pub const MigrationError = error{
@@ -72,6 +72,7 @@ pub const MigrationManager = struct {
             "timer_sessions",
             "settings",
             "schema_version",
+            "backup_config",
         };
 
         var missing_count: u32 = 0;
@@ -201,6 +202,29 @@ pub const MigrationManager = struct {
             , .{}) catch |err| {
                 logger.global_logger.err("❌ 重建 schema_version 失败: {any}", .{err});
             };
+        } else if (std.mem.eql(u8, table_name, "backup_config")) {
+            self.db.?.exec(
+                \\CREATE TABLE IF NOT EXISTS backup_config (
+                \\    id INTEGER PRIMARY KEY CHECK (id = 1),
+                \\    target_type TEXT NOT NULL DEFAULT 'local',
+                \\    enabled BOOLEAN NOT NULL DEFAULT 0,
+                \\    auto_backup BOOLEAN NOT NULL DEFAULT 0,
+                \\    auto_backup_interval INTEGER NOT NULL DEFAULT 86400,
+                \\    local_path TEXT,
+                \\    webdav_url TEXT,
+                \\    webdav_username TEXT,
+                \\    webdav_password_encrypted BLOB,
+                \\    s3_endpoint TEXT,
+                \\    s3_bucket TEXT,
+                \\    s3_region TEXT,
+                \\    s3_access_key_encrypted BLOB,
+                \\    s3_secret_key_encrypted BLOB,
+                \\    s3_path_prefix TEXT,
+                \\    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                \\);
+            , .{}) catch |err| {
+                logger.global_logger.err("❌ 重建 backup_config 失败: {any}", .{err});
+            };
         }
     }
 
@@ -273,6 +297,11 @@ pub const MigrationManager = struct {
             try self.migrateToV6();
             try self.setSchemaVersion(to_version);
             logger.global_logger.info("✓ 数据库迁移完成 (5 -> 6)", .{});
+        } else if (from_version == 6 and to_version == 7) {
+            // 迁移到版本 7：添加备份配置表
+            try self.migrateToV7();
+            try self.setSchemaVersion(to_version);
+            logger.global_logger.info("✓ 数据库迁移完成 (6 -> 7)", .{});
         } else {
             logger.global_logger.err("❌ 不支持的迁移路径: {} -> {}", .{ from_version, to_version });
             return MigrationError.MigrationFailed;
@@ -288,6 +317,39 @@ pub const MigrationManager = struct {
         db.exec("ALTER TABLE settings ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
 
         logger.global_logger.info("已迁移到版本 6(wallpaper backfill)", .{});
+    }
+
+    /// 迁移到版本 7：创建备份配置表
+    fn migrateToV7(self: *MigrationManager) !void {
+        const db = self.db orelse return;
+
+        const create_backup_config_sql =
+            \\CREATE TABLE IF NOT EXISTS backup_config (
+            \\    id INTEGER PRIMARY KEY CHECK (id = 1),
+            \\    target_type TEXT NOT NULL DEFAULT 'local',
+            \\    enabled BOOLEAN NOT NULL DEFAULT 0,
+            \\    auto_backup BOOLEAN NOT NULL DEFAULT 0,
+            \\    auto_backup_interval INTEGER NOT NULL DEFAULT 86400,
+            \\    local_path TEXT,
+            \\    webdav_url TEXT,
+            \\    webdav_username TEXT,
+            \\    webdav_password_encrypted BLOB,
+            \\    s3_endpoint TEXT,
+            \\    s3_bucket TEXT,
+            \\    s3_region TEXT,
+            \\    s3_access_key_encrypted BLOB,
+            \\    s3_secret_key_encrypted BLOB,
+            \\    s3_path_prefix TEXT,
+            \\    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            \\);
+        ;
+
+        db.exec(create_backup_config_sql, .{}) catch |err| {
+            logger.global_logger.err("❌ 创建 backup_config 表失败: {any}", .{err});
+            return MigrationError.TableCreationFailed;
+        };
+
+        logger.global_logger.info("已迁移到版本 7(backup_config)", .{});
     }
 
     /// 迁移到版本 5：添加暂停记账字段

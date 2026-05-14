@@ -7,6 +7,7 @@ const settings = @import("../../settings/mod.zig");
 const habit_crud = @import("../../storage/habit_crud.zig");
 const MainApplication = @import("../app.zig").MainApplication;
 const build_options = @import("build_options");
+const backup_mod = @import("../../storage/backup/BackupAdapter.zig");
 
 const ClockState = clock.ClockState;
 const ModeEnumT = clock.ModeEnumT;
@@ -180,8 +181,6 @@ fn handleRequest(request: *http.Server.Request) !void {
         try handleCreateSession(request);
     } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/sessions")) {
         try handleGetSessions(request);
-    } else if (request.head.method == .GET and std.mem.startsWith(u8, path, "/api/habits/") and std.mem.endsWith(u8, path, "/streak")) {
-        try handleGetHabitStreak(request);
     } else if (request.head.method == .GET and std.mem.startsWith(u8, path, "/api/habits/") and std.mem.endsWith(u8, path, "/detail")) {
         try handleGetHabitDetail(request);
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/timer/rest")) {
@@ -190,6 +189,20 @@ fn handleRequest(request: *http.Server.Request) !void {
         try handleFinish(request);
     } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/timer/progress")) {
         try handleGetProgress(request);
+    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/backup/config")) {
+        try handleGetBackupConfig(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/config")) {
+        try handleUpdateBackupConfig(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/create")) {
+        try handleBackupCreate(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/restore")) {
+        try handleBackupRestore(request);
+    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/backup/list")) {
+        try handleBackupList(request);
+    } else if (request.head.method == .DELETE and std.mem.startsWith(u8, path, "/api/backup/")) {
+        try handleBackupDelete(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/verify")) {
+        try handleBackupVerify(request);
     } else {
         try request.respond("", .{ .status = .not_found });
     }
@@ -597,6 +610,254 @@ fn handleGetProgress(request: *http.Server.Request) !void {
     });
 }
 
+fn handleGetBackupConfig(request: *http.Server.Request) !void {
+    logger.global_logger.debug("[API] GET /api/backup/config", .{});
+    const app = getApp();
+    const backup_config = app.settings_manager.getBackupConfig();
+
+    const target_type_str = switch (backup_config.target_type) {
+        .local => "local",
+        .webdav => "webdav",
+        .s3 => "s3",
+    };
+
+    const json_resp = try std.fmt.allocPrint(getAllocator(),
+        "{{\"enabled\":{},\"auto_backup\":{},\"auto_backup_interval\":{},\"target_type\":\"{s}\",\"local_path\":\"{s}\",\"webdav_url\":\"{s}\",\"webdav_username\":\"{s}\",\"s3_endpoint\":\"{s}\",\"s3_bucket\":\"{s}\",\"s3_region\":\"{s}\",\"s3_path_prefix\":\"{s}\"}}",
+        .{
+            @intFromBool(backup_config.enabled),
+            @intFromBool(backup_config.auto_backup),
+            backup_config.auto_backup_interval,
+            target_type_str,
+            backup_config.local_path,
+            backup_config.webdav_url,
+            backup_config.webdav_username,
+            backup_config.s3_endpoint,
+            backup_config.s3_bucket,
+            backup_config.s3_region,
+            backup_config.s3_path_prefix,
+        }
+    );
+    defer getAllocator().free(json_resp);
+    try request.respond(json_resp, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleUpdateBackupConfig(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] POST /api/backup/config", .{});
+    const app = getApp();
+    const allocator = getAllocator();
+    const body = try readRequestBody(request, allocator);
+    defer allocator.free(body);
+
+    const body_copy: [:0]u8 = try allocator.allocSentinel(u8, body.len, 0);
+    @memcpy(body_copy[0..body.len], body);
+
+    try app.settings_manager.updateBackupConfig(body_copy);
+    allocator.free(body_copy);
+
+    const resp = "{\"success\":true}";
+    try request.respond(resp, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleBackupCreate(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] POST /api/backup/create", .{});
+    const app = getApp();
+    const db = app.settings_manager.sqlite_db orelse {
+        try request.respond("{\"success\":false,\"error\":\"database not open\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const result = db.backup_manager.createBackup() catch |err| {
+        const err_msg = std.fmt.allocPrint(getAllocator(), "{{\"success\":false,\"error\":\"{s}\"}}", .{@errorName(err)}) catch unreachable;
+        defer getAllocator().free(err_msg);
+        try request.respond(err_msg, .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const resp = try std.fmt.allocPrint(getAllocator(), "{{\"success\":true,\"backup_path\":\"{s}\"}}", .{result});
+    defer getAllocator().free(resp);
+    try request.respond(resp, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleBackupRestore(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] POST /api/backup/restore", .{});
+    const app = getApp();
+    const allocator = getAllocator();
+    const body = try readRequestBody(request, allocator);
+    defer allocator.free(body);
+
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch null;
+    defer if (parsed) |p| p.deinit();
+
+    if (parsed == null) {
+        try request.respond("{\"success\":false,\"error\":\"invalid json\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+
+    const name_val = parsed.?.value.object.get("name") orelse null;
+    if (name_val == null or name_val.? != .string) {
+        try request.respond("{\"success\":false,\"error\":\"missing name\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+
+    const backup_name = name_val.?.string;
+
+    const db = app.settings_manager.sqlite_db orelse {
+        try request.respond("{\"success\":false,\"error\":\"database not open\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    db.backup_manager.restoreFromBackup(backup_name) catch |err| {
+        const err_msg = std.fmt.allocPrint(getAllocator(), "{{\"success\":false,\"error\":\"{s}\"}}", .{@errorName(err)}) catch unreachable;
+        defer getAllocator().free(err_msg);
+        try request.respond(err_msg, .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const resp = "{\"success\":true}";
+    try request.respond(resp, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleBackupList(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] GET /api/backup/list", .{});
+    const app = getApp();
+    const db = app.settings_manager.sqlite_db orelse {
+        try request.respond("{\"success\":false,\"error\":\"database not open\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const backups = db.backup_manager.listBackups() catch |err| {
+        const err_msg = std.fmt.allocPrint(getAllocator(), "{{\"success\":false,\"error\":\"{s}\"}}", .{@errorName(err)}) catch unreachable;
+        defer getAllocator().free(err_msg);
+        try request.respond(err_msg, .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer db.backup_manager.freeBackupList(backups);
+
+    const allocator = getAllocator();
+    var json_parts: std.ArrayList(u8) = .{};
+    defer json_parts.deinit(allocator);
+
+    try json_parts.appendSlice(allocator, "{\"success\":true,\"backups\":[");
+    for (backups, 0..) |b, i| {
+        if (i > 0) try json_parts.appendSlice(allocator, ",");
+        const entry = try std.fmt.allocPrint(allocator,
+            "{{\"name\":\"{s}\",\"timestamp\":{d},\"size_bytes\":{d}}}",
+            .{ b.name, b.timestamp, b.size_bytes }
+        );
+        defer allocator.free(entry);
+        try json_parts.appendSlice(allocator, entry);
+    }
+    try json_parts.appendSlice(allocator, "]}");
+
+    try request.respond(json_parts.items, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleBackupDelete(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] DELETE /api/backup/*", .{});
+    const allocator = getAllocator();
+    const target = request.head.target;
+
+    const name_start = std.mem.lastIndexOfScalar(u8, target, '/') orelse target.len;
+    const backup_name = target[name_start + 1..];
+
+    const app = getApp();
+    const db = app.settings_manager.sqlite_db orelse {
+        try request.respond("{\"success\":false,\"error\":\"database not open\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    db.backup_manager.deleteBackup(backup_name) catch |err| {
+        const err_msg = std.fmt.allocPrint(allocator, "{{\"success\":false,\"error\":\"{s}\"}}", .{@errorName(err)}) catch unreachable;
+        defer allocator.free(err_msg);
+        try request.respond(err_msg, .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const resp = "{\"success\":true}";
+    try request.respond(resp, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleBackupVerify(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] POST /api/backup/verify", .{});
+    const app = getApp();
+    const allocator = getAllocator();
+
+    const backup_config = app.settings_manager.getBackupConfig();
+    if (!backup_config.enabled) {
+        try request.respond("{\"success\":false,\"error\":\"backup not enabled\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+
+    const adapter: backup_mod.BackupAdapter = switch (backup_config.target_type) {
+        .local => backup_mod.createLocalAdapter(allocator, .{ .path = if (backup_config.local_path.len > 0) backup_config.local_path else "" }),
+        .webdav => backup_mod.createWebDAVAdapter(allocator, .{
+            .url = backup_config.webdav_url,
+            .username = backup_config.webdav_username,
+            .password = backup_config.webdav_password,
+            .base_path = "/",
+        }),
+        .s3 => backup_mod.createS3Adapter(allocator, .{
+            .endpoint = backup_config.s3_endpoint,
+            .bucket = backup_config.s3_bucket,
+            .region = backup_config.s3_region,
+            .access_key = backup_config.s3_access_key,
+            .secret_key = backup_config.s3_secret_key,
+            .path_prefix = if (backup_config.s3_path_prefix.len > 0) backup_config.s3_path_prefix else "little_timer/",
+        }),
+    };
+    defer {
+        adapter.vtable.freeList(adapter.ptr, &[_]backup_mod.BackupInfo{});
+    }
+
+    const test_result = adapter.list() catch |err| {
+        const err_msg = std.fmt.allocPrint(allocator, "{{\"success\":false,\"error\":\"{s}\"}}", .{@errorName(err)}) catch unreachable;
+        defer allocator.free(err_msg);
+        try request.respond(err_msg, .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    adapter.freeList(test_result);
+
+    try request.respond("{\"success\":true}", .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
 fn handleModeChange(request: *http.Server.Request) !void {
     logger.global_logger.info("[API] POST /api/mode", .{});
     const allocator = getAllocator();
@@ -644,6 +905,8 @@ fn handleUpdateSettings(request: *http.Server.Request) !void {
 
     const body_copy: [:0]u8 = try allocator.allocSentinel(u8, body.len, 0);
     @memcpy(body_copy[0..body.len], body);
+    defer allocator.free(body_copy);
+
     try app.settings_manager.handleSettingsEvent(.{ .change_settings = body_copy });
 
     try request.respond("{\"status\":\"settings_updated\"}", .{
@@ -1153,8 +1416,6 @@ fn handleGetSessions(request: *http.Server.Request) !void {
         }
     }
 
-    std.debug.print("[handleGetSessions] date={s}, start_date={s}, end_date={s}\n", .{ date orelse "null", start_date orelse "null", end_date orelse "null" });
-
     const app = getApp();
 
     var sessions: []habit_crud.SessionRow = &.{};
@@ -1164,7 +1425,6 @@ fn handleGetSessions(request: *http.Server.Request) !void {
     };
 
     if (start_date != null and end_date != null) {
-        std.debug.print("[handleGetSessions] calling getSessionsByDateRange\n", .{});
         sessions = app.settings_manager.sqlite_db.?.*.habit_manager.getSessionsByDateRange(start_date.?, end_date.?) catch {
             try request.respond("{\"err\":\"Failed to get sessions\"}", .{
                 .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -1195,36 +1455,9 @@ fn handleGetSessions(request: *http.Server.Request) !void {
 
     owns_sessions = true;
 
-    std.debug.print("[handleGetSessions] returning {} sessions\n", .{sessions.len});
-
     const serialized = try std.fmt.allocPrint(getAllocator(), "{f}", .{std.json.fmt(sessions, .{})});
     defer getAllocator().free(serialized);
     try request.respond(serialized, .{
-        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
-    });
-}
-
-fn handleGetHabitStreak(request: *http.Server.Request) !void {
-    const target = request.head.target;
-    const path = if (std.mem.indexOfScalar(u8, target, '?')) |q_idx| target[0..q_idx] else target;
-    const habit_id = parsePathIdWithSuffix(path, "/api/habits/", "/streak") catch {
-        try request.respond("{\"err\":\"Invalid id\"}", .{
-            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
-        });
-        return;
-    };
-
-    const app = getApp();
-    const streak = app.settings_manager.sqlite_db.?.*.habit_manager.getHabitStreak(habit_id, 1500) catch {
-        try request.respond("{\"err\":\"Failed to get streak\"}", .{
-            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
-        });
-        return;
-    };
-
-    const resp = try std.fmt.allocPrint(getAllocator(), "{{\"habit_id\":{},\"streak\":{}}}", .{ habit_id, streak });
-    defer getAllocator().free(resp);
-    try request.respond(resp, .{
         .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
     });
 }
@@ -1279,12 +1512,11 @@ fn handleGetHabitDetail(request: *http.Server.Request) !void {
     defer habit_manager.freeHabit(h_row);
 
     const today_seconds = habit_manager.getHabitTodaySeconds(habit_id, date_param) catch 0;
-    const streak = habit_manager.getHabitStreak(habit_id, h_row.goal_seconds) catch 0;
 
     const progress_percent: i64 = if (h_row.goal_seconds > 0) @divTrunc(today_seconds * 100, h_row.goal_seconds) else 0;
 
-    const resp = try std.fmt.allocPrint(getAllocator(), "{{\"id\":{},\"name\":\"{s}\",\"goal_seconds\":{},\"color\":\"{s}\",\"today_seconds\":{},\"streak\":{},\"progress_percent\":{}}}", .{
-        h_row.id, h_row.name, h_row.goal_seconds, h_row.color, today_seconds, streak, progress_percent,
+    const resp = try std.fmt.allocPrint(getAllocator(), "{{\"id\":{},\"name\":\"{s}\",\"goal_seconds\":{},\"color\":\"{s}\",\"today_seconds\":{},\"progress_percent\":{}}}", .{
+        h_row.id, h_row.name, h_row.goal_seconds, h_row.color, today_seconds, progress_percent,
     });
     defer getAllocator().free(resp);
     try request.respond(resp, .{

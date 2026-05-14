@@ -24,26 +24,6 @@ test "parsePathId 非数字 ID" {
     try std.testing.expectError(std.fmt.ParseIntError.InvalidFormat, result);
 }
 
-test "parsePathIdWithSuffix 有效路径" {
-    const result = parsePathIdWithSuffix("/api/habits/123/streak", "/api/habits/", "/streak");
-    try std.testing.expectEqual(@as(i64, 123), result);
-}
-
-test "parsePathIdWithSuffix 无效前缀" {
-    const result = parsePathIdWithSuffix("/api/wrong/123/streak", "/api/habits/", "/streak");
-    try std.testing.expectError(error.InvalidPath, result);
-}
-
-test "parsePathIdWithSuffix 无效后缀" {
-    const result = parsePathIdWithSuffix("/api/habits/123/invalid", "/api/habits/", "/streak");
-    try std.testing.expectError(error.InvalidPath, result);
-}
-
-test "parsePathIdWithSuffix 路径太短" {
-    const result = parsePathIdWithSuffix("/api/habits/", "/api/habits/", "/streak");
-    try std.testing.expectError(error.InvalidPath, result);
-}
-
 test "ModeEnumT 枚举值" {
     try std.testing.expectEqual(@as(interface.ModeEnumT, .COUNTDOWN_MODE), .COUNTDOWN_MODE);
     try std.testing.expectEqual(@as(interface.ModeEnumT, .STOPWATCH_MODE), .STOPWATCH_MODE);

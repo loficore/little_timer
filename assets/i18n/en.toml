@@ -35,11 +35,12 @@ loop_status = "Round {remaining}/{total}"
 finished_notification = "⏰ Timer complete!"
 
 [settings.tabs]
-basic = "Basic"
+basic = "Basic Settings"
 countdown = "Countdown"
 stopwatch = "Stopwatch"
 world_clock = "World Clock"
 presets = "Presets"
+backup = "Backup"
 
 [settings.basic]
 timezone = "Timezone"

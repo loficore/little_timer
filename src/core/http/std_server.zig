@@ -141,8 +141,23 @@ fn handleRequest(request: *http.Server.Request) !void {
     else
         target;
 
+    // ============================================
+    // 路由分发 - 按功能分组
+    // ============================================
+
+    // 静态资源
     if (request.head.method == .GET and std.mem.eql(u8, path, "/")) {
         try handleRoot(request);
+    // 前端日志
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/log")) {
+        try handleFrontendLog(request);
+    // SSE 事件流
+    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/events")) {
+        try handleSSE(request);
+
+    // ============================================
+    // Timer 相关路由
+    // ============================================
     } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/state")) {
         try handleGetState(request);
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/start")) {
@@ -153,14 +168,16 @@ fn handleRequest(request: *http.Server.Request) !void {
         try handleReset(request);
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/mode")) {
         try handleModeChange(request);
-    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/settings")) {
-        try handleGetSettings(request);
-    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/settings")) {
-        try handleUpdateSettings(request);
-    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/log")) {
-        try handleFrontendLog(request);
-    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/events")) {
-        try handleSSE(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/timer/rest")) {
+        try handleStartRest(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/timer/finish")) {
+        try handleFinish(request);
+    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/timer/progress")) {
+        try handleGetProgress(request);
+
+    // ============================================
+    // Habit Sets 路由
+    // ============================================
     } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/habit-sets")) {
         try handleGetHabitSets(request);
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/habit-sets")) {
@@ -169,6 +186,10 @@ fn handleRequest(request: *http.Server.Request) !void {
         try handleUpdateHabitSet(request);
     } else if (request.head.method == .DELETE and std.mem.startsWith(u8, path, "/api/habit-sets/")) {
         try handleDeleteHabitSet(request);
+
+    // ============================================
+    // Habits 路由
+    // ============================================
     } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/habits")) {
         try handleGetHabits(request);
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/habits")) {
@@ -177,18 +198,28 @@ fn handleRequest(request: *http.Server.Request) !void {
         try handleUpdateHabit(request);
     } else if (request.head.method == .DELETE and std.mem.startsWith(u8, path, "/api/habits/")) {
         try handleDeleteHabit(request);
-    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/sessions")) {
-        try handleCreateSession(request);
-    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/sessions")) {
-        try handleGetSessions(request);
     } else if (request.head.method == .GET and std.mem.startsWith(u8, path, "/api/habits/") and std.mem.endsWith(u8, path, "/detail")) {
         try handleGetHabitDetail(request);
-    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/timer/rest")) {
-        try handleStartRest(request);
-    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/timer/finish")) {
-        try handleFinish(request);
-    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/timer/progress")) {
-        try handleGetProgress(request);
+
+    // ============================================
+    // Sessions 路由
+    // ============================================
+    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/sessions")) {
+        try handleGetSessions(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/sessions")) {
+        try handleCreateSession(request);
+
+    // ============================================
+    // Settings 路由
+    // ============================================
+    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/settings")) {
+        try handleGetSettings(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/settings")) {
+        try handleUpdateSettings(request);
+
+    // ============================================
+    // Backup 路由
+    // ============================================
     } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/backup/config")) {
         try handleGetBackupConfig(request);
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/config")) {
@@ -203,6 +234,10 @@ fn handleRequest(request: *http.Server.Request) !void {
         try handleBackupDelete(request);
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/verify")) {
         try handleBackupVerify(request);
+
+    // ============================================
+    // 404 Fallback
+    // ============================================
     } else {
         try request.respond("", .{ .status = .not_found });
     }

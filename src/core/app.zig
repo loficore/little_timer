@@ -237,10 +237,7 @@ pub const MainApplication = struct {
 
         self.clock_manager.handleEvent(.{ .tick = delta_ms });
         const display_data = self.clock_manager.update();
-        self.updateDisplay(display_data) catch |err| {
-            logger.global_logger.err("更新显示失败: {any}", .{err});
-            self.error_recovery.recordError("更新显示失败", "DISPLAY_UPDATE");
-        };
+        // display_data 通过 SSE 推送到前端，此处无需额外处理
 
         // 每隔几秒自动保存计时进度（仅当正在运行时）
         const now_ns = std.time.nanoTimestamp();

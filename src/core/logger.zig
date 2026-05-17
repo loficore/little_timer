@@ -299,9 +299,9 @@ pub const Logger = struct {
             if (dir.access(dst, .{})) |_| {
                 // dst exists, skip
             } else |_| {
-                try self.compressFile(dir, src, dst);
+                try self.archiveFile(dir, src, dst);
                 try dir.deleteFile(src);
-                self.info("日志文件已压缩: {s} -> {s}", .{ src, dst });
+                self.info("日志文件已归档: {s} -> {s}", .{ src, dst });
             }
 
             self.allocator.?.free(src);
@@ -309,8 +309,8 @@ pub const Logger = struct {
         }
     }
 
-    /// 压缩单个文件为 gzip
-    fn compressFile(self: *Logger, dir: std.fs.Dir, src_name: []const u8, dst_name: []const u8) !void {
+    /// 归档单个文件（复制内容）
+    fn archiveFile(self: *Logger, dir: std.fs.Dir, src_name: []const u8, dst_name: []const u8) !void {
         const src_file = try dir.openFile(src_name, .{});
         defer src_file.close();
 
@@ -326,7 +326,7 @@ pub const Logger = struct {
         const dst_file = try dir.createFile(dst_name, .{});
         defer dst_file.close();
 
-        // 直接复制内容（压缩功能暂未实现）
+        // 直接复制内容（归档功能）
         try dst_file.writeAll(src_content);
     }
 

@@ -7,7 +7,7 @@ pub const ClockEvent = interface.ClockEvent;
 pub const ModeEnumT = interface.ModeEnumT;
 pub const ClockTaskConfig = interface.ClockTaskConfig;
 
-var tick_count: usize = 0;
+var tick_count: std.atomic.Value(usize) = std.atomic.Value(usize).init(0);
 
 const CountdownState = struct {
     duration_ms: u64, // 配置的总时长
@@ -30,7 +30,6 @@ const CountdownState = struct {
     pub fn tick(self: *CountdownState, delta_ms: i64) void {
         if (self.is_paused or self.is_finished) return;
 
-        // 问题2：检查负数 tick
         if (delta_ms < 0) {
             logger.global_logger.warn("⚠️ 错误: tick 值为负数 {} ms，将被忽略", .{delta_ms});
             return;
@@ -43,7 +42,6 @@ const CountdownState = struct {
         // 休息阶段倒计时
         if (self.in_rest) {
             self.rest_remaining_ms -= delta_ms;
-            // 问题3：改进休息时间边界逻辑（不允许成负值）
             if (self.rest_remaining_ms <= 0) {
                 self.in_rest = false;
                 self.is_finished = false;
@@ -87,7 +85,7 @@ const CountdownState = struct {
 };
 
 const StopwatchState = struct {
-    esplased_ms: i64 = 0,
+    elapsed_ms: i64 = 0,
     max_ms: i64,
     is_paused: bool = true,
     is_finished: bool = false,
@@ -100,7 +98,6 @@ const StopwatchState = struct {
     pub fn tick(self: *StopwatchState, delta_ms: i64) void {
         if (self.is_paused or self.is_finished) return;
 
-        // 问题2：检查负数 tick
         if (delta_ms < 0) {
             logger.global_logger.warn("⚠️ 错误: tick 值为负数 {} ms，将被忽略", .{delta_ms});
             return;
@@ -110,9 +107,9 @@ const StopwatchState = struct {
             return;
         }
 
-        self.esplased_ms += delta_ms;
-        if (self.esplased_ms >= self.max_ms) {
-            self.esplased_ms = self.max_ms;
+        self.elapsed_ms += delta_ms;
+        if (self.elapsed_ms >= self.max_ms) {
+            self.elapsed_ms = self.max_ms;
             self.is_finished = true;
         }
     }
@@ -126,7 +123,7 @@ pub const ClockState = union(ModeEnumT) {
     pub fn getTimeInfo(self: *const ClockState) i64 {
         return switch (self.*) {
             .COUNTDOWN_MODE => |*countdown| @divTrunc(countdown.remaining_ms, 1000),
-            .STOPWATCH_MODE => |*stopwatch| @divTrunc(stopwatch.esplased_ms, 1000),
+            .STOPWATCH_MODE => |*stopwatch| @divTrunc(stopwatch.elapsed_ms, 1000),
         };
     }
 
@@ -187,7 +184,7 @@ pub const ClockState = union(ModeEnumT) {
     pub fn getElapsedSeconds(self: *const ClockState) i64 {
         return switch (self.*) {
             .COUNTDOWN_MODE => |*countdown| @divTrunc(@as(i64, @intCast(countdown.duration_ms)) - @as(i64, @intCast(countdown.remaining_ms)), 1000),
-            .STOPWATCH_MODE => |*stopwatch| @divTrunc(@as(i64, @intCast(stopwatch.esplased_ms)), 1000),
+            .STOPWATCH_MODE => |*stopwatch| @divTrunc(@as(i64, @intCast(stopwatch.elapsed_ms)), 1000),
         };
     }
 
@@ -216,9 +213,7 @@ pub const ClockManager = struct {
     /// 整数溢出检查辅助函数
     /// 检查 duration_seconds * 1000 是否会溢出 i64
     fn checkDurationOverflow(duration_seconds: u64) bool {
-        // i64::MAX = 9223372036854775807
-        // i64::MAX / 1000 ≈ 9223372036854775
-        const max_safe_duration = 9223372036854775;
+        const max_safe_duration: u64 = std.math.maxInt(i64) / 1000;
         return duration_seconds > max_safe_duration;
     }
 
@@ -232,11 +227,10 @@ pub const ClockManager = struct {
     pub fn init(
         clock_config: ClockTaskConfig,
     ) ClockManager {
-        // 问题1：检查整数溢出
         if (ClockManager.checkDurationOverflow(clock_config.countdown.duration_seconds) or
             ClockManager.checkDurationOverflow(clock_config.stopwatch.max_seconds))
         {
-            logger.global_logger.err("错误: 时间配置超出最大值（大于 9223372036854775 秒）", .{});
+            logger.global_logger.err("错误: 时间配置超出最大值（大于 {d} 秒）", .{std.math.maxInt(i64) / 1000});
             // 降级处理：使用默认值
             const safe_config: ClockTaskConfig = .{
                 .countdown = .{
@@ -270,7 +264,7 @@ pub const ClockManager = struct {
             },
             .STOPWATCH_MODE => ClockState{
                 .STOPWATCH_MODE = StopwatchState{
-                    .esplased_ms = 0,
+                    .elapsed_ms = 0,
                     .max_ms = @as(i64, @intCast(clock_config.stopwatch.max_seconds * 1000)),
                     .is_paused = true,
                 },
@@ -291,8 +285,8 @@ pub const ClockManager = struct {
         switch (event) {
             .tick => {
                 // 每隔几个 tick 打印一次剩余时间（减少日志量）
-                tick_count += 1;
-                if (tick_count % 10 == 0) {
+                const new_count = tick_count.fetchAdd(1, .monotonic) + 1;
+                if (new_count % 10 == 0) {
                     // 获取当前时间用于调试
                     const display = self.update();
                     const remaining_ms = display.getTimeInfo() * 1000;
@@ -363,7 +357,7 @@ pub const ClockManager = struct {
                         self.state.COUNTDOWN_MODE.is_finished = false;
                     },
                     .STOPWATCH_MODE => {
-                        self.state.STOPWATCH_MODE.esplased_ms = 0;
+                        self.state.STOPWATCH_MODE.elapsed_ms = 0;
                         self.state.STOPWATCH_MODE.is_paused = true;
                         self.state.STOPWATCH_MODE.is_finished = false;
                     },
@@ -417,7 +411,7 @@ pub const ClockManager = struct {
                         const default_max_seconds: u64 = 24 * 60 * 60;
                         self.state = ClockState{
                             .STOPWATCH_MODE = StopwatchState{
-                                .esplased_ms = 0,
+                                .elapsed_ms = 0,
                                 .max_ms = @as(i64, @intCast(default_max_seconds * 1000)),
                                 .is_paused = true,
                             },
@@ -450,7 +444,7 @@ pub const ClockManager = struct {
                     },
                     .STOPWATCH_MODE => ClockState{
                         .STOPWATCH_MODE = StopwatchState{
-                            .esplased_ms = 0,
+                            .elapsed_ms = 0,
                             .max_ms = @as(i64, @intCast(new_config.stopwatch.max_seconds * 1000)),
                             .is_paused = true,
                         },

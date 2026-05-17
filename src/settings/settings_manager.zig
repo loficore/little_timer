@@ -117,8 +117,119 @@ pub const SettingsManager = struct {
         // 从 SQLite 加载设置
         try self.loadSettingsFromSqlite();
 
+        // 从 SQLite 加载备份配置
+        try self.loadBackupConfigFromSqlite();
+
         self.is_dirty = false;
         logger.global_logger.info("✓ 设置已从 SQLite 加载", .{});
+    }
+
+    /// 从 SQLite 加载备份配置，凭证使用 master_key 解密
+    fn loadBackupConfigFromSqlite(self: *SettingsManager) !void {
+        if (self.sqlite_db == null) {
+            logger.global_logger.warn("loadBackupConfigFromSqlite: sqlite_db is null", .{});
+            return;
+        }
+
+        // 释放旧的 owned_backup_* 字符串
+        if (self.owned_backup_local_path) |old| self.allocator.free(old);
+        if (self.owned_backup_webdav_url) |old| self.allocator.free(old);
+        if (self.owned_backup_webdav_username) |old| self.allocator.free(old);
+        if (self.owned_backup_webdav_password) |old| self.allocator.free(old);
+        if (self.owned_backup_s3_endpoint) |old| self.allocator.free(old);
+        if (self.owned_backup_s3_bucket) |old| self.allocator.free(old);
+        if (self.owned_backup_s3_region) |old| self.allocator.free(old);
+        if (self.owned_backup_s3_access_key) |old| self.allocator.free(old);
+        if (self.owned_backup_s3_secret_key) |old| self.allocator.free(old);
+        if (self.owned_backup_s3_path_prefix) |old| self.allocator.free(old);
+        self.owned_backup_local_path = null;
+        self.owned_backup_webdav_url = null;
+        self.owned_backup_webdav_username = null;
+        self.owned_backup_webdav_password = null;
+        self.owned_backup_s3_endpoint = null;
+        self.owned_backup_s3_bucket = null;
+        self.owned_backup_s3_region = null;
+        self.owned_backup_s3_access_key = null;
+        self.owned_backup_s3_secret_key = null;
+        self.owned_backup_s3_path_prefix = null;
+
+        const loaded = self.sqlite_db.?.*.loadBackupConfig(self.allocator) catch |err| {
+            logger.global_logger.warn("⚠️ 从 SQLite 加载备份配置失败: {any}", .{err});
+            return;
+        };
+        defer {
+            self.allocator.free(loaded.local_path);
+            self.allocator.free(loaded.webdav_url);
+            self.allocator.free(loaded.webdav_username);
+            self.allocator.free(loaded.webdav_password);
+            self.allocator.free(loaded.s3_endpoint);
+            self.allocator.free(loaded.s3_bucket);
+            self.allocator.free(loaded.s3_region);
+            self.allocator.free(loaded.s3_access_key);
+            self.allocator.free(loaded.s3_secret_key);
+            self.allocator.free(loaded.s3_path_prefix);
+        }
+
+        // 赋值非字符串字段
+        self.backup_config.enabled = loaded.enabled;
+        self.backup_config.auto_backup = loaded.auto_backup;
+        self.backup_config.auto_backup_interval = loaded.auto_backup_interval;
+        self.backup_config.target_type = loaded.target_type;
+
+        // 转移字符串所有权
+        self.owned_backup_local_path = if (loaded.local_path.len > 0)
+            try self.allocator.dupe(u8, loaded.local_path)
+        else
+            null;
+        self.owned_backup_webdav_url = if (loaded.webdav_url.len > 0)
+            try self.allocator.dupe(u8, loaded.webdav_url)
+        else
+            null;
+        self.owned_backup_webdav_username = if (loaded.webdav_username.len > 0)
+            try self.allocator.dupe(u8, loaded.webdav_username)
+        else
+            null;
+        self.owned_backup_webdav_password = if (loaded.webdav_password.len > 0)
+            try self.allocator.dupe(u8, loaded.webdav_password)
+        else
+            null;
+        self.owned_backup_s3_endpoint = if (loaded.s3_endpoint.len > 0)
+            try self.allocator.dupe(u8, loaded.s3_endpoint)
+        else
+            null;
+        self.owned_backup_s3_bucket = if (loaded.s3_bucket.len > 0)
+            try self.allocator.dupe(u8, loaded.s3_bucket)
+        else
+            null;
+        self.owned_backup_s3_region = if (loaded.s3_region.len > 0)
+            try self.allocator.dupe(u8, loaded.s3_region)
+        else
+            null;
+        self.owned_backup_s3_access_key = if (loaded.s3_access_key.len > 0)
+            try self.allocator.dupe(u8, loaded.s3_access_key)
+        else
+            null;
+        self.owned_backup_s3_secret_key = if (loaded.s3_secret_key.len > 0)
+            try self.allocator.dupe(u8, loaded.s3_secret_key)
+        else
+            null;
+        self.owned_backup_s3_path_prefix = if (loaded.s3_path_prefix.len > 0)
+            try self.allocator.dupe(u8, loaded.s3_path_prefix)
+        else
+            null;
+
+        self.backup_config.local_path = self.owned_backup_local_path orelse "";
+        self.backup_config.webdav_url = self.owned_backup_webdav_url orelse "";
+        self.backup_config.webdav_username = self.owned_backup_webdav_username orelse "";
+        self.backup_config.webdav_password = self.owned_backup_webdav_password orelse "";
+        self.backup_config.s3_endpoint = self.owned_backup_s3_endpoint orelse "";
+        self.backup_config.s3_bucket = self.owned_backup_s3_bucket orelse "";
+        self.backup_config.s3_region = self.owned_backup_s3_region orelse "";
+        self.backup_config.s3_access_key = self.owned_backup_s3_access_key orelse "";
+        self.backup_config.s3_secret_key = self.owned_backup_s3_secret_key orelse "";
+        self.backup_config.s3_path_prefix = self.owned_backup_s3_path_prefix orelse "little_timer/";
+
+        logger.global_logger.info("✓ 备份配置已从 SQLite 加载（凭证已解密）", .{});
     }
 
     /// 保存设置到数据库
@@ -270,8 +381,8 @@ pub const SettingsManager = struct {
     /// - **self**: SettingsManager实例指针
     ///
     /// 返回:
-    /// - *const SettingsConfig: 当前配置的只读指针
-    pub fn getConfig(self: *const SettingsManager) *const SettingsConfig {
+    /// - *SettingsConfig: 当前配置的可变指针
+    pub fn getConfig(self: *SettingsManager) *SettingsConfig {
         return &self.config;
     }
 
@@ -409,6 +520,22 @@ pub const SettingsManager = struct {
         self.is_dirty = true;
 
         logger.global_logger.info("✓ 基本设置已更新: 时区={}, 语言={s}, 默认模式={}", .{ basic_config.timezone, basic_config.language, basic_config.default_mode });
+    }
+
+    /// 更新认证设置
+    ///
+    /// 参数:
+    /// - **self**: SettingsManager实例指针
+    /// - **auth_config**: 新的认证配置
+    ///
+    /// 返回:
+    /// - !void: 如果保存失败则返回错误
+    pub fn updateAuth(self: *SettingsManager, new_config: interface.SettingsConfig) !void {
+        self.config.auth = new_config.auth;
+        self.is_dirty = true;
+        try self.save();
+
+        logger.global_logger.info("✓ 认证设置已更新: auth_enabled={}", .{self.config.auth.auth_enabled});
     }
 
     /// 添加预设

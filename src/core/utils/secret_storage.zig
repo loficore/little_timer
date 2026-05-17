@@ -1,11 +1,13 @@
 //! 密钥存储模块 - 提供跨平台的安全凭证存储
-//! Linux: libsecret (Secret Service API)
-//! macOS: Keychain Services
+//! Linux: Kernel Keyring (with in-memory fallback)
+//! macOS: Keychain Services (stub)
 //! Windows: wincred API
-//! Android: AccountManager
+//! Android: AccountManager (stub)
 
 const std = @import("std");
 const builtin = @import("builtin");
+const logger = @import("../logger.zig");
+const keyring = @import("keyring.zig");
 
 pub const SecretError = error{
     NotFound,
@@ -101,8 +103,8 @@ fn getLinuxInMemoryStore() *std.StringHashMap([]u8) {
     return &linux_in_memory_store;
 }
 
-fn makeLinuxKey(service: []const u8, key: []const u8) []u8 {
-    return std.fmt.allocPrint(std.heap.page_allocator, "little_timer:{s}:{s}", .{ service, key }) catch return "";
+fn makeLinuxKey(service: []const u8, key: []const u8) ![]u8 {
+    return std.fmt.allocPrint(std.heap.page_allocator, "little_timer:{s}:{s}", .{ service, key });
 }
 
 fn storeLinux(ptr: *anyopaque, service: []const u8, key: []const u8, value: []const u8) SecretError!void {
@@ -110,7 +112,7 @@ fn storeLinux(ptr: *anyopaque, service: []const u8, key: []const u8, value: []co
     @setRuntimeSafety(false);
 
     const map = getLinuxInMemoryStore();
-    const map_key = makeLinuxKey(service, key);
+    const map_key = makeLinuxKey(service, key) catch return SecretError.OutOfMemory;
     defer std.heap.page_allocator.free(map_key);
 
     if (map.get(map_key)) |existing| {
@@ -126,7 +128,7 @@ fn retrieveLinux(ptr: *anyopaque, service: []const u8, key: []const u8, out_ptr:
     @setRuntimeSafety(false);
 
     const map = getLinuxInMemoryStore();
-    const map_key = makeLinuxKey(service, key);
+    const map_key = makeLinuxKey(service, key) catch return SecretError.OutOfMemory;
     defer std.heap.page_allocator.free(map_key);
 
     const value_copy = map.get(map_key) orelse return SecretError.NotFound;
@@ -408,33 +410,31 @@ fn freeAndroid(ptr: *anyopaque, buffer: [*]u8, len: usize) void {
 }
 
 pub fn storeMasterKey(key: []const u8) SecretError!void {
-    const allocator = std.heap.page_allocator;
+    const key_desc = "little_timer:master_key";
+    logger.global_logger.info("storeMasterKey: key_len={d}, desc={s}", .{key.len, key_desc});
 
-    var service = SecretService.create(allocator) catch |err| {
-        std.debug.print("⚠️ 无法创建SecretService，使用内存模式: {any}\n", .{err});
-        if (master_key_instance) |existing| {
-            allocator.free(existing);
-        }
-        master_key_instance = allocator.dupe(u8, key);
-        return;
+    const alloc = std.heap.page_allocator;
+
+    _ = keyring.joinOrCreateSessionKeyring() catch |err| switch (err) {
+        error.KeyringNotFound, error.KeyringCreateFailed => {
+            logger.global_logger.warn("storeMasterKey: join session keyring failed: {any}", .{err});
+        },
+        else => {
+            logger.global_logger.warn("storeMasterKey: join session keyring failed: {any}", .{err});
+        },
     };
-    defer {
-        allocator.destroy(@as(*LinuxSecretImpl, @ptrCast(@alignCast(service.ptr))));
-    }
 
-    service.store("master_key", "master_key", key) catch |err| {
-        std.debug.print("⚠️ 无法持久化master key到密钥链，使用内存模式: {any}\n", .{err});
-        if (master_key_instance) |existing| {
-            allocator.free(existing);
-        }
-        master_key_instance = allocator.dupe(u8, key);
-        return;
+    keyring.storeKeyInKeyring(key_desc, key) catch |err| {
+        logger.global_logger.warn("storeMasterKey: store key failed, continuing with in-memory cache: {any}", .{err});
     };
 
     if (master_key_instance) |existing| {
-        allocator.free(existing);
+        alloc.free(existing);
+        master_key_instance = null;
     }
-    master_key_instance = allocator.dupe(u8, key);
+    const cached = alloc.dupe(u8, key) catch return SecretError.OutOfMemory;
+    master_key_instance = cached;
+    logger.global_logger.info("storeMasterKey: cached key in memory, len={d}", .{cached.len});
 }
 
 pub fn retrieveMasterKey() SecretError![]u8 {
@@ -443,15 +443,29 @@ pub fn retrieveMasterKey() SecretError![]u8 {
     }
 
     const allocator = std.heap.page_allocator;
-    var service = try SecretService.create(allocator);
-    defer {
-        allocator.destroy(@as(*LinuxSecretImpl, @ptrCast(@alignCast(service.ptr))));
-    }
+    const key_desc = "little_timer:master_key";
 
-    const key = try service.retrieve("master_key", "master_key");
-    const key_copy = try allocator.dupe(u8, key);
-    master_key_instance = key_copy;
-    return key_copy;
+    _ = keyring.joinOrCreateSessionKeyring() catch |err| switch (err) {
+        error.KeyringNotFound, error.KeyringCreateFailed => return SecretError.NotFound,
+        else => return SecretError.PlatformError,
+    };
+
+    const key_data = keyring.retrieveKeyFromKeyring(key_desc, allocator) catch |err| switch (err) {
+        error.KeyringNotFound => {
+            logger.global_logger.warn("retrieveMasterKey: key not found: {any}", .{err});
+            return SecretError.NotFound;
+        },
+        error.KeyringRetrieveFailed => {
+            logger.global_logger.warn("retrieveMasterKey: key read failed, regenerate: {any}", .{err});
+            return SecretError.NotFound;
+        },
+        else => {
+            logger.global_logger.err("retrieveMasterKey: key retrieval failed: {any}", .{err});
+            return SecretError.PlatformError;
+        },
+    };
+    master_key_instance = key_data;
+    return key_data;
 }
 
 pub fn deleteMasterKey() void {
@@ -461,10 +475,4 @@ pub fn deleteMasterKey() void {
         allocator.free(key);
         master_key_instance = null;
     }
-
-    var service = SecretService.create(allocator) catch return;
-    defer {
-        allocator.destroy(@as(*LinuxSecretImpl, @ptrCast(@alignCast(service.ptr))));
-    }
-    service.delete("master_key", "master_key") catch {};
 }

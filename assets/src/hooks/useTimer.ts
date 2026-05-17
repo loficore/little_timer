@@ -28,15 +28,15 @@ export interface UseTimerReturn {
   elapsedSeconds: number;
   remainingSeconds: number;
   displayTime: string;
-  
+
   // 操作
   setTimerConfig: (config: Partial<TimerConfig>) => void;
-  start: () => Promise<void>;
+  start: (habitId?: number) => Promise<void>;
   pause: () => Promise<void>;
-  resume: () => Promise<void>;
+  resume: (habitId?: number) => Promise<void>;
   reset: () => Promise<void>;
   skipToNext: () => void;
-  finish: () => Promise<void>;
+  finish: () => Promise<{ elapsed_seconds: number }>;
 }
 
 export const useTimer = (): UseTimerReturn => {
@@ -66,7 +66,7 @@ export const useTimer = (): UseTimerReturn => {
     setTimerConfigState((prev) => ({ ...prev, ...config }));
   }, []);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (habitId?: number) => {
     if (isFinished) {
       await reset();
       return;
@@ -85,7 +85,7 @@ export const useTimer = (): UseTimerReturn => {
     }
 
     try {
-      await apiClientRef.current.startTimer(undefined, {
+      await apiClientRef.current.startTimer(habitId, {
         mode: timerConfig.mode,
         workDuration: timerConfig.workDuration,
         restDuration: timerConfig.restDuration,
@@ -105,10 +105,10 @@ export const useTimer = (): UseTimerReturn => {
     }
   }, []);
 
-  const resume = useCallback(async () => {
+  const resume = useCallback(async (habitId?: number) => {
     setIsPaused(false);
     try {
-      await apiClientRef.current.resumeTimer();
+      await apiClientRef.current.resumeTimer(habitId);
     } catch (e) {
       logError(`恢复计时失败: ${e}`);
     }
@@ -131,22 +131,24 @@ export const useTimer = (): UseTimerReturn => {
     }
   }, [timerConfig.workDuration]);
 
-  const finish = useCallback(async () => {
+  const finish = useCallback(async (): Promise<{ elapsed_seconds: number }> => {
     try {
       const result = await apiClientRef.current.finishTimer();
       logSuccess(`✓ 已计入今日统计: ${formatDuration(result.elapsed_seconds)}`);
+
+      setIsRunning(false);
+      setIsPaused(false);
+      setIsFinished(false);
+      setElapsedSeconds(0);
+      setRemainingSeconds(timerConfig.workDuration);
+      setCurrentRound(0);
+      sessionRecordedRef.current = false;
+
+      return result;
     } catch (e) {
       logError(`结束计时失败: ${e}`);
-      return;
+      throw e;
     }
-
-    setIsRunning(false);
-    setIsPaused(false);
-    setIsFinished(false);
-    setElapsedSeconds(0);
-    setRemainingSeconds(timerConfig.workDuration);
-    setCurrentRound(0);
-    sessionRecordedRef.current = false;
   }, [timerConfig.workDuration]);
 
   const skipToNext = useCallback(() => {

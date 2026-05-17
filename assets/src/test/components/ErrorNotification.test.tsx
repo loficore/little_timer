@@ -1,16 +1,50 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/preact";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, cleanup } from "@testing-library/preact";
 import { ErrorNotification, OfflineModeIndicator } from "../../components/ErrorNotification";
 
 describe("ErrorNotification 组件", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("visible 为 false 时应该返回 null", () => {
     const { container } = render(<ErrorNotification visible={false} />);
     expect(container.firstChild).toBeNull();
   });
 
-  it("visible 为 true 时应该返回 null（当前实现是 stub）", () => {
+  it("visible 为 true 但无 message 时应该返回 null", () => {
     const { container } = render(<ErrorNotification visible={true} />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it("visible 为 true 且有 message 时应该显示错误通知", async () => {
+    vi.useFakeTimers();
+    render(<ErrorNotification visible={true} message="保存失败" />);
+    expect(screen.getByText("保存失败")).toBeTruthy();
+    expect(screen.getByText("操作失败")).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("5 秒后自动消失", async () => {
+    vi.useFakeTimers();
+    const onDismiss = vi.fn();
+    render(<ErrorNotification visible={true} message="测试错误" onDismiss={onDismiss} />);
+    expect(screen.getByText("测试错误")).toBeTruthy();
+    vi.advanceTimersByTime(5000);
+    await waitFor(() => {
+      expect(onDismiss).toHaveBeenCalled();
+    });
+    vi.useRealTimers();
+  });
+
+  it("点击关闭按钮应该调用 onDismiss", async () => {
+    vi.useFakeTimers();
+    const onDismiss = vi.fn();
+    render(<ErrorNotification visible={true} message="测试错误" onDismiss={onDismiss} />);
+    const closeBtn = screen.getByLabelText("关闭");
+    closeBtn.click();
+    expect(onDismiss).toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });
 

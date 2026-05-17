@@ -116,7 +116,7 @@ test "ClockManager tick 事件" {
     manager.handleEvent(.{ .tick = 5000 });
 
     const state = manager.update();
-    try std.testing.expectEqual(state.STOPWATCH_MODE.esplased_ms, 5000);
+    try std.testing.expectEqual(state.STOPWATCH_MODE.elapsed_ms, 5000);
 }
 
 test "SettingsConfig 默认值" {

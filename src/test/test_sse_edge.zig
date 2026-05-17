@@ -29,7 +29,7 @@ test "ClockState JSON 序列化 - stopwatch 模式" {
 
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_paused);
     try std.testing.expect(!manager.state.STOPWATCH_MODE.is_finished);
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 0);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 0);
     try std.testing.expectEqual(manager.state.STOPWATCH_MODE.max_ms, 3600 * 1000);
 }
 

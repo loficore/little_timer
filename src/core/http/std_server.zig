@@ -8,9 +8,14 @@ const habit_crud = @import("../../storage/habit_crud.zig");
 const MainApplication = @import("../app.zig").MainApplication;
 const build_options = @import("build_options");
 const backup_mod = @import("../../storage/backup/BackupAdapter.zig");
+const crypto = @import("../utils/crypto.zig");
 
 const ClockState = clock.ClockState;
 const ModeEnumT = clock.ModeEnumT;
+
+pub const HttpError = error{
+    RequestBodyTooLarge,
+};
 
 var global_app: ?*MainApplication = null;
 var global_allocator: ?std.mem.Allocator = null;
@@ -48,6 +53,7 @@ pub const HttpServerManager = struct {
         self.thread = try std.Thread.spawn(.{}, serverLoop, .{
             &self.listener,
             &self.running,
+            self.allocator,
         });
     }
 
@@ -65,7 +71,7 @@ pub const HttpServerManager = struct {
     }
 };
 
-fn serverLoop(listener: *std.net.Server, running: *std.atomic.Value(bool)) void {
+fn serverLoop(listener: *std.net.Server, running: *std.atomic.Value(bool), allocator: std.mem.Allocator) void {
     while (running.load(.acquire)) {
         const stream = listener.accept() catch {
             continue;
@@ -73,6 +79,7 @@ fn serverLoop(listener: *std.net.Server, running: *std.atomic.Value(bool)) void 
         const thread = std.Thread.spawn(.{}, handleConnection, .{
             stream,
             running,
+            allocator,
         }) catch {
             stream.stream.close();
             continue;
@@ -81,13 +88,16 @@ fn serverLoop(listener: *std.net.Server, running: *std.atomic.Value(bool)) void 
     }
 }
 
-fn handleConnection(conn: std.net.Server.Connection, running: *std.atomic.Value(bool)) void {
+fn handleConnection(conn: std.net.Server.Connection, running: *std.atomic.Value(bool), allocator: std.mem.Allocator) void {
     defer conn.stream.close();
 
-    var read_buffer: [8192]u8 = undefined;
-    var reader = conn.stream.reader(&read_buffer);
-    var write_buffer: [8192]u8 = undefined;
-    var writer = conn.stream.writer(&write_buffer);
+    const read_buffer = allocator.alloc(u8, 8192) catch return;
+    defer allocator.free(read_buffer);
+    const write_buffer = allocator.alloc(u8, 8192) catch return;
+    defer allocator.free(write_buffer);
+
+    var reader = conn.stream.reader(read_buffer);
+    var writer = conn.stream.writer(write_buffer);
     var server = http.Server.init(reader.interface(), &writer.interface);
 
     while (running.load(.acquire)) {
@@ -111,10 +121,18 @@ fn handleConnection(conn: std.net.Server.Connection, running: *std.atomic.Value(
     }
 }
 
+const MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
+
 /// 读取 HTTP 请求体
 fn readRequestBody(request: *http.Server.Request, allocator: std.mem.Allocator) ![]u8 {
     const content_length_u64 = request.head.content_length orelse 0;
     const content_length: usize = @intCast(content_length_u64);
+
+    if (content_length > MAX_REQUEST_BODY_SIZE) {
+        logger.global_logger.err("请求体过大: {d} bytes", .{content_length});
+        return error.RequestBodyTooLarge;
+    }
+
     const body_bytes = try allocator.alloc(u8, content_length);
     errdefer allocator.free(body_bytes);
 
@@ -140,6 +158,17 @@ fn handleRequest(request: *http.Server.Request) !void {
         target[0..query_idx]
     else
         target;
+
+    // 公开端点（无需认证）
+    const public_paths = [_][]const u8{ "/", "/api/log", "/api/events" };
+    const is_public = for (public_paths) |p| {
+        if (std.mem.eql(u8, path, p)) break true;
+    } else false;
+
+    // API 路由需要认证（除非是公开端点）
+    if (!is_public and std.mem.startsWith(u8, path, "/api/")) {
+        if (!validateAuth(request)) return;
+    }
 
     // ============================================
     // 路由分发 - 按功能分组
@@ -236,6 +265,16 @@ fn handleRequest(request: *http.Server.Request) !void {
         try handleBackupVerify(request);
 
     // ============================================
+    // Auth 路由
+    // ============================================
+    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/auth/status")) {
+        try handleAuthStatus(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/auth/enable")) {
+        try handleAuthEnable(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/auth/disable")) {
+        try handleAuthDisable(request);
+
+    // ============================================
     // 404 Fallback
     // ============================================
     } else {
@@ -249,6 +288,56 @@ fn getApp() *MainApplication {
 
 fn getAllocator() std.mem.Allocator {
     return global_allocator orelse @panic("global_allocator not set");
+}
+
+/// 验证请求认证
+/// 如果 auth_enabled 为 true，则检查 Authorization 头
+/// 返回 true 表示认证通过，false 表示认证失败（已发送 401 响应）
+///
+/// 注意: Zig 0.15.2 std.http.Server.Request.Head 不直接暴露 headers，
+/// 当前只能通过 URL query 参数进行认证。这是已知限制，
+/// 当 Zig HTTP server 支持 headers 访问后应改为读取 Authorization header。
+fn validateAuth(request: *http.Server.Request) bool {
+    const app = getApp();
+    const auth_config = app.settings_manager.getConfig().auth;
+
+    if (!auth_config.auth_enabled) {
+        return true;
+    }
+
+    const auth_token = auth_config.auth_token;
+    if (auth_token.len == 0) {
+        return true;
+    }
+
+    const target = request.head.target;
+    const auth_param = "auth_token=";
+    if (std.mem.indexOf(u8, target, auth_param)) |idx| {
+        const token_start = idx + auth_param.len;
+        const token_end = std.mem.indexOfScalar(u8, target[token_start..], '&') orelse target.len;
+        const provided_token = target[token_start..token_start + token_end];
+        if (std.mem.eql(u8, provided_token, auth_token)) {
+            return true;
+        }
+    }
+
+    sendJsonError(request, "Unauthorized: Invalid or missing token", .unauthorized);
+    return false;
+}
+
+/// 发送 JSON 错误响应
+fn sendJsonError(request: *http.Server.Request, message: []const u8, status: http.Status) void {
+    const json_err = std.fmt.allocPrint(getAllocator(), "{{\"err\":\"{s}\"}}", .{message}) catch {
+        _ = request.respond("", .{ .status = status }) catch {};
+        return;
+    };
+    defer getAllocator().free(json_err);
+    _ = request.respond(json_err, .{
+        .status = status,
+        .extra_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+        },
+    }) catch {};
 }
 
 fn parsePathId(path: []const u8, prefix: []const u8) !i64 {
@@ -657,7 +746,7 @@ fn handleGetBackupConfig(request: *http.Server.Request) !void {
     };
 
     const json_resp = try std.fmt.allocPrint(getAllocator(),
-        "{{\"enabled\":{},\"auto_backup\":{},\"auto_backup_interval\":{},\"target_type\":\"{s}\",\"local_path\":\"{s}\",\"webdav_url\":\"{s}\",\"webdav_username\":\"{s}\",\"s3_endpoint\":\"{s}\",\"s3_bucket\":\"{s}\",\"s3_region\":\"{s}\",\"s3_path_prefix\":\"{s}\"}}",
+        "{{\"enabled\":{},\"auto_backup\":{},\"auto_backup_interval\":{},\"target_type\":\"{s}\",\"local_path\":\"{s}\",\"webdav_url\":\"{s}\",\"webdav_username\":\"{s}\",\"webdav_password\":\"{s}\",\"s3_endpoint\":\"{s}\",\"s3_bucket\":\"{s}\",\"s3_region\":\"{s}\",\"s3_access_key\":\"{s}\",\"s3_secret_key\":\"{s}\",\"s3_path_prefix\":\"{s}\"}}",
         .{
             @intFromBool(backup_config.enabled),
             @intFromBool(backup_config.auto_backup),
@@ -666,9 +755,12 @@ fn handleGetBackupConfig(request: *http.Server.Request) !void {
             backup_config.local_path,
             backup_config.webdav_url,
             backup_config.webdav_username,
+            if (backup_config.webdav_password.len > 0) "******" else "",
             backup_config.s3_endpoint,
             backup_config.s3_bucket,
             backup_config.s3_region,
+            if (backup_config.s3_access_key.len > 0) "******" else "",
+            if (backup_config.s3_secret_key.len > 0) "******" else "",
             backup_config.s3_path_prefix,
         }
     );
@@ -821,6 +913,14 @@ fn handleBackupDelete(request: *http.Server.Request) !void {
     const name_start = std.mem.lastIndexOfScalar(u8, target, '/') orelse target.len;
     const backup_name = target[name_start + 1..];
 
+    // 防止路径遍历攻击
+    if (backup_name.len == 0 or std.mem.indexOfAny(u8, backup_name, "/\\..") != null) {
+        try request.respond("{\"success\":false,\"error\":\"invalid backup name\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+
     const app = getApp();
     const db = app.settings_manager.sqlite_db orelse {
         try request.respond("{\"success\":false,\"error\":\"database not open\"}", .{
@@ -893,6 +993,87 @@ fn handleBackupVerify(request: *http.Server.Request) !void {
     });
 }
 
+fn handleAuthStatus(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] GET /api/auth/status", .{});
+    const app = getApp();
+    const allocator = getAllocator();
+
+    const auth_config = app.settings_manager.getConfig().auth;
+
+    const response = std.fmt.allocPrint(allocator,
+        \\{{"auth_enabled":{}, "has_token":{}}}
+    , .{
+        auth_config.auth_enabled,
+        auth_config.auth_token.len > 0,
+    }) catch {
+        try request.respond("{\"err\":\"encoding error\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer allocator.free(response);
+
+    try request.respond(response, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleAuthEnable(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] POST /api/auth/enable", .{});
+    const app = getApp();
+    const allocator = getAllocator();
+
+    const token = crypto.generateToken(allocator) catch {
+        try request.respond("{\"err\":\"token generation failed\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer allocator.free(token);
+
+    var new_config = app.settings_manager.getConfig();
+    new_config.auth.auth_enabled = true;
+    new_config.auth.auth_token = token;
+
+    app.settings_manager.updateAuth(new_config.*) catch {
+        try request.respond("{\"err\":\"save failed\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const response = std.fmt.allocPrint(allocator, "{{\"success\":true,\"token\":\"{s}\"}}", .{token}) catch {
+        try request.respond("{\"err\":\"encoding error\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer allocator.free(response);
+
+    try request.respond(response, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleAuthDisable(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] POST /api/auth/disable", .{});
+    const app = getApp();
+
+    var new_config = app.settings_manager.getConfig();
+    new_config.auth.auth_enabled = false;
+
+    app.settings_manager.updateAuth(new_config.*) catch {
+        try request.respond("{\"err\":\"save failed\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    try request.respond("{\"success\":true}", .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
 fn handleModeChange(request: *http.Server.Request) !void {
     logger.global_logger.info("[API] POST /api/mode", .{});
     const allocator = getAllocator();
@@ -957,6 +1138,11 @@ fn handleSSE(request: *http.Server.Request) !void {
     var last_tick_ts = std.time.timestamp();
     var last_heartbeat_ts = std.time.timestamp();
 
+    // SSE 安全限制
+    const max_session_seconds: i64 = 3600; // 最大连接时间 1 小时
+    const max_heartbeat_gap_seconds: i64 = 30; // 最大心跳间隔 30 秒
+    const session_start_ts = std.time.timestamp();
+
     var body_writer = try request.respondStreaming(&buffer, .{
         .respond_options = .{
             .status = .ok,
@@ -973,6 +1159,19 @@ fn handleSSE(request: *http.Server.Request) !void {
         std.Thread.sleep(1_000_000_000);
 
         const now = std.time.timestamp();
+
+        // 检查最大连接时间
+        if (now - session_start_ts > max_session_seconds) {
+            logger.global_logger.info("SSE 连接超时 (1小时)，关闭连接", .{});
+            break;
+        }
+
+        // 检查心跳超时
+        if (now - last_heartbeat_ts > max_heartbeat_gap_seconds * 3) {
+            logger.global_logger.warn("SSE 心跳超时，关闭连接", .{});
+            break;
+        }
+
         const delta_s = now - last_tick_ts;
         last_tick_ts = now;
 

@@ -1,6 +1,24 @@
 //! 公共接口模块
 const std = @import("std");
 
+pub const SECOND = 1;
+pub const MINUTE = 60;
+pub const HOUR = 3600;
+pub const DAY = 86400;
+pub const YEAR = 31536000;
+
+pub const DEFAULT_WORK_DURATION_SECONDS = 25 * MINUTE;
+pub const DEFAULT_REST_DURATION_SECONDS = 5 * MINUTE;
+pub const DEFAULT_MAX_STOPWATCH_SECONDS = 24 * HOUR;
+pub const DEFAULT_MAX_DURATION_SECONDS = DAY;
+pub const DEFAULT_MAX_YEAR_SECONDS = 365 * YEAR;
+
+pub const DEFAULT_TICK_INTERVAL_MS = 1000;
+pub const DEFAULT_AUTO_SAVE_INTERVAL_MS = 5000;
+pub const MIN_TICK_INTERVAL_MS = 100;
+pub const MAX_TICK_INTERVAL_MS = 5000;
+pub const DEFAULT_MAX_LOG_FILE_SIZE = 10 * 1024 * 1024;
+
 pub const ModeEnumT = enum {
     COUNTDOWN_MODE,
     STOPWATCH_MODE,
@@ -19,7 +37,7 @@ pub const ClockTaskConfig = struct {
 
     /// 倒计时配置
     countdown: struct {
-        duration_seconds: u64 = 25 * 60, // 倒计时秒
+        duration_seconds: u64 = DEFAULT_WORK_DURATION_SECONDS, // 倒计时秒
         loop: bool = false, // 是否循环倒计时
         loop_interval_seconds: u64 = 0, // 循环间隔休息秒数
         loop_count: u32 = 0, // 循环次数，0 表示无限循环
@@ -27,7 +45,7 @@ pub const ClockTaskConfig = struct {
 
     /// 正计时配置
     stopwatch: struct {
-        max_seconds: u64 = 24 * 60 * 60, // 正计时上限（秒），默认一天
+        max_seconds: u64 = DEFAULT_MAX_STOPWATCH_SECONDS, // 正计时上限（秒），默认一天
     } = .{},
 };
 
@@ -73,6 +91,12 @@ pub const SettingsConfig = struct {
         max_file_size: u64 = 10 * 1024 * 1024, // 单个日志文件最大大小（字节）
         max_file_count: u8 = 5, // 最多保留的日志文件数量
     } = .{},
+
+    /// 认证设置
+    auth: struct {
+        auth_enabled: bool = false, // 是否启用认证
+        auth_token: []const u8 = "", // Bearer Token (空=未设置)
+    } = .{},
 };
 
 /// 默认模式枚举（替代字符串比较）
@@ -97,7 +121,7 @@ pub const BackupTargetType = enum {
 pub const BackupConfig = struct {
     enabled: bool = false,
     auto_backup: bool = false,
-    auto_backup_interval: u64 = 86400, // 秒，默认1天
+    auto_backup_interval: u64 = DAY, // 秒，默认1天
 
     target_type: BackupTargetType = .local,
 

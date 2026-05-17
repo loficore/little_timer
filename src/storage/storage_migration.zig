@@ -312,9 +312,15 @@ pub const MigrationManager = struct {
     fn migrateToV6(self: *MigrationManager) !void {
         const db = self.db orelse return;
 
-        db.exec("ALTER TABLE habit_sets ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
-        db.exec("ALTER TABLE habits ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
-        db.exec("ALTER TABLE settings ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
+        db.exec("ALTER TABLE habit_sets ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch |err| {
+            logger.global_logger.err("❌ 迁移 habit_sets wallpaper 失败: {any}", .{err});
+        };
+        db.exec("ALTER TABLE habits ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch |err| {
+            logger.global_logger.err("❌ 迁移 habits wallpaper 失败: {any}", .{err});
+        };
+        db.exec("ALTER TABLE settings ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch |err| {
+            logger.global_logger.err("❌ 迁移 settings wallpaper 失败: {any}", .{err});
+        };
 
         logger.global_logger.info("已迁移到版本 6(wallpaper backfill)", .{});
     }
@@ -356,9 +362,15 @@ pub const MigrationManager = struct {
     fn migrateToV5(self: *MigrationManager) !void {
         const db = self.db orelse return;
 
-        db.exec("ALTER TABLE timer_sessions ADD COLUMN paused_total_seconds INTEGER NOT NULL DEFAULT 0;", .{}) catch {};
-        db.exec("ALTER TABLE timer_sessions ADD COLUMN pause_started_at INTEGER;", .{}) catch {};
-        db.exec("ALTER TABLE timer_sessions ADD COLUMN last_synced_at INTEGER;", .{}) catch {};
+        db.exec("ALTER TABLE timer_sessions ADD COLUMN paused_total_seconds INTEGER NOT NULL DEFAULT 0;", .{}) catch |err| {
+            logger.global_logger.err("❌ 迁移 timer_sessions paused_total_seconds 失败: {any}", .{err});
+        };
+        db.exec("ALTER TABLE timer_sessions ADD COLUMN pause_started_at INTEGER;", .{}) catch |err| {
+            logger.global_logger.err("❌ 迁移 timer_sessions pause_started_at 失败: {any}", .{err});
+        };
+        db.exec("ALTER TABLE timer_sessions ADD COLUMN last_synced_at INTEGER;", .{}) catch |err| {
+            logger.global_logger.err("❌ 迁移 timer_sessions last_synced_at 失败: {any}", .{err});
+        };
 
         logger.global_logger.info("已迁移到版本 5(timer_sessions pause accounting)", .{});
     }
@@ -367,9 +379,15 @@ pub const MigrationManager = struct {
     fn migrateToV3(self: *MigrationManager) !void {
         const db = self.db orelse return;
 
-        db.exec("ALTER TABLE habit_sets ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
-        db.exec("ALTER TABLE habits ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
-        db.exec("ALTER TABLE settings ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch {};
+        db.exec("ALTER TABLE habit_sets ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch |err| {
+            logger.global_logger.err("❌ 迁移 habit_sets wallpaper 失败: {any}", .{err});
+        };
+        db.exec("ALTER TABLE habits ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch |err| {
+            logger.global_logger.err("❌ 迁移 habits wallpaper 失败: {any}", .{err});
+        };
+        db.exec("ALTER TABLE settings ADD COLUMN wallpaper TEXT DEFAULT '';", .{}) catch |err| {
+            logger.global_logger.err("❌ 迁移 settings wallpaper 失败: {any}", .{err});
+        };
 
         logger.global_logger.info("已迁移到版本 3(wallpaper)", .{});
     }

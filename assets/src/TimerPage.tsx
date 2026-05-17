@@ -12,21 +12,14 @@ import {
 } from "./utils/audio";
 import { SevenSegmentDisplay } from "./components/SevenSegmentDisplay";
 import { DropdownSelect } from "./components/DropdownSelect";
-import { TimerConfig } from "./components/TimerConfig";
+import { TimerConfig as TimerConfigComponent } from "./components/TimerConfig";
 import { StarIconComponent } from "./utils/icons";
 import { useSSE } from "./hooks/useSSE";
+import { useTimer } from "./hooks/useTimer";
+import type { TimerConfig, TimerMode } from "./hooks/useTimer";
 
 interface TimerPageProps {
     onHabitsClick?: () => void;
-}
-
-type TimerMode = "stopwatch" | "countdown";
-
-interface TimerConfig {
-    mode: TimerMode;
-    workDuration: number;
-    restDuration: number;
-    loopCount: number;
 }
 
 type LayoutDensity = "compact" | "normal" | "spacious";
@@ -42,20 +35,6 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
     const [habitDetail, setHabitDetail] = useState<HabitDetail | null>(null);
     const [showHabitPicker, setShowHabitPicker] = useState(false);
 
-    const [timerConfig, setTimerConfig] = useState<TimerConfig>({
-        mode: "stopwatch",
-        workDuration: 25 * 60,
-        restDuration: 5 * 60,
-        loopCount: 0,
-    });
-
-    const [isRunning, setIsRunning] = useState(false);
-    const [isPaused, setIsPaused] = useState(false);
-    const [elapsedSeconds, setElapsedSeconds] = useState(0);
-    const [remainingSeconds, setRemainingSeconds] = useState(0);
-    const [isFinished, setIsFinished] = useState(false);
-    const [isResting, setIsResting] = useState(false);
-    const [currentRound, setCurrentRound] = useState(0);
     const [audioPreferences, setAudioPreferences] = useState<AudioPreferences>(() => loadAudioPreferences());
     const [layoutDensity, setLayoutDensity] = useState<LayoutDensity>(() => {
         const saved = localStorage.getItem("layout_density");
@@ -68,12 +47,28 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
     const sessionRecordedRef = useRef(false);
     const apiClientRef = useRef(getAPIClient());
-    const timerIntervalRef = useRef<number | null>(null);
     const previousFinishedRef = useRef(false);
-    // 标记初始数据加载是否成功
     const initialDataLoadedRef = useRef(false);
 
-    // 使用 SSE hook 来监听连接状态
+    const {
+        timerConfig,
+        setTimerConfig,
+        isRunning,
+        isPaused,
+        isFinished,
+        isResting,
+        currentRound,
+        elapsedSeconds,
+        remainingSeconds,
+        displayTime,
+        start,
+        pause,
+        resume,
+        reset,
+        skipToNext,
+        finish,
+    } = useTimer();
+
     const { isConnected: sseConnected } = useSSE();
 
     useEffect(() => {
@@ -93,7 +88,6 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
     useEffect(() => {
         void loadData();
-        void restoreTimerProgress();
     }, []);
 
     // 当 SSE 连接成功且初始数据还未加载时，重新尝试加载数据
@@ -103,42 +97,6 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             void loadData();
         }
     }, [sseConnected]);
-
-    // 恢复计时进度（页面刷新后）
-    const restoreTimerProgress = async () => {
-        try {
-            const progress = await apiClientRef.current.getTimerProgress();
-            
-            if (progress.session_id && !progress.is_finished) {
-                // 有活跃的计时会话，恢复状态
-                setSelectedHabitId(progress.habit_id);
-                setTimerConfig(prev => ({
-                    ...prev,
-                    mode: progress.mode as TimerMode,
-                }));
-                
-                if (progress.mode === 'stopwatch') {
-                    setElapsedSeconds(progress.elapsed_seconds);
-                } else {
-                    setRemainingSeconds(progress.remaining_seconds);
-                    setIsResting(progress.in_rest);
-                }
-                
-                setIsRunning(progress.is_running);
-                setIsPaused(progress.is_paused);
-                
-                // 如果正在运行，需要加载 habit 详情
-                if (progress.habit_id) {
-                    void loadHabitDetail(progress.habit_id);
-                }
-                
-                logSuccess('✓ 已恢复计时进度');
-            }
-        } catch (e: any) {
-            // 没有保存的进度是正常的，不用报错
-            console.debug('恢复计时进度失败:', e);
-        }
-    };
 
     useEffect(() => {
         const latest = loadAudioPreferences();
@@ -155,57 +113,6 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             void loadHabitDetail(selectedHabitId);
         }
     }, [selectedHabitId]);
-
-    useEffect(() => {
-        if (isRunning && !isPaused && !isFinished) {
-            timerIntervalRef.current = window.setInterval(() => {
-                if (timerConfig.mode === "stopwatch") {
-                    setElapsedSeconds(prev => prev + 1);
-                } else {
-                    if (isResting) {
-                        setRemainingSeconds(prev => {
-                            const newVal = prev - 1;
-                            if (newVal <= 0) {
-                                setIsResting(false);
-                                setRemainingSeconds(timerConfig.workDuration);
-                                setCurrentRound(prev => prev + 1);
-                                return 0;
-                            }
-                            return newVal;
-                        });
-                    } else {
-                        setRemainingSeconds(prev => {
-                            const newVal = prev - 1;
-                            if (newVal <= 0) {
-                                if (timerConfig.loopCount > 0 && currentRound >= timerConfig.loopCount) {
-                                    setIsFinished(true);
-                                    setIsRunning(false);
-                                    void recordSession();
-                                    return 0;
-                                } else if (timerConfig.restDuration > 0) {
-                                    setIsResting(true);
-                                    setRemainingSeconds(timerConfig.restDuration);
-                                    return timerConfig.restDuration;
-                                } else {
-                                    setCurrentRound(prev => prev + 1);
-                                    setRemainingSeconds(timerConfig.workDuration);
-                                    return timerConfig.workDuration;
-                                }
-                            }
-                            return newVal;
-                        });
-                    }
-                }
-            }, 1000);
-        }
-
-        return () => {
-            if (timerIntervalRef.current) {
-                clearInterval(timerIntervalRef.current);
-                timerIntervalRef.current = null;
-            }
-        };
-    }, [isRunning, isPaused, isFinished, timerConfig, isResting, currentRound]);
 
     useEffect(() => {
         if (isFinished && !previousFinishedRef.current) {
@@ -303,7 +210,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
         }
     };
 
-    const startTimer = async () => {
+    const handleStart = async () => {
         void audioEngine.unlock();
 
         if (!selectedHabitId) {
@@ -311,120 +218,41 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             return;
         }
 
-        if (isFinished) {
-            void resetTimer();
-            return;
-        }
-
-        sessionRecordedRef.current = false;
-        setIsRunning(true);
-        setIsPaused(false);
-
-        if (timerConfig.mode === "countdown") {
-            setRemainingSeconds(timerConfig.workDuration);
-            setCurrentRound(1);
-            setIsResting(false);
-        } else {
-            setElapsedSeconds(0);
-        }
-
-        try {
-            await apiClientRef.current.startTimer(selectedHabitId ?? undefined, {
-                mode: timerConfig.mode,
-                workDuration: timerConfig.workDuration,
-                restDuration: timerConfig.restDuration,
-                loopCount: timerConfig.loopCount,
-            });
-            audioEngine.playTick();
-        } catch (e: any) {
-            logError(`启动计时失败: ${e}`);
-        }
+        await start(selectedHabitId ?? undefined);
+        audioEngine.playTick();
     };
 
-    const pauseTimer = async () => {
+    const handlePause = async () => {
         audioEngine.stopTick();
-        setIsPaused(true);
-        try {
-            await apiClientRef.current.pauseTimer();
-        } catch (e: any) {
-            logError(`暂停计时失败: ${e}`);
-        }
+        await pause();
     };
 
-    const resumeTimer = async () => {
+    const handleResume = async () => {
         void audioEngine.unlock();
-        setIsPaused(false);
-        try {
-            await apiClientRef.current.resumeTimer(selectedHabitId ?? undefined);
-            audioEngine.playTick();
-        } catch (e: any) {
-            logError(`恢复计时失败: ${e}`);
-        }
+        await resume(selectedHabitId ?? undefined);
+        audioEngine.playTick();
     };
 
-    const finishTimer = async () => {
+    const handleFinish = async () => {
         audioEngine.stopTick();
         try {
-            const result = await apiClientRef.current.finishTimer();
+            const result = await finish();
             logSuccess(`✓ 已计入今日统计: ${formatDuration(result.elapsed_seconds)}`);
-            
-            // 刷新习惯详情
             if (selectedHabitId) {
                 void loadHabitDetail(selectedHabitId);
             }
-        } catch (e: any) {
+        } catch (e) {
             logError(`结束计时失败: ${e}`);
-            return;
         }
-
-        // 重置前端状态
-        setIsRunning(false);
-        setIsPaused(false);
-        setIsFinished(false);
-        setElapsedSeconds(0);
-        setRemainingSeconds(timerConfig.workDuration);
-        setCurrentRound(0);
-        sessionRecordedRef.current = false;
     };
 
-    const resetTimer = async () => {
+    const handleReset = async () => {
         audioEngine.stopTick();
-        setIsRunning(false);
-        setIsPaused(false);
-        setIsFinished(false);
-        setIsResting(false);
-        setElapsedSeconds(0);
-        setRemainingSeconds(timerConfig.workDuration);
-        setCurrentRound(0);
-        sessionRecordedRef.current = false;
-
-        try {
-            await apiClientRef.current.resetTimer();
-        } catch (e: any) {
-            logError(`重置计时失败: ${e}`);
-        }
+        await reset();
     };
 
-    const skipToNext = () => {
-        if (timerConfig.mode === "countdown" && isRunning) {
-            if (isResting) {
-                setIsResting(false);
-                setRemainingSeconds(timerConfig.workDuration);
-                setCurrentRound(prev => prev + 1);
-            } else {
-                if (timerConfig.loopCount > 0 && currentRound >= timerConfig.loopCount) {
-                    setIsFinished(true);
-                    setIsRunning(false);
-                    void recordSession();
-                } else if (timerConfig.restDuration > 0) {
-                    setIsResting(true);
-                    setRemainingSeconds(timerConfig.restDuration);
-                } else {
-                    setCurrentRound(prev => prev + 1);
-                    setRemainingSeconds(timerConfig.workDuration);
-                }
-            }
-        }
+    const handleSkipToNext = () => {
+        skipToNext();
     };
 
     const handleHabitSelect = async (habitId: number) => {
@@ -446,13 +274,12 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             setHabitDetail(detail);
             const habit = habits.find(h => h.id === habitId);
             setSelectedHabit(habit || null);
-        } catch (e: any) {
+        } catch (e) {
             logError(`加载习惯详情失败: ${e}`);
         }
     };
 
-    const displayTime = timerConfig.mode === "stopwatch" ? elapsedSeconds : remainingSeconds;
-    const timeDisplay = formatDuration(displayTime);
+    const timeDisplay = displayTime;
     const timeStateClass = isFinished
         ? "time-state-finished"
         : isResting
@@ -524,7 +351,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     />
                 </div>
 
-                <TimerConfig
+                <TimerConfigComponent
                     config={timerConfig}
                     isRunning={isRunning}
                     isCountdownMode={timerConfig.mode === "countdown"}
@@ -582,7 +409,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     {isRunning && !isPaused ? (
                         <button
                             className="btn btn-primary btn-lg min-w-[130px]"
-                            onClick={() => void pauseTimer()}
+                            onClick={() => void handlePause()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -592,7 +419,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     ) : isPaused ? (
                         <button
                             className="btn btn-primary btn-lg min-w-[130px]"
-                            onClick={() => void resumeTimer()}
+                            onClick={() => void handleResume()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -602,7 +429,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     ) : (
                         <button
                             className="btn btn-primary btn-lg min-w-[130px]"
-                            onClick={() => void startTimer()}
+                            onClick={() => void handleStart()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -610,11 +437,11 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                             {isFinished ? t("timer.restart") : (selectedHabitId ? t("timer.start") : t("timer.select_habit"))}
                         </button>
                     )}
-                    
+
                     {timerConfig.mode === "countdown" && isRunning && (
                         <button
                             className="btn btn-ghost btn-lg min-w-[110px]"
-                            onClick={() => void skipToNext()}
+                            onClick={() => void handleSkipToNext()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
@@ -626,7 +453,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     {isRunning && (
                         <button
                             className="btn btn-success btn-lg min-w-[110px]"
-                            onClick={() => void finishTimer()}
+                            onClick={() => void handleFinish()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -634,10 +461,10 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                             {t("timer.finish")}
                         </button>
                     )}
-                    
+
                     <button
                         className="btn btn-secondary btn-lg min-w-[110px]"
-                        onClick={() => void resetTimer()}
+                        onClick={() => void handleReset()}
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />

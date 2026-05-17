@@ -20,6 +20,6 @@ test "PBKDF2 key derivation" {
     const password = "test_password";
     const salt: [16]u8 = .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
     var key: [crypto.AES256GCM_KEY_SIZE]u8 = undefined;
-    crypto.deriveKey(password, salt, &key);
+    try crypto.deriveKey(password, salt, &key);
     try std.testing.expect(key.len == crypto.AES256GCM_KEY_SIZE);
 }

@@ -100,13 +100,13 @@ test "问题2: 正计时拒绝负数 tick" {
     manager.handleEvent(.user_start_timer);
     manager.handleEvent(.{ .tick = 1000 });
 
-    const elapsed_before = manager.state.STOPWATCH_MODE.esplased_ms;
+    const elapsed_before = manager.state.STOPWATCH_MODE.elapsed_ms;
 
     // 发送负数 tick（应该被拒绝）
     manager.handleEvent(.{ .tick = -500 });
 
     // 验证时间没有倒退
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, elapsed_before);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, elapsed_before);
 }
 
 test "问题2: 倒计时接受零 tick" {

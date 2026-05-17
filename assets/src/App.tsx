@@ -60,12 +60,24 @@ const formatUnknownError = (value: unknown): string => {
   return "未知错误";
 };
 
+const sanitizeWallpaperUrl = (url: string): string => {
+  if (!url || typeof url !== "string") return "";
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("data:image/")) {
+    return trimmed;
+  }
+  return "";
+};
+
 export const App = () => {
   const [page, setPage] = useState<Page>("timer");
   const [globalWallpaper, setGlobalWallpaper] = useState<string | null>(() => {
     const cached = readCachedWallpaper();
     return cached || null;
   });
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const applyThemeMode = (themeMode = "dark") => {
     const html = document.documentElement;
@@ -228,7 +240,7 @@ export const App = () => {
       } else if (wallpaperInfo.type === "image") {
         // 图片层失败时仍显示兜底渐变，避免退化成纯黑背景
         html.style.backgroundColor = "#0d0d0d";
-        html.style.backgroundImage = `url("${wallpaperInfo.value.replace(/"/g, '\\"')}"), ${WALLPAPER_FALLBACK_GRADIENT}`;
+        html.style.backgroundImage = `url("${sanitizeWallpaperUrl(wallpaperInfo.value).replace(/"/g, '\\"')}"), ${WALLPAPER_FALLBACK_GRADIENT}`;
         html.style.backgroundSize = "cover, 140% 140%";
         html.style.backgroundPosition = "center center, center center";
         html.style.backgroundRepeat = "no-repeat, no-repeat";
@@ -261,7 +273,11 @@ export const App = () => {
 
   return (
     <>
-      <ErrorNotification visible={true} />
+      <ErrorNotification
+        visible={!!errorMessage}
+        message={errorMessage || undefined}
+        onDismiss={() => setErrorMessage(null)}
+      />
 
       <div className="flex h-screen bg-transparent">
         {/* 侧边栏 - 桌面端 */}

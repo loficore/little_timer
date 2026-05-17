@@ -4,6 +4,7 @@ const std = @import("std");
 const crypto = std.crypto;
 const Aes256Gcm = std.crypto.aead.aes_gcm.Aes256Gcm;
 const HmacSha256 = std.crypto.auth.hmac.sha2.HmacSha256;
+const Random = std.Random;
 
 pub const CryptoError = error{
     InvalidKeyLength,
@@ -22,6 +23,13 @@ pub fn generateKey() [AES256GCM_KEY_SIZE]u8 {
     return key;
 }
 
+pub fn generateKeyOwned(allocator: std.mem.Allocator) ![]u8 {
+    const key = generateKey();
+    const owned = try allocator.alloc(u8, key.len);
+    @memcpy(owned, &key);
+    return owned;
+}
+
 pub fn generateNonce() [AES256GCM_NONCE_SIZE]u8 {
     var nonce: [AES256GCM_NONCE_SIZE]u8 = undefined;
     crypto.random.bytes(&nonce);
@@ -34,8 +42,11 @@ pub fn generateSalt() [16]u8 {
     return salt;
 }
 
-pub fn deriveKey(password: []const u8, salt: [16]u8, output_key: *[AES256GCM_KEY_SIZE]u8) void {
-    std.crypto.pwhash.pbkdf2(output_key, password, &salt, 100_000, HmacSha256) catch unreachable;
+pub fn deriveKey(password: []const u8, salt: [16]u8, output_key: *[AES256GCM_KEY_SIZE]u8) CryptoError!void {
+    std.crypto.pbkdf2.pbkdf2(output_key, password, &salt, 100_000, HmacSha256) catch |err| {
+        _ = err;
+        return CryptoError.OutOfMemory;
+    };
 }
 
 pub fn encrypt(plaintext: []const u8, key: [AES256GCM_KEY_SIZE]u8, nonce: [AES256GCM_NONCE_SIZE]u8, ciphertext: []u8) CryptoError!void {
@@ -93,4 +104,24 @@ pub fn decryptWithPassword(ciphertext: []const u8, password: []const u8, allocat
         return CryptoError.AuthenticationFailed;
     };
     return plaintext;
+}
+
+pub fn generateToken(allocator: std.mem.Allocator) ![]u8 {
+    const TOKEN_SIZE = 32;
+    const hex_chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const CHARSET_SIZE: u32 = 62;
+    const MASK: u8 = 0xFC; // 256 - (256 % 62) = 256 - 8 = 248, highest multiple of 62 that fits in u8
+
+    var token = try allocator.alloc(u8, TOKEN_SIZE);
+    var single_byte: [1]u8 = undefined;
+    for (0..TOKEN_SIZE) |i| {
+        // rejection sampling: retry until we get a byte that won't bias the distribution
+        while (true) {
+            crypto.random.bytes(&single_byte);
+            if (single_byte[0] < MASK) break; // byte is in [0, 247], no bias
+            // byte is in [248, 255], would cause bias, retry
+        }
+        token[i] = hex_chars[single_byte[0] % CHARSET_SIZE];
+    }
+    return token;
 }

@@ -1,5 +1,6 @@
 //! 设置验证模块 - 集中所有配置参数的范围和格式验证
 const std = @import("std");
+const interface = @import("../core/interface.zig");
 
 /// 验证错误类型
 pub const ValidationError = error{
@@ -12,6 +13,7 @@ pub const ValidationError = error{
     InvalidTickInterval, // Tick 间隔超出范围
     InvalidPresetName, // 预设名称无效
     PresetLimitExceeded, // 预设数量超过上限
+    InvalidToken, // 认证 Token 格式无效
 };
 
 /// 验证时区范围 [-12, 14]
@@ -48,7 +50,7 @@ pub fn validateLanguage(lang: []const u8) ValidationError!void {
 /// 返回:
 /// - ValidationError!void: 如果时长超出范围则返回错误
 pub fn validateDuration(duration: u64) ValidationError!void {
-    if (duration < 1 or duration > 86400) {
+    if (duration < 1 or duration > interface.DAY) {
         return error.InvalidDuration;
     }
 }
@@ -87,7 +89,7 @@ pub fn validateLoopInterval(interval: u64) ValidationError!void {
 /// 返回:
 /// - ValidationError!void: 如果上限超出范围则返回错误
 pub fn validateMaxSeconds(max_seconds: u64) ValidationError!void {
-    if (max_seconds == 0 or max_seconds > 86400 * 365) {
+    if (max_seconds == 0 or max_seconds > interface.DEFAULT_MAX_YEAR_SECONDS) {
         return error.InvalidMaxSeconds;
     }
 }
@@ -100,7 +102,7 @@ pub fn validateMaxSeconds(max_seconds: u64) ValidationError!void {
 /// 返回:
 /// - ValidationError!void: 如果间隔超出范围则返回错误
 pub fn validateTickInterval(interval_ms: i64) ValidationError!void {
-    if (interval_ms < 100 or interval_ms > 5000) {
+    if (interval_ms < interface.MIN_TICK_INTERVAL_MS or interval_ms > interface.MAX_TICK_INTERVAL_MS) {
         return error.InvalidTickInterval;
     }
 }
@@ -194,4 +196,17 @@ pub fn safeI64FromJson(json_int: i64, min: i64, max: i64) ?i64 {
         return null;
     }
     return json_int;
+}
+
+/// 验证认证 Token (最小 32 字符，最大 256 字符)
+///
+/// 参数:
+/// - **token**: 待验证的 token 字符串
+///
+/// 返回:
+/// - ValidationError!void: 如果 token 格式无效则返回错误
+pub fn validateAuthToken(token: []const u8) ValidationError!void {
+    if (token.len < 32 or token.len > 256) {
+        return error.InvalidToken;
+    }
 }

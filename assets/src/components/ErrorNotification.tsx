@@ -1,17 +1,62 @@
 import type { FunctionalComponent } from "preact";
+import { useState, useEffect } from "preact/hooks";
 
 interface ErrorNotificationProps {
   visible?: boolean;
+  message?: string;
+  onDismiss?: () => void;
 }
 
 export const ErrorNotification: FunctionalComponent<ErrorNotificationProps> = ({
   visible = false,
+  message,
+  onDismiss,
 }) => {
-  if (!visible) {
+  const [displayMessage, setDisplayMessage] = useState<string | null>(null);
+  const [isShowing, setIsShowing] = useState(false);
+
+  useEffect(() => {
+    if (visible && message) {
+      setDisplayMessage(message);
+      setIsShowing(true);
+      const timer = setTimeout(() => {
+        setIsShowing(false);
+        onDismiss?.();
+      }, 5000);
+      return () => clearTimeout(timer);
+    } else if (!visible) {
+      setIsShowing(false);
+    }
+  }, [visible, message, onDismiss]);
+
+  if (!isShowing || !displayMessage) {
     return null;
   }
 
-  return null;
+  return (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-slide-down">
+      <div className="bg-red-700 border border-red-600 rounded-lg p-3 sm:p-4 shadow-lg max-w-md">
+        <div className="flex items-start gap-2 sm:gap-3">
+          <span className="text-lg flex-shrink-0">⚠️</span>
+          <div className="flex-1 min-w-0">
+            <strong className="text-white text-sm sm:text-base">操作失败</strong>
+            <p className="text-red-100 mt-1 text-xs sm:text-sm break-words">{displayMessage}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setIsShowing(false);
+              onDismiss?.();
+            }}
+            className="text-red-200 hover:text-white flex-shrink-0"
+            aria-label="关闭"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export const OfflineModeIndicator: FunctionalComponent<{

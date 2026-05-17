@@ -16,6 +16,8 @@ pub const ErrorRecoveryManager = struct {
     recovery_attempts: u32 = 0,
     /// 分配器
     allocator: std.mem.Allocator,
+    /// 线程安全锁
+    mutex: std.Thread.Mutex = .{},
 
     /// 初始化错误恢复管理器
     ///
@@ -37,6 +39,9 @@ pub const ErrorRecoveryManager = struct {
     /// - **error_msg**: 错误消息
     /// - **error_type**: 错误类型（用于分类）
     pub fn recordError(self: *ErrorRecoveryManager, error_msg: []const u8, error_type: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         self.error_count += 1;
         self.last_error_time = @as(i64, @truncate(std.time.nanoTimestamp()));
 
@@ -73,6 +78,9 @@ pub const ErrorRecoveryManager = struct {
     /// 返回:
     /// - bool: 恢复是否成功
     pub fn attemptRecovery(self: *ErrorRecoveryManager) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         if (!self.is_recovering) {
             return true;
         }
@@ -92,7 +100,9 @@ pub const ErrorRecoveryManager = struct {
         const delay_ms = std.math.pow(u32, 2, self.recovery_attempts) * 100; // 指数退避
         logger.global_logger.info("等待 {d}ms 后重试...", .{delay_ms});
 
-        // 这里可以添加实际的恢复逻辑（例如清理资源、重新初始化等）
+        // 使用计算的延迟进行 sleep
+        std.Thread.sleep(@as(u64, delay_ms) * 1000 * 1000); // 转换为纳秒
+
         return true;
     }
 
@@ -101,6 +111,9 @@ pub const ErrorRecoveryManager = struct {
     /// 参数:
     /// - **self**: ErrorRecoveryManager实例指针
     pub fn markRecoverySuccess(self: *ErrorRecoveryManager) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         if (self.is_recovering) {
             logger.global_logger.info("✅ 错误恢复成功！", .{});
             self.is_recovering = false;
@@ -114,6 +127,9 @@ pub const ErrorRecoveryManager = struct {
     /// 返回:
     /// - []const u8: 最后的错误消息
     pub fn getLastErrorMessage(self: *const ErrorRecoveryManager) []const u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         // 找到 null 终止符
         var len: usize = 0;
         for (self.last_error_message) |byte| {
@@ -128,6 +144,9 @@ pub const ErrorRecoveryManager = struct {
     /// 返回:
     /// - struct { count: u32, is_recovering: bool, recovery_attempts: u32 }
     pub fn getErrorStats(self: *const ErrorRecoveryManager) struct { count: u32, is_recovering: bool, recovery_attempts: u32 } {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         return .{
             .count = self.error_count,
             .is_recovering = self.is_recovering,
@@ -140,6 +159,9 @@ pub const ErrorRecoveryManager = struct {
     /// 参数:
     /// - **self**: ErrorRecoveryManager实例指针
     pub fn reset(self: *ErrorRecoveryManager) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         self.error_count = 0;
         self.is_recovering = false;
         self.recovery_attempts = 0;
@@ -159,6 +181,8 @@ pub const ErrorRecoveryManager = struct {
     /// 返回:
     /// - bool: true 表示处于恢复状态
     pub fn isRecovering(self: *const ErrorRecoveryManager) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         return self.is_recovering;
     }
 
@@ -167,6 +191,8 @@ pub const ErrorRecoveryManager = struct {
     /// 返回:
     /// - u32: 当前恢复尝试次数
     pub fn getRecoveryAttempts(self: *const ErrorRecoveryManager) u32 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         return self.recovery_attempts;
     }
 
@@ -175,6 +201,8 @@ pub const ErrorRecoveryManager = struct {
     /// 参数:
     /// - **self**: ErrorRecoveryManager实例指针
     pub fn deinit(self: *ErrorRecoveryManager) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         logger.global_logger.info("错误恢复管理器已清理 (总错误数: {d})", .{self.error_count});
     }
 };
@@ -187,9 +215,14 @@ pub const NetworkErrorDetector = struct {
     last_failure_time: i64 = 0,
     /// 最大允许连续失败次数
     max_consecutive_failures: u32 = 5,
+    /// 线程安全锁
+    mutex: std.Thread.Mutex = .{},
 
     /// 记录连接成功
     pub fn recordSuccess(self: *NetworkErrorDetector) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         if (self.consecutive_failures > 0) {
             logger.global_logger.info("✅ 连接恢复成功，重置失败计数", .{});
         }
@@ -198,6 +231,9 @@ pub const NetworkErrorDetector = struct {
 
     /// 记录连接失败
     pub fn recordFailure(self: *NetworkErrorDetector) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         self.consecutive_failures += 1;
         self.last_failure_time = std.time.nanoTimestamp();
 
@@ -213,11 +249,15 @@ pub const NetworkErrorDetector = struct {
     /// 返回:
     /// - bool: true 表示应该断开
     pub fn shouldDisconnect(self: *const NetworkErrorDetector) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         return self.consecutive_failures >= self.max_consecutive_failures;
     }
 
     /// 重置状态
     pub fn reset(self: *NetworkErrorDetector) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         self.consecutive_failures = 0;
     }
 };

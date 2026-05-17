@@ -91,12 +91,42 @@ pub const SqliteManager = struct {
             return;
         }
 
+        // 确保父目录存在且权限正确
+        const dir_path = std.fs.path.dirname(self.db_path);
+        if (dir_path) |dp| {
+            std.fs.cwd().makeDir(dp) catch |err| {
+                if (err != error.PathAlreadyExists) {
+                    logger.global_logger.warn("⚠️ 创建数据库目录失败: {any}", .{err});
+                }
+            };
+            // 设置目录权限为 0700（仅 owner 访问）
+            var dp_null: [256:0]u8 = undefined;
+            const dp_len = dp.len;
+            @memcpy(dp_null[0..dp_len], dp);
+            dp_null[dp_len] = 0;
+            const dir_chmod_result = std.os.linux.chmod(&dp_null, 0o700);
+            if (dir_chmod_result == -1) {
+                logger.global_logger.warn("⚠️ 设置数据库目录权限失败", .{});
+            }
+        }
+
         // 使用 zqlite 高级 API 打开数据库
         const flags = zqlite.OpenFlags.Create | zqlite.OpenFlags.ReadWrite;
         self.db = zqlite.open(self.db_path, flags) catch |err| {
             logger.global_logger.err("❌ SQLite 打开失败: {any}", .{err});
             return SqliteError.DatabaseOpenFailed;
         };
+
+        // 设置 DB 文件权限为 0600（仅 owner 读写）
+        // 使用 os.linux.chmod 直接调用底层 syscall
+        const db_path_len = self.db_path.len;
+        var db_path_null: [256:0]u8 = undefined;
+        @memcpy(db_path_null[0..db_path_len], self.db_path);
+        db_path_null[db_path_len] = 0;
+        const chmod_result = std.os.linux.chmod(&db_path_null, 0o600);
+        if (chmod_result == -1) {
+            logger.global_logger.warn("⚠️ 设置 DB 文件权限失败", .{});
+        }
 
         self.is_initialized = true;
         logger.global_logger.info("✓ SQLite 数据库已打开: {s}", .{self.db_path});

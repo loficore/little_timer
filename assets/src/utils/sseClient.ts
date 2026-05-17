@@ -16,6 +16,7 @@ export class SSEClient {
     private onEvent: EventCallback | null = null;
     private onError: ErrorCallback | null = null;
     private onConnect: ConnectCallback | null = null;
+    private closed = false;
 
     /**
      * 构造函数，接受 SSE 服务器的基础 URL
@@ -83,6 +84,10 @@ export class SSEClient {
     }
 
     private handleReconnect(): void {
+        if (this.closed) {
+            return;
+        }
+
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             console.error('Max reconnection attempts reached');
             this.close();
@@ -91,10 +96,13 @@ export class SSEClient {
 
         this.reconnectAttempts++;
         const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-        
+
         console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})...`);
-        
+
         setTimeout(() => {
+            if (this.closed) {
+                return;
+            }
             this.createConnection();
         }, delay);
     }
@@ -103,6 +111,7 @@ export class SSEClient {
      * 关闭 SSE 连接
      */
     close(): void {
+        this.closed = true;
         if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;

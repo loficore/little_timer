@@ -285,7 +285,7 @@ test "正计时初始化" {
     };
     const manager = clock.ClockManager.init(config);
 
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 0);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 0);
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_paused);
 }
 
@@ -301,7 +301,7 @@ test "正计时基础 tick" {
     manager.handleEvent(.user_start_timer);
     manager.handleEvent(.{ .tick = 1000 });
 
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 1000);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 1000);
     try std.testing.expect(!manager.state.STOPWATCH_MODE.is_finished);
 }
 
@@ -317,7 +317,7 @@ test "正计时到达上限" {
     manager.handleEvent(.user_start_timer);
     manager.handleEvent(.{ .tick = 5000 });
 
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 5000);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 5000);
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_finished);
 }
 
@@ -333,7 +333,7 @@ test "正计时超过上限不增加" {
     manager.handleEvent(.user_start_timer);
     manager.handleEvent(.{ .tick = 6000 });
 
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 5000);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 5000);
 }
 
 test "正计时重置" {
@@ -349,7 +349,7 @@ test "正计时重置" {
     manager.handleEvent(.{ .tick = 5000 });
     manager.handleEvent(.user_reset_timer);
 
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 0);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 0);
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_paused);
     try std.testing.expect(!manager.state.STOPWATCH_MODE.is_finished); // 确认 is_finished 被清理
 }
@@ -370,11 +370,11 @@ test "正计时暂停后 tick 不生效" {
     manager.handleEvent(.user_pause_timer);
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_paused);
 
-    const elapsed_before = manager.state.STOPWATCH_MODE.esplased_ms;
+    const elapsed_before = manager.state.STOPWATCH_MODE.elapsed_ms;
 
     // 暂停状态下的 tick 应该被忽略
     manager.handleEvent(.{ .tick = 3000 });
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, elapsed_before);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, elapsed_before);
 }
 
 test "正计时达到上限后继续 tick 不增长" {
@@ -393,7 +393,7 @@ test "正计时达到上限后继续 tick 不增长" {
 
     // 继续 tick 不应该增长
     manager.handleEvent(.{ .tick = 2000 });
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 5000);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 5000);
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_finished);
 }
 
@@ -419,7 +419,7 @@ test "模式切换 - 倒计时到正计时" {
     };
     manager.handleEvent(.{ .user_change_config = new_config });
 
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 0);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 0);
 }
 
 test "user_change_mode 使用默认配置" {
@@ -438,7 +438,7 @@ test "user_change_mode 使用默认配置" {
 
     // 验证采用了默认配置：24小时上限
     try std.testing.expectEqual(manager.state.STOPWATCH_MODE.max_ms, 24 * 60 * 60 * 1000);
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 0);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 0);
 
     // 切换回倒计时（默认25分钟）
     manager.handleEvent(.{ .user_change_mode = .COUNTDOWN_MODE });
@@ -569,7 +569,7 @@ test "正计时 1 毫秒粒度" {
     manager.handleEvent(.user_start_timer);
     manager.handleEvent(.{ .tick = 1 });
 
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 1);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 1);
 }
 
 test "连续多次 tick" {

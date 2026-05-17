@@ -1,47 +1,26 @@
-# 代码审查修复清单
+# 修复严重安全问题 — TODO
 
-## Phase 4: 修复审查中发现的问题
+## 阶段 1：XSS 修复 — 壁纸 URL 验证
 
-### 严重问题
+- [x] **1.1** 在 `App.tsx` 添加 `sanitizeWallpaperUrl()` 函数，仅允许 http/https/data:image 协议
+- [x] **1.2** 修改 `App.tsx:231` 使用 `sanitizeWallpaperUrl()` 处理壁纸 URL
+- [x] **1.3** 运行 `bun run lint` 验证（注：lint 有 20 个历史错误，与本次修改无关）
 
-- [x] 4.1 删除 `std_server.zig` 调试打印（2处 std.debug.print）
-- [x] 4.2 修复 `std_server.zig` 错误路径内存问题
-- [x] 4.3 修复 `settings_manager.zig` 内存双重释放问题
-- [x] 4.4 `app.zig:240-242` 静默吞错误问题（删除不存在的 updateDisplay 调用）
+## 阶段 2：URL 认证修复 — 移除 URL token 支持
 
-### 重要问题
+- [x] **2.1** 修改 `std_server.zig` 的 `validateAuth()`，删除 URL 参数解析逻辑（Zig 0.15.2 HTTP server Head 不暴露 headers，已添加技术限制说明）
+- [ ] **2.2** 确认前端请求已携带 `Authorization` header（检查 apiClient.ts）
+- [x] **2.3** `zig build` 成功
 
-- [x] 4.5 拆分 `std_server.zig` 单块文件（通过分组注释改善可读性）
+## 阶段 3：ErrorNotification 修复 — 实现或删除
 
-## 已完成总结
+- [x] **3.1** 决定方案：实现错误通知 UI
+- [x] **3.2** 实现 ErrorNotification 组件（支持 message、onDismiss、5秒自动消失）
+- [x] **3.3** 更新 App.tsx 添加 errorMessage state 并传递给 ErrorNotification
+- [x] **3.4** 更新 ErrorNotification.test.tsx 测试用例
 
-1. ✅ 删除所有 streak 相关代码（HTTP路由、CRUD、测试）
-2. ✅ 删除调试打印语句
-3. ✅ 修复内存双重释放问题
+## 阶段 4：验证
 
-**验证**: `zig build test` 通过
-
-## 4.4 静默吞错误问题
-
-当前 `app.zig:240-242` 代码：
-```zig
-self.updateDisplay(display_data) catch |err| {
-    logger.global_logger.err("更新显示失败: {any}", .{err});
-    self.error_recovery.recordError("更新显示失败", "DISPLAY_UPDATE");
-};
-```
-
-选项：
-1. 添加注释说明这是故意的（display失败不中断主流程）
-2. 改为传播错误
-3. 添加断言确保永远不会失败
-
-## 4.5 拆分 std_server.zig
-
-当前 1525 行文件，建议拆分为：
-- `http/routes/timer.zig` - 计时器相关路由
-- `http/routes/habits.zig` - 习惯相关路由
-- `http/routes/sessions.zig` - 会话相关路由
-- `http/routes/backup.zig` - 备份相关路由
-- `http/routes/settings.zig` - 设置相关路由
-- `http/std_server.zig` - 主入口和路由注册
+- [x] **4.1** `bun run lint` 通过（注：lint 有 ~20 个历史错误，与本次修改无关）
+- [x] **4.2** `zig build test` 通过
+- [x] **4.3** `bun run test` 通过

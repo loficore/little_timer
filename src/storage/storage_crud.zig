@@ -15,6 +15,9 @@ pub const CrudError = error{
     SettingsNotFound, // 设置未找到
     SettingsSaveFailed, // 设置保存失败
     DatabaseOpenFailed, // 数据库打开失败
+    EncryptionFailed, // 加密失败
+    DecryptionFailed, // 解密失败
+    MasterKeyNotFound, // 主密钥未找到
 };
 
 /// SQLite 设置行数据
@@ -212,35 +215,28 @@ pub const CrudManager = struct {
 
         logger.global_logger.debug("保存备份配置到数据库（加密凭证）...", .{});
 
-        const master_key = secret_storage.retrieveMasterKey() catch |err| {
-            logger.global_logger.warn("⚠️ 无法获取 master_key，加密凭证将使用占位符: {any}", .{err});
-            try self.db.?.exec(
-                "INSERT OR REPLACE INTO backup_config (id, target_type, enabled, auto_backup, auto_backup_interval, local_path, webdav_url, webdav_username, webdav_password_encrypted, s3_endpoint, s3_bucket, s3_region, s3_access_key_encrypted, s3_secret_key_encrypted, s3_path_prefix) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
-                .{
-                    target_type_str,
-                    @intFromBool(config.enabled),
-                    @intFromBool(config.auto_backup),
-                    config.auto_backup_interval,
-                    config.local_path,
-                    config.webdav_url,
-                    config.webdav_username,
-                    "ENCRYPTED_PLACEHOLDER",
-                    config.s3_endpoint,
-                    config.s3_bucket,
-                    config.s3_region,
-                    "ENCRYPTED_PLACEHOLDER",
-                    "ENCRYPTED_PLACEHOLDER",
-                    config.s3_path_prefix,
-                },
-            );
-            return;
-        };
-        defer self.allocator.free(master_key);
+        // 确保 master key 存在，如果不存在则自动生成
+        var master_key: []u8 = undefined;
+        const key_err = secret_storage.retrieveMasterKey();
+        if (key_err) |key| {
+            master_key = key;
+        } else |err| {
+            logger.global_logger.info("Master key 不存在 (err={any})，自动生成并存储到 keyring...", .{err});
+            const new_key = try crypto.generateKeyOwned(self.allocator);
+            try secret_storage.storeMasterKey(new_key);
+            master_key = try secret_storage.retrieveMasterKey();
+            self.allocator.free(new_key);
+        }
+        // master_key 来自 keyring 缓存，secret_storage 内部管理生命周期
 
         const encrypt_credential = struct {
-            fn func(plaintext: []const u8, key: []const u8, allocator: std.mem.Allocator) ![]u8 {
+            fn func(label: []const u8, plaintext: []const u8, key: []const u8, allocator: std.mem.Allocator) ![]u8 {
                 if (plaintext.len == 0) {
-                    return allocator.dupe(u8, "");
+                    return allocator.alloc(u8, 0);
+                }
+                if (key.len == 0) {
+                    logger.global_logger.err("加密失败: key 为空 (field={s})", .{label});
+                    return error.EncryptionFailed;
                 }
                 var key_arr: [crypto.AES256GCM_KEY_SIZE]u8 = undefined;
                 @memcpy(key_arr[0..@min(key.len, crypto.AES256GCM_KEY_SIZE)], key[0..@min(key.len, crypto.AES256GCM_KEY_SIZE)]);
@@ -249,6 +245,7 @@ pub const CrudManager = struct {
                 const result = try allocator.alloc(u8, ciphertext_len);
                 crypto.encrypt(plaintext, key_arr, nonce, result) catch {
                     allocator.free(result);
+                    logger.global_logger.err("加密失败: encrypt 错误 (field={s}, plaintext_len={d}, key_len={d})", .{label, plaintext.len, key.len});
                     return error.EncryptionFailed;
                 };
                 var combined = try allocator.alloc(u8, nonce.len + ciphertext_len);
@@ -259,13 +256,22 @@ pub const CrudManager = struct {
             }
         }.func;
 
-        const webdav_password_encrypted = try encrypt_credential(config.webdav_password, master_key, self.allocator);
+        const webdav_password_encrypted = if (config.target_type == .webdav)
+            try encrypt_credential("webdav_password", config.webdav_password, master_key, self.allocator)
+        else
+            try self.allocator.alloc(u8, 0);
         defer self.allocator.free(webdav_password_encrypted);
 
-        const s3_access_key_encrypted = try encrypt_credential(config.s3_access_key, master_key, self.allocator);
+        const s3_access_key_encrypted = if (config.target_type == .s3)
+            try encrypt_credential("s3_access_key", config.s3_access_key, master_key, self.allocator)
+        else
+            try self.allocator.alloc(u8, 0);
         defer self.allocator.free(s3_access_key_encrypted);
 
-        const s3_secret_key_encrypted = try encrypt_credential(config.s3_secret_key, master_key, self.allocator);
+        const s3_secret_key_encrypted = if (config.target_type == .s3)
+            try encrypt_credential("s3_secret_key", config.s3_secret_key, master_key, self.allocator)
+        else
+            try self.allocator.alloc(u8, 0);
         defer self.allocator.free(s3_secret_key_encrypted);
 
         try self.db.?.exec(
@@ -342,8 +348,8 @@ pub const CrudManager = struct {
         else
             .local;
 
-        const master_key = secret_storage.retrieveMasterKey() catch |err| {
-            logger.global_logger.warn("⚠️ 无法获取 master_key，凭证将使用密文或占位符: {any}", .{err});
+        const master_key = secret_storage.retrieveMasterKey() catch |key_err| {
+            logger.global_logger.warn("retrieveMasterKey failed: {any}, credentials will not be decrypted", .{key_err});
             return interface.BackupConfig{
                 .enabled = enabled_raw != 0,
                 .auto_backup = auto_backup_raw != 0,
@@ -352,49 +358,43 @@ pub const CrudManager = struct {
                 .local_path = try allocator.dupe(u8, local_path),
                 .webdav_url = try allocator.dupe(u8, webdav_url),
                 .webdav_username = try allocator.dupe(u8, webdav_username),
-                .webdav_password = try allocator.dupe(u8, webdav_password_encrypted),
+                .webdav_password = try allocator.dupe(u8, ""),
                 .s3_endpoint = try allocator.dupe(u8, s3_endpoint),
                 .s3_bucket = try allocator.dupe(u8, s3_bucket),
                 .s3_region = try allocator.dupe(u8, s3_region),
-                .s3_access_key = try allocator.dupe(u8, s3_access_key_encrypted),
-                .s3_secret_key = try allocator.dupe(u8, s3_secret_key_encrypted),
+                .s3_access_key = try allocator.dupe(u8, ""),
+                .s3_secret_key = try allocator.dupe(u8, ""),
                 .s3_path_prefix = try allocator.dupe(u8, s3_path_prefix),
             };
         };
         defer allocator.free(master_key);
 
         const decrypt_credential = struct {
-            fn func(encrypted: []const u8, key: []const u8, alloc: std.mem.Allocator) ![]u8 {
-                if (encrypted.len == 0) {
-                    return alloc.dupe(u8, "");
-                }
-                if (std.mem.eql(u8, encrypted, "ENCRYPTED_PLACEHOLDER")) {
-                    return alloc.dupe(u8, "");
-                }
-                if (encrypted.len < crypto.AES256GCM_NONCE_SIZE + crypto.AES256GCM_TAG_SIZE) {
-                    return alloc.dupe(u8, encrypted);
+            fn func(encrypted: []const u8, key: []const u8, alloc: std.mem.Allocator) []u8 {
+                if (encrypted.len == 0 or encrypted.len < crypto.AES256GCM_NONCE_SIZE + crypto.AES256GCM_TAG_SIZE) {
+                    return &[_]u8{};
                 }
                 var key_arr: [crypto.AES256GCM_KEY_SIZE]u8 = undefined;
                 @memcpy(key_arr[0..@min(key.len, crypto.AES256GCM_KEY_SIZE)], key[0..@min(key.len, crypto.AES256GCM_KEY_SIZE)]);
-                const nonce: *[crypto.AES256GCM_NONCE_SIZE]u8 = @ptrCast(@alignCast(encrypted[0..crypto.AES256GCM_NONCE_SIZE]));
+                const nonce: *const [crypto.AES256GCM_NONCE_SIZE]u8 = @ptrCast(@alignCast(encrypted[0..crypto.AES256GCM_NONCE_SIZE]));
                 const ciphertext = encrypted[crypto.AES256GCM_NONCE_SIZE..];
-                const plaintext = try alloc.alloc(u8, ciphertext.len - crypto.AES256GCM_TAG_SIZE);
+                const plaintext = alloc.alloc(u8, ciphertext.len - crypto.AES256GCM_TAG_SIZE) catch return &[_]u8{};
                 crypto.decrypt(ciphertext, key_arr, nonce.*, plaintext) catch {
                     alloc.free(plaintext);
-                    return error.DecryptionFailed;
+                    return &[_]u8{};
                 };
                 return plaintext;
             }
         }.func;
 
-        const webdav_password = try decrypt_credential(webdav_password_encrypted, master_key, allocator);
-        defer allocator.free(webdav_password);
+        const webdav_password = decrypt_credential(webdav_password_encrypted, master_key, allocator);
+        errdefer if (webdav_password.len > 0) allocator.free(webdav_password);
 
-        const s3_access_key = try decrypt_credential(s3_access_key_encrypted, master_key, allocator);
-        defer allocator.free(s3_access_key);
+        const s3_access_key = decrypt_credential(s3_access_key_encrypted, master_key, allocator);
+        errdefer if (s3_access_key.len > 0) allocator.free(s3_access_key);
 
-        const s3_secret_key = try decrypt_credential(s3_secret_key_encrypted, master_key, allocator);
-        defer allocator.free(s3_secret_key);
+        const s3_secret_key = decrypt_credential(s3_secret_key_encrypted, master_key, allocator);
+        errdefer if (s3_secret_key.len > 0) allocator.free(s3_secret_key);
 
         const backup_config = interface.BackupConfig{
             .enabled = enabled_raw != 0,

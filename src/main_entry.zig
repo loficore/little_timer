@@ -173,8 +173,14 @@ pub fn main() !void {
         app_thread.join();
         logger.global_logger.info("HTTP 服务器线程已结束", .{});
     } else {
-        // HTTP 模式下等待
-        while (true) std.Thread.sleep(1 * std.time.ns_per_s);
+        // HTTP 模式下等待退出信号
+        while (!main_app.should_exit.load(.acquire)) {
+            std.Thread.sleep(100 * std.time.ns_per_ms);
+        }
+        logger.global_logger.info("接收到退出信号，等待 HTTP 服务器线程结束...", .{});
+        app_thread.join();
+        main_app.deinit();
+        logger.global_logger.info("HTTP 服务器线程已结束，应用已关闭", .{});
     }
 }
 

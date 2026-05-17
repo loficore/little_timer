@@ -22,7 +22,7 @@ test "运行中切换 countdown → stopwatch" {
 
     manager.handleEvent(.{ .user_change_mode = .STOPWATCH_MODE });
 
-    try std.testing.expect(manager.state.STOPWATCH_MODE.esplased_ms == 0);
+    try std.testing.expect(manager.state.STOPWATCH_MODE.elapsed_ms == 0);
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_paused);
     try std.testing.expect(!manager.state.STOPWATCH_MODE.is_finished);
 }
@@ -37,7 +37,7 @@ test "运行中切换 stopwatch → countdown" {
     manager.handleEvent(.user_start_timer);
     manager.handleEvent(.{ .tick = 5000 });
 
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 5000);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 5000);
 
     manager.handleEvent(.{ .user_change_mode = .COUNTDOWN_MODE });
 
@@ -126,7 +126,7 @@ test "pause → change mode → resume" {
     manager.handleEvent(.user_start_timer);
     manager.handleEvent(.{ .tick = 5000 });
 
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 5000);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 5000);
 }
 
 test "tick 正好在 0ms 结束" {
@@ -183,7 +183,7 @@ test "stopwatch tick 正好达到 max" {
     manager.handleEvent(.{ .tick = 60000 });
 
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_finished);
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 60000);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 60000);
 }
 
 test "stopwatch tick 超过 max（不应超过）" {
@@ -198,7 +198,7 @@ test "stopwatch tick 超过 max（不应超过）" {
     manager.handleEvent(.{ .tick = 20000 });
 
     try std.testing.expect(manager.state.STOPWATCH_MODE.is_finished);
-    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.esplased_ms, 60000);
+    try std.testing.expectEqual(manager.state.STOPWATCH_MODE.elapsed_ms, 60000);
 }
 
 test "countdown 循环模式 reset 后继续" {

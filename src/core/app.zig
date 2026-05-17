@@ -236,13 +236,13 @@ pub const MainApplication = struct {
         logger.global_logger.debug("Tick: 增量 {} ms", .{delta_ms});
 
         self.clock_manager.handleEvent(.{ .tick = delta_ms });
-        const display_data = self.clock_manager.update();
+        _ = self.clock_manager.update();
         // display_data 通过 SSE 推送到前端，此处无需额外处理
 
         // 每隔几秒自动保存计时进度（仅当正在运行时）
         const now_ns = std.time.nanoTimestamp();
         const now_ms: i64 = @intCast(@divFloor(now_ns, 1_000_000));
-        if (now_ms - self.last_save_time > 5000) { // 5 秒保存一次
+        if (now_ms - self.last_save_time > interface.DEFAULT_AUTO_SAVE_INTERVAL_MS) { // 5 秒保存一次
             self.last_save_time = now_ms;
             self.saveTimerProgress();
         }
@@ -421,7 +421,7 @@ pub const MainApplication = struct {
                 display.*.COUNTDOWN_MODE.in_rest = s.in_rest;
             },
             .STOPWATCH_MODE => {
-                display.*.STOPWATCH_MODE.esplased_ms = s.elapsed_seconds * 1000;
+                display.*.STOPWATCH_MODE.elapsed_ms = s.elapsed_seconds * 1000;
                 display.*.STOPWATCH_MODE.is_paused = s.is_paused;
                 display.*.STOPWATCH_MODE.is_finished = s.is_finished;
             },

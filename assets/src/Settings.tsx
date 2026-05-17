@@ -10,6 +10,8 @@ import { t, setLanguage } from "./utils/i18n";
 import { getAPIClient } from "./utils/apiClientSingleton";
 import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
 import { ClockIconComponent, CheckIconComponent, ResetIcon } from "./utils/icons";
+import { loadAudioPreferences, normalizeAudioPreferences, saveAudioPreferences } from "./utils/audio";
+import { STORAGE_KEYS } from "./utils/constants";
 
 const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "basic", labelKey: "settings.tabs.basic" },
@@ -167,6 +169,27 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       
       const setStateStartAt = performance.now();
       setConfig(loadedConfig);
+
+      const backupResult = await apiClientRef.current.getBackupConfig().catch(() => null);
+      if (backupResult) {
+        const bc = backupResult as any;
+        setConfig((prev) => ({
+          ...prev,
+          backup_enabled: bc.enabled ?? false,
+          backup_target_type: bc.target_type ?? 'local',
+          backup_local_path: bc.local_path ?? '',
+          backup_webdav_url: bc.webdav_url ?? '',
+          backup_webdav_username: bc.webdav_username ?? '',
+          backup_webdav_password: bc.webdav_password ?? '',
+          backup_s3_endpoint: bc.s3_endpoint ?? '',
+          backup_s3_bucket: bc.s3_bucket ?? '',
+          backup_s3_region: bc.s3_region ?? '',
+          backup_s3_access_key: bc.s3_access_key ?? '',
+          backup_s3_secret_key: bc.s3_secret_key ?? '',
+          backup_s3_path_prefix: bc.s3_path_prefix ?? '',
+        }));
+      }
+
       logPerf("Settings.load.success", {
         durationMs: Math.round(performance.now() - startAt),
         apiDurationMs,
@@ -257,14 +280,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       basic: serverBasic,
     };
 
-    void sound_enabled;
-    void sound_tick;
-    void sound_finish;
-    void sound_volume;
-    void layout_density;
-    void time_display_style;
-    void light_style;
-
     if (apiClientRef.current) {
       void apiClientRef.current.updateSettings(serverConfig)
         .then(() => {
@@ -284,6 +299,25 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         })
         .finally(() => {
           setIsSaving(false);
+        });
+
+      const backupConfig: any = {
+        enabled: config.backup_enabled ?? false,
+        target_type: config.backup_target_type ?? 'local',
+        local_path: config.backup_local_path ?? '',
+        webdav_url: config.backup_webdav_url ?? '',
+        webdav_username: config.backup_webdav_username ?? '',
+        webdav_password: config.backup_webdav_password ?? '',
+        s3_endpoint: config.backup_s3_endpoint ?? '',
+        s3_bucket: config.backup_s3_bucket ?? '',
+        s3_region: config.backup_s3_region ?? '',
+        s3_access_key: config.backup_s3_access_key ?? '',
+        s3_secret_key: config.backup_s3_secret_key ?? '',
+        s3_path_prefix: config.backup_s3_path_prefix ?? '',
+      };
+      void apiClientRef.current.updateBackupConfig(backupConfig)
+        .catch((err) => {
+          console.error('Failed to save backup config:', err);
         });
     }
   };
@@ -443,27 +477,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
               config={config}
               onChange={async (newConfig) => {
                 setConfig(newConfig);
-                if (apiClientRef.current) {
-                  try {
-                    const backupConfig: any = {
-                      enabled: newConfig.backup_enabled ?? false,
-                      target_type: newConfig.backup_target ?? 'local',
-                      local_path: newConfig.backup_local_path ?? '',
-                      webdav_url: newConfig.backup_webdav_url ?? '',
-                      webdav_username: newConfig.backup_webdav_username ?? '',
-                      webdav_password: newConfig.backup_webdav_password ?? '',
-                      s3_endpoint: newConfig.backup_s3_endpoint ?? '',
-                      s3_bucket: newConfig.backup_s3_bucket ?? '',
-                      s3_region: newConfig.backup_s3_region ?? '',
-                      s3_access_key: newConfig.backup_s3_access_key ?? '',
-                      s3_secret_key: newConfig.backup_s3_secret_key ?? '',
-                      s3_path_prefix: newConfig.backup_s3_path_prefix ?? '',
-                    };
-                    await apiClientRef.current.updateBackupConfig(backupConfig);
-                  } catch (err) {
-                    console.error('Failed to save backup config:', err);
-                  }
-                }
               }}
             />
           )}

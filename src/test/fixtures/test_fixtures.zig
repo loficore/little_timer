@@ -185,8 +185,7 @@ pub fn generatePresetJson(allocator: std.mem.Allocator, fixture: TimerPresetFixt
     const writer = list.writer(allocator);
 
     try writer.writeByte('{');
-    try writer.print("{f}", .{std.json.fmt(fixture.name, .{})});
-    try writer.writeByte(':');
+    try writer.writeAll("\"name\":");
     try writer.print("{f}", .{std.json.fmt(fixture.name, .{})});
     try writer.writeByte(',');
 

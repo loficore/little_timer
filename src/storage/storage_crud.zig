@@ -217,17 +217,17 @@ pub const CrudManager = struct {
 
         // 确保 master key 存在，如果不存在则自动生成
         var master_key: []u8 = undefined;
-        const key_err = secret_storage.retrieveMasterKey();
+        const key_err = secret_storage.retrieveMasterKey(self.allocator);
         if (key_err) |key| {
             master_key = key;
         } else |err| {
-            logger.global_logger.info("Master key 不存在 (err={any})，自动生成并存储到 keyring...", .{err});
+            logger.global_logger.info("Master key 不存在 (err={any})，自动生成并存储到 libsecret...", .{err});
             const new_key = try crypto.generateKeyOwned(self.allocator);
             try secret_storage.storeMasterKey(new_key);
-            master_key = try secret_storage.retrieveMasterKey();
             self.allocator.free(new_key);
+            master_key = try secret_storage.retrieveMasterKey(self.allocator);
         }
-        // master_key 来自 keyring 缓存，secret_storage 内部管理生命周期
+        defer self.allocator.free(master_key);
 
         const encrypt_credential = struct {
             fn func(label: []const u8, plaintext: []const u8, key: []const u8, allocator: std.mem.Allocator) ![]u8 {
@@ -348,7 +348,7 @@ pub const CrudManager = struct {
         else
             .local;
 
-        const master_key = secret_storage.retrieveMasterKey() catch |key_err| {
+        const master_key = secret_storage.retrieveMasterKey(allocator) catch |key_err| {
             logger.global_logger.warn("retrieveMasterKey failed: {any}, credentials will not be decrypted", .{key_err});
             return interface.BackupConfig{
                 .enabled = enabled_raw != 0,

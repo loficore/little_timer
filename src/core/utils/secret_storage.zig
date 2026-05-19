@@ -1,5 +1,5 @@
 //! 密钥存储模块 - 提供跨平台的安全凭证存储
-//! Linux: Kernel Keyring (with in-memory fallback)
+//! Linux: libsecret (D-Bus org.freedesktop.secrets)
 //! macOS: Keychain Services (stub)
 //! Windows: wincred API
 //! Android: AccountManager (stub)
@@ -7,7 +7,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const logger = @import("../logger.zig");
-const keyring = @import("keyring.zig");
+const base64 = @import("base64.zig");
+
+const libsecret = @cImport({
+    @cInclude("libsecret/secret.h");
+});
 
 pub const SecretError = error{
     NotFound,
@@ -17,462 +21,342 @@ pub const SecretError = error{
     OutOfMemory,
     NotImplemented,
     PlatformError,
+    Base64Error,
 };
 
-pub const SecretSchema = struct {
-    name: []const u8,
-    attributes: []const Attribute,
-};
-
-pub const Attribute = struct {
-    key: []const u8,
-    value: []const u8,
-};
+pub const SecretSchema = struct { name: []const u8, attributes: []const Attribute };
+pub const Attribute = struct { key: []const u8, value: []const u8 };
 
 pub const SecretService = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
+    allocator: std.mem.Allocator,
 
     pub const VTable = struct {
         store: *const fn (*anyopaque, []const u8, []const u8, []const u8) SecretError!void,
-        retrieve: *const fn (*anyopaque, []const u8, []const u8, *[*]u8, *usize) SecretError!void,
+        retrieve: *const fn (*anyopaque, std.mem.Allocator, []const u8, []const u8) SecretError![]u8,
         delete: *const fn (*anyopaque, []const u8, []const u8) SecretError!void,
-        free: *const fn (*anyopaque, [*]u8, usize) void,
     };
 
     pub fn store(self: *SecretService, service: []const u8, key: []const u8, value: []const u8) SecretError!void {
         return self.vtable.store(self.ptr, service, key, value);
     }
-
-    pub fn retrieve(self: *SecretService, service: []const u8, key: []const u8) SecretError![]u8 {
-        var ptr: [*]u8 = undefined;
-        var len: usize = undefined;
-        try self.vtable.retrieve(self.ptr, service, key, &ptr, &len);
-        defer self.vtable.free(self.ptr, ptr, len);
-        return ptr[0..len];
+    pub fn retrieve(self: *SecretService, allocator: std.mem.Allocator, service: []const u8, key: []const u8) SecretError![]u8 {
+        return self.vtable.retrieve(self.ptr, allocator, service, key);
     }
-
     pub fn delete(self: *SecretService, service: []const u8, key: []const u8) SecretError!void {
         return self.vtable.delete(self.ptr, service, key);
     }
-
     pub fn create(allocator: std.mem.Allocator) !SecretService {
         return switch (builtin.os.tag) {
-            .linux => try createLinux(allocator),
-            .macos => try createMac(allocator),
-            .windows => try createWindows(allocator),
+            .linux => createLinux(allocator),
+            .macos => createMac(allocator),
+            .windows => createWindows(allocator),
             else => return SecretError.NotImplemented,
         };
     }
 };
 
 const LINUX_SERVICE_NAME = "little_timer";
-const MASTER_KEY_ATTR = "master_key";
+const MASTER_KEY_KEY = "master_key";
 
-var master_key_instance: ?[]u8 = null;
-var linux_in_memory_store: std.StringHashMap([]u8) = undefined;
-var linux_in_memory_initialized = false;
-
+// Linux implementation - libsecret D-Bus
 fn createLinux(allocator: std.mem.Allocator) !SecretService {
-    @setRuntimeSafety(false);
     const impl = try allocator.create(LinuxSecretImpl);
     impl.* = .{ .allocator = allocator };
+
+    libsecret.g_type_init();
+
     return SecretService{
         .ptr = @ptrCast(impl),
-        .vtable = &.{
-            .store = storeLinux,
-            .retrieve = retrieveLinux,
-            .delete = deleteLinux,
-            .free = freeLinux,
-        },
+        .allocator = allocator,
+        .vtable = &.{ .store = storeLinux, .retrieve = retrieveLinux, .delete = deleteLinux },
     };
 }
 
-const LinuxSecretImpl = struct {
-    allocator: std.mem.Allocator,
-};
+const LinuxSecretImpl = struct { allocator: std.mem.Allocator };
 
-const SECRET_SCHEMA_NONE: u32 = 0;
-const SECRET_SCHEMA_ATTRIBUTE_STRING: u32 = 0;
+fn createLinuxSchema() ?*libsecret.SecretSchema {
+    const schema_attrs = libsecret.g_hash_table_new_full(
+        libsecret.g_str_hash,
+        libsecret.g_str_equal,
+        null,
+        null,
+    ) orelse return null;
+    defer _ = libsecret.g_hash_table_destroy(schema_attrs);
 
-fn getLinuxInMemoryStore() *std.StringHashMap([]u8) {
-    if (!linux_in_memory_initialized) {
-        linux_in_memory_store = std.StringHashMap([]u8).init(std.heap.page_allocator);
-        linux_in_memory_initialized = true;
-    }
-    return &linux_in_memory_store;
-}
+    _ = libsecret.g_hash_table_insert(schema_attrs, @constCast(@ptrCast(@as([*c]const u8, @ptrCast("service")))), @as(?*anyopaque, @ptrFromInt(@as(usize, @intCast(libsecret.SECRET_SCHEMA_ATTRIBUTE_STRING)))));
+    _ = libsecret.g_hash_table_insert(schema_attrs, @constCast(@ptrCast(@as([*c]const u8, @ptrCast("account")))), @as(?*anyopaque, @ptrFromInt(@as(usize, @intCast(libsecret.SECRET_SCHEMA_ATTRIBUTE_STRING)))));
 
-fn makeLinuxKey(service: []const u8, key: []const u8) ![]u8 {
-    return std.fmt.allocPrint(std.heap.page_allocator, "little_timer:{s}:{s}", .{ service, key });
+    return libsecret.secret_schema_newv("little_timer", libsecret.SECRET_SCHEMA_DONT_MATCH_NAME, schema_attrs);
 }
 
 fn storeLinux(ptr: *anyopaque, service: []const u8, key: []const u8, value: []const u8) SecretError!void {
-    _ = ptr;
-    @setRuntimeSafety(false);
+    const impl: *LinuxSecretImpl = @ptrCast(@alignCast(ptr));
+    var err: ?*libsecret.GError = null;
 
-    const map = getLinuxInMemoryStore();
-    const map_key = makeLinuxKey(service, key) catch return SecretError.OutOfMemory;
-    defer std.heap.page_allocator.free(map_key);
+    const schema = createLinuxSchema() orelse return error.InvalidValue;
+    defer _ = libsecret.secret_schema_unref(schema);
 
-    if (map.get(map_key)) |existing| {
-        std.heap.page_allocator.free(existing);
+    const attrs = libsecret.g_hash_table_new_full(
+        libsecret.g_str_hash,
+        libsecret.g_str_equal,
+        null,
+        null,
+    );
+    if (attrs == null) return error.InvalidValue;
+    defer _ = libsecret.g_hash_table_destroy(attrs);
+
+    const svc_key = libsecret.g_strdup(@ptrCast(service));
+    const acct_key = libsecret.g_strdup(@ptrCast(key));
+    if (svc_key == null or acct_key == null) return error.InvalidValue;
+    _ = libsecret.g_hash_table_insert(attrs, @constCast(@ptrCast(@as([*c]const u8, @ptrCast("service")))), svc_key);
+    _ = libsecret.g_hash_table_insert(attrs, @constCast(@ptrCast(@as([*c]const u8, @ptrCast("account")))), acct_key);
+
+    const label_bytes = std.mem.concat(impl.allocator, u8, &.{ service, key }) catch {
+        return error.InvalidValue;
+    };
+    defer impl.allocator.free(label_bytes);
+    const label_null = impl.allocator.alloc(u8, label_bytes.len + 1) catch { return error.InvalidValue; };
+    @memcpy(label_null.ptr, label_bytes);
+    label_null[label_bytes.len] = 0;
+    defer impl.allocator.free(label_null);
+
+    const encoded = base64.encode(impl.allocator, value) catch return error.OutOfMemory;
+    defer impl.allocator.free(encoded);
+    const value_copy = impl.allocator.alloc(u8, encoded.len + 1) catch { return error.InvalidValue; };
+    @memcpy(value_copy.ptr, encoded);
+    value_copy[encoded.len] = 0;
+    defer impl.allocator.free(value_copy);
+
+    const res = libsecret.secret_password_storev_sync(schema, attrs, null, @ptrCast(label_null.ptr), @ptrCast(value_copy.ptr), null, @ptrCast(&err));
+    if (res == 0) {
+        if (err) |e| libsecret.g_error_free(e);
+        return error.NoAccess;
     }
-
-    const value_copy = std.heap.page_allocator.dupe(u8, value) catch return SecretError.OutOfMemory;
-    map.put(map_key, value_copy) catch return SecretError.OutOfMemory;
+    if (err) |e| libsecret.g_error_free(e);
 }
 
-fn retrieveLinux(ptr: *anyopaque, service: []const u8, key: []const u8, out_ptr: *[*]u8, out_len: *usize) SecretError!void {
-    _ = ptr;
-    @setRuntimeSafety(false);
+fn retrieveLinux(ptr: *anyopaque, allocator: std.mem.Allocator, service: []const u8, key: []const u8) SecretError![]u8 {
+    const impl: *LinuxSecretImpl = @ptrCast(@alignCast(ptr));
+    _ = impl;
+    var err: ?*libsecret.GError = null;
 
-    const map = getLinuxInMemoryStore();
-    const map_key = makeLinuxKey(service, key) catch return SecretError.OutOfMemory;
-    defer std.heap.page_allocator.free(map_key);
+    const schema = createLinuxSchema() orelse return error.InvalidValue;
+    defer _ = libsecret.secret_schema_unref(schema);
 
-    const value_copy = map.get(map_key) orelse return SecretError.NotFound;
-    const copy = std.heap.page_allocator.dupe(u8, value_copy) catch return SecretError.OutOfMemory;
-    out_ptr.* = copy.ptr;
-    out_len.* = copy.len;
+    const attrs = libsecret.g_hash_table_new_full(
+        libsecret.g_str_hash,
+        libsecret.g_str_equal,
+        null,
+        null,
+    );
+    if (attrs == null) return error.InvalidValue;
+    defer _ = libsecret.g_hash_table_destroy(attrs);
+
+    const svc_key = libsecret.g_strdup(@ptrCast(service));
+    const acct_key = libsecret.g_strdup(@ptrCast(key));
+    if (svc_key == null or acct_key == null) return error.InvalidValue;
+    _ = libsecret.g_hash_table_insert(attrs, @constCast(@ptrCast(@as([*c]const u8, @ptrCast("service")))), svc_key);
+    _ = libsecret.g_hash_table_insert(attrs, @constCast(@ptrCast(@as([*c]const u8, @ptrCast("account")))), acct_key);
+
+    const password = libsecret.secret_password_lookupv_sync(schema, attrs, null, @ptrCast(&err));
+    if (err != null) {
+        if (err) |e| libsecret.g_error_free(e);
+        return error.NotFound;
+    }
+    if (password == null) {
+        return error.NotFound;
+    }
+    defer libsecret.secret_password_free(password);
+
+    const len = std.mem.len(password);
+    const raw = password[0..len];
+
+    if (base64.isBase64(raw)) {
+        const decoded = base64.decode(allocator, raw) catch return error.Base64Error;
+        return decoded;
+    } else {
+        return allocator.dupe(u8, raw) catch return error.OutOfMemory;
+    }
 }
 
 fn deleteLinux(ptr: *anyopaque, service: []const u8, key: []const u8) SecretError!void {
-    _ = ptr;
-    @setRuntimeSafety(false);
+    const impl: *LinuxSecretImpl = @ptrCast(@alignCast(ptr));
+    _ = impl;
+    var err: ?*libsecret.GError = null;
 
-    const map = getLinuxInMemoryStore();
-    const map_key = makeLinuxKey(service, key);
-    defer std.heap.page_allocator.free(map_key);
+    const schema = createLinuxSchema() orelse return error.InvalidValue;
+    defer _ = libsecret.secret_schema_unref(schema);
 
-    if (map.fetchRemove(map_key)) |entry| {
-        std.heap.page_allocator.free(entry.value);
+    const attrs = libsecret.g_hash_table_new_full(
+        libsecret.g_str_hash,
+        libsecret.g_str_equal,
+        null,
+        null,
+    );
+    if (attrs == null) return error.InvalidValue;
+    defer _ = libsecret.g_hash_table_destroy(attrs);
+
+    const svc_key = libsecret.g_strdup(@ptrCast(service));
+    const acct_key = libsecret.g_strdup(@ptrCast(key));
+    if (svc_key == null or acct_key == null) return error.InvalidValue;
+    _ = libsecret.g_hash_table_insert(attrs, @constCast(@ptrCast(@as([*c]const u8, @ptrCast("service")))), svc_key);
+    _ = libsecret.g_hash_table_insert(attrs, @constCast(@ptrCast(@as([*c]const u8, @ptrCast("account")))), acct_key);
+
+    const res = libsecret.secret_password_clearv_sync(schema, attrs, null, @ptrCast(&err));
+    if (res == 0) {
+        if (err) |e| libsecret.g_error_free(e);
+        return error.NoAccess;
     }
+    if (err) |e| libsecret.g_error_free(e);
 }
 
-fn freeLinux(ptr: *anyopaque, buffer: [*]u8, len: usize) void {
-    _ = ptr;
-    @setRuntimeSafety(false);
-    if (len > 0) {
-        std.heap.page_allocator.free(buffer[0..len]);
-    }
-}
-
+// macOS
 fn createMac(allocator: std.mem.Allocator) !SecretService {
-    @setRuntimeSafety(false);
     const impl = try allocator.create(MacSecretImpl);
     impl.* = .{ .allocator = allocator };
     return SecretService{
         .ptr = @ptrCast(impl),
-        .vtable = &.{
-            .store = storeMac,
-            .retrieve = retrieveMac,
-            .delete = deleteMac,
-            .free = freeMac,
-        },
+        .allocator = allocator,
+        .vtable = &.{ .store = storeMac, .retrieve = retrieveMac, .delete = deleteMac },
     };
 }
 
-const MacSecretImpl = struct {
-    allocator: std.mem.Allocator,
-};
+const MacSecretImpl = struct { allocator: std.mem.Allocator };
 
-fn storeMac(ptr: *anyopaque, service: []const u8, key: []const u8, value: []const u8) SecretError!void {
-    _ = ptr;
-    _ = service;
-    _ = key;
-    _ = value;
-    @setRuntimeSafety(false);
-    return SecretError.NotImplemented;
-}
+fn storeMac(_: *anyopaque, _: []const u8, _: []const u8, _: []const u8) SecretError!void { return SecretError.NotImplemented; }
+fn retrieveMac(_: *anyopaque, _: std.mem.Allocator, _: []const u8, _: []const u8) SecretError![]u8 { return SecretError.NotImplemented; }
+fn deleteMac(_: *anyopaque, _: []const u8, _: []const u8) SecretError!void { return SecretError.NotImplemented; }
 
-fn retrieveMac(ptr: *anyopaque, service: []const u8, key: []const u8, out_ptr: *[*]u8, out_len: *usize) SecretError!void {
-    _ = ptr;
-    _ = service;
-    _ = key;
-    _ = out_ptr;
-    _ = out_len;
-    @setRuntimeSafety(false);
-    return SecretError.NotImplemented;
-}
-
-fn deleteMac(ptr: *anyopaque, service: []const u8, key: []const u8) SecretError!void {
-    _ = ptr;
-    _ = service;
-    _ = key;
-    @setRuntimeSafety(false);
-    return SecretError.NotImplemented;
-}
-
-fn freeMac(ptr: *anyopaque, buffer: [*]u8, len: usize) void {
-    _ = ptr;
-    _ = buffer;
-    _ = len;
-    @setRuntimeSafety(false);
-}
-
+// Windows
 fn createWindows(allocator: std.mem.Allocator) !SecretService {
-    @setRuntimeSafety(false);
     const impl = try allocator.create(WindowsSecretImpl);
     impl.* = .{ .allocator = allocator };
     return SecretService{
         .ptr = @ptrCast(impl),
-        .vtable = &.{
-            .store = storeWindows,
-            .retrieve = retrieveWindows,
-            .delete = deleteWindows,
-            .free = freeWindows,
-        },
+        .allocator = allocator,
+        .vtable = &.{ .store = storeWindows, .retrieve = retrieveWindows, .delete = deleteWindows },
     };
 }
 
-const WindowsSecretImpl = struct {
-    allocator: std.mem.Allocator,
-};
+const WindowsSecretImpl = struct { allocator: std.mem.Allocator };
 
 const windows = struct {
     const DWORD = u32;
     const WCHAR = u16;
     const LPWSTR = ?[*:0]WCHAR;
     const BOOL = c_int;
-    const FILETIME = extern struct {
-        dwLowDateTime: DWORD,
-        dwHighDateTime: DWORD,
-    };
+    const FILETIME = extern struct { dwLowDateTime: DWORD, dwHighDateTime: DWORD };
     const CREDENTIALW = extern struct {
-        Flags: DWORD,
-        Type: DWORD,
-        TargetName: LPWSTR,
-        Comment: LPWSTR,
-        LastWritten: FILETIME,
-        CredentialBlobSize: DWORD,
-        CredentialBlob: ?[*]u8,
-        Persist: DWORD,
-        AttributeCount: DWORD,
-        Attributes: ?*anyopaque,
-        TargetAlias: LPWSTR,
-        UserName: LPWSTR,
+        Flags: DWORD, Type: DWORD, TargetName: LPWSTR, Comment: LPWSTR, LastWritten: FILETIME,
+        CredentialBlobSize: DWORD, CredentialBlob: ?[*]u8, Persist: DWORD, AttributeCount: DWORD,
+        Attributes: ?*anyopaque, TargetAlias: LPWSTR, UserName: LPWSTR,
     };
     const CRED_PERSIST_LOCAL_MACHINE: DWORD = 2;
     const CRED_TYPE_GENERIC: DWORD = 1;
-
-    extern "advapi32" fn CredWriteW(Credential: *const CREDENTIALW, Flags: DWORD) callconv(.Stdcall) BOOL;
-    extern "advapi32" fn CredReadW(TargetName: LPWSTR, Type: DWORD, Flags: DWORD, Credential: *?*CREDENTIALW) callconv(.Stdcall) BOOL;
-    extern "advapi32" fn CredDeleteW(TargetName: LPWSTR, Type: DWORD, Flags: DWORD) callconv(.Stdcall) BOOL;
-    extern "advapi32" fn CredFree(BUFFER: *anyopaque) callconv(.Stdcall) void;
+    extern "advapi32" fn CredWriteW(*const CREDENTIALW, DWORD) callconv(.Stdcall) BOOL;
+    extern "advapi32" fn CredReadW(LPWSTR, DWORD, DWORD, *?*CREDENTIALW) callconv(.Stdcall) BOOL;
+    extern "advapi32" fn CredDeleteW(LPWSTR, DWORD, DWORD) callconv(.Stdcall) BOOL;
+    extern "advapi32" fn CredFree(*anyopaque) callconv(.Stdcall) void;
 };
 
-fn storeWindows(ptr: *anyopaque, service: []const u8, key: []const u8, value: []const u8) SecretError {
-    if (builtin.os.tag != .windows) {
-        return SecretError.NotImplemented;
-    }
-
+fn storeWindows(ptr: *anyopaque, service: []const u8, key: []const u8, value: []const u8) SecretError!void {
+    if (builtin.os.tag != .windows) return SecretError.NotImplemented;
     const impl: *WindowsSecretImpl = @ptrCast(@alignCast(ptr));
-    @setRuntimeSafety(false);
-
-    const target = std.fmt.allocPrintZ(impl.allocator, "little_timer:{s}:{s}", .{ service, key }) catch return SecretError.OutOfMemory;
+    const target = std.fmt.allocPrintZ(impl.allocator, "little_timer:{s}:{s}", .{service, key}) catch return SecretError.OutOfMemory;
     defer impl.allocator.free(target);
+    const utf16 = std.unicode.utf8ToUtf16LeAllocZ(impl.allocator, target) catch return SecretError.OutOfMemory;
+    defer impl.allocator.free(utf16);
 
-    const target_utf16 = std.unicode.utf8ToUtf16LeAllocZ(impl.allocator, target) catch return SecretError.OutOfMemory;
-    defer impl.allocator.free(target_utf16);
+    const encoded = base64.encode(impl.allocator, value) catch return SecretError.OutOfMemory;
+    defer impl.allocator.free(encoded);
+    const utf16_value = std.unicode.utf8ToUtf16LeAllocZ(impl.allocator, encoded) catch return SecretError.OutOfMemory;
+    defer impl.allocator.free(utf16_value);
 
-    const credential = windows.CREDENTIALW{
-        .TargetName = target_utf16.ptr,
+    const cred = windows.CREDENTIALW{
+        .TargetName = utf16.ptr,
         .Type = windows.CRED_TYPE_GENERIC,
-        .CredentialBlobSize = @intCast(value.len),
-        .CredentialBlob = @constCast(value.ptr),
+        .CredentialBlobSize = @intCast(utf16_value.len * 2),
+        .CredentialBlob = @ptrCast(utf16_value.ptr),
         .Persist = windows.CRED_PERSIST_LOCAL_MACHINE,
     };
-
-    if (windows.CredWriteW(&credential, 0) == 0) {
-        return SecretError.PlatformError;
-    }
-
-    return;
+    if (windows.CredWriteW(&cred, 0) == 0) return SecretError.PlatformError;
 }
 
-fn retrieveWindows(ptr: *anyopaque, service: []const u8, key: []const u8, out_ptr: *[*]u8, out_len: *usize) SecretError {
-    if (builtin.os.tag != .windows) {
-        return SecretError.NotImplemented;
-    }
-
+fn retrieveWindows(ptr: *anyopaque, allocator: std.mem.Allocator, service: []const u8, key: []const u8) SecretError![]u8 {
+    if (builtin.os.tag != .windows) return SecretError.NotImplemented;
     const impl: *WindowsSecretImpl = @ptrCast(@alignCast(ptr));
-    @setRuntimeSafety(false);
-
-    const target = std.fmt.allocPrintZ(impl.allocator, "little_timer:{s}:{s}", .{ service, key }) catch return SecretError.OutOfMemory;
-    defer impl.allocator.free(target);
-
-    const target_utf16 = std.unicode.utf8ToUtf16LeAllocZ(impl.allocator, target) catch return SecretError.OutOfMemory;
-    defer impl.allocator.free(target_utf16);
-
+    _ = impl;
+    const target = std.fmt.allocPrintZ(allocator, "little_timer:{s}:{s}", .{service, key}) catch return SecretError.OutOfMemory;
+    defer allocator.free(target);
+    const utf16 = std.unicode.utf8ToUtf16LeAllocZ(allocator, target) catch return SecretError.OutOfMemory;
+    defer allocator.free(utf16);
     var cred: ?*windows.CREDENTIALW = null;
-    if (windows.CredReadW(target_utf16.ptr, windows.CRED_TYPE_GENERIC, 0, &cred) == 0) {
-        return SecretError.NotFound;
-    }
-    defer {
-        if (cred) |c| {
-            windows.CredFree(c);
-        }
-    }
-
+    if (windows.CredReadW(utf16.ptr, windows.CRED_TYPE_GENERIC, 0, &cred) == 0) return SecretError.NotFound;
+    defer if (cred) |c| windows.CredFree(c);
     const c = cred.?;
-    if (c.CredentialBlobSize == 0 or c.CredentialBlob == null) {
-        return SecretError.NotFound;
-    }
-
-    const copy = impl.allocator.dupe(u8, c.CredentialBlob.?[0..c.CredentialBlobSize]) catch return SecretError.OutOfMemory;
-    out_ptr.* = copy.ptr;
-    out_len.* = copy.len;
-
-    return;
+    if (c.CredentialBlobSize == 0 or c.CredentialBlob == null) return SecretError.NotFound;
+    const blob_len = c.CredentialBlobSize / 2;
+    const utf16_slice: [:0]u16 = @ptrCast(@alignCast(c.CredentialBlob.?[0 .. blob_len * 2]));
+    const encoded = std.unicode.utf16LeToUtf8Alloc(allocator, utf16_slice) catch return SecretError.InvalidValue;
+    const decoded = base64.decode(allocator, encoded) catch return error.Base64Error;
+    allocator.free(encoded);
+    return decoded;
 }
 
-fn deleteWindows(ptr: *anyopaque, service: []const u8, key: []const u8) SecretError {
-    if (builtin.os.tag != .windows) {
-        return SecretError.NotImplemented;
-    }
-
+fn deleteWindows(ptr: *anyopaque, service: []const u8, key: []const u8) SecretError!void {
+    if (builtin.os.tag != .windows) return SecretError.NotImplemented;
     const impl: *WindowsSecretImpl = @ptrCast(@alignCast(ptr));
-    @setRuntimeSafety(false);
-
-    const target = std.fmt.allocPrintZ(impl.allocator, "little_timer:{s}:{s}", .{ service, key }) catch return SecretError.OutOfMemory;
+    const target = std.fmt.allocPrintZ(impl.allocator, "little_timer:{s}:{s}", .{service, key}) catch return SecretError.OutOfMemory;
     defer impl.allocator.free(target);
-
-    const target_utf16 = std.unicode.utf8ToUtf16LeAllocZ(impl.allocator, target) catch return SecretError.OutOfMemory;
-    defer impl.allocator.free(target_utf16);
-
-    if (windows.CredDeleteW(target_utf16.ptr, windows.CRED_TYPE_GENERIC, 0) == 0) {
-        return SecretError.NotFound;
-    }
-
-    return;
+    const utf16 = std.unicode.utf8ToUtf16LeAllocZ(impl.allocator, target) catch return SecretError.OutOfMemory;
+    defer impl.allocator.free(utf16);
+    if (windows.CredDeleteW(utf16.ptr, windows.CRED_TYPE_GENERIC, 0) == 0) return SecretError.NotFound;
 }
 
-fn freeWindows(ptr: *anyopaque, buffer: [*]u8, len: usize) void {
-    _ = ptr;
-    @setRuntimeSafety(false);
-    if (len > 0 and buffer != null) {
-        std.heap.page_allocator.free(buffer[0..len]);
-    }
-}
-
+// Android
 fn createAndroid(allocator: std.mem.Allocator) !SecretService {
-    @setRuntimeSafety(false);
     const impl = try allocator.create(AndroidSecretImpl);
     impl.* = .{ .allocator = allocator };
     return SecretService{
         .ptr = @ptrCast(impl),
-        .vtable = &.{
-            .store = storeAndroid,
-            .retrieve = retrieveAndroid,
-            .delete = deleteAndroid,
-            .free = freeAndroid,
-        },
+        .allocator = allocator,
+        .vtable = &.{ .store = storeAndroid, .retrieve = retrieveAndroid, .delete = deleteAndroid },
     };
 }
 
-const AndroidSecretImpl = struct {
-    allocator: std.mem.Allocator,
-};
+const AndroidSecretImpl = struct { allocator: std.mem.Allocator };
 
-fn storeAndroid(ptr: *anyopaque, service: []const u8, key: []const u8, value: []const u8) SecretError {
-    _ = ptr;
-    _ = service;
-    _ = key;
-    _ = value;
-    @setRuntimeSafety(false);
-    return SecretError.NotImplemented;
-}
+fn storeAndroid(_: *anyopaque, _: []const u8, _: []const u8, _: []const u8) SecretError!void { return SecretError.NotImplemented; }
+fn retrieveAndroid(_: *anyopaque, _: std.mem.Allocator, _: []const u8, _: []const u8) SecretError![]u8 { return SecretError.NotImplemented; }
+fn deleteAndroid(_: *anyopaque, _: []const u8, _: []const u8) SecretError!void { return SecretError.NotImplemented; }
 
-fn retrieveAndroid(ptr: *anyopaque, service: []const u8, key: []const u8, out_ptr: *[*]u8, out_len: *usize) SecretError {
-    _ = ptr;
-    _ = service;
-    _ = key;
-    _ = out_ptr;
-    _ = out_len;
-    @setRuntimeSafety(false);
-    return SecretError.NotImplemented;
-}
+// Master key functions
+var global_service: SecretService = undefined;
+var global_service_init = false;
 
-fn deleteAndroid(ptr: *anyopaque, service: []const u8, key: []const u8) SecretError {
-    _ = ptr;
-    _ = service;
-    _ = key;
-    @setRuntimeSafety(false);
-    return SecretError.NotImplemented;
-}
-
-fn freeAndroid(ptr: *anyopaque, buffer: [*]u8, len: usize) void {
-    _ = ptr;
-    _ = buffer;
-    _ = len;
-    @setRuntimeSafety(false);
+fn getGlobalSecretService() !*SecretService {
+    if (global_service_init) return &global_service;
+    global_service = try SecretService.create(std.heap.page_allocator);
+    global_service_init = true;
+    return &global_service;
 }
 
 pub fn storeMasterKey(key: []const u8) SecretError!void {
-    const key_desc = "little_timer:master_key";
-    logger.global_logger.info("storeMasterKey: key_len={d}, desc={s}", .{key.len, key_desc});
-
-    const alloc = std.heap.page_allocator;
-
-    _ = keyring.joinOrCreateSessionKeyring() catch |err| switch (err) {
-        error.KeyringNotFound, error.KeyringCreateFailed => {
-            logger.global_logger.warn("storeMasterKey: join session keyring failed: {any}", .{err});
-        },
-        else => {
-            logger.global_logger.warn("storeMasterKey: join session keyring failed: {any}", .{err});
-        },
-    };
-
-    keyring.storeKeyInKeyring(key_desc, key) catch |err| {
-        logger.global_logger.warn("storeMasterKey: store key failed, continuing with in-memory cache: {any}", .{err});
-    };
-
-    if (master_key_instance) |existing| {
-        alloc.free(existing);
-        master_key_instance = null;
-    }
-    const cached = alloc.dupe(u8, key) catch return SecretError.OutOfMemory;
-    master_key_instance = cached;
-    logger.global_logger.info("storeMasterKey: cached key in memory, len={d}", .{cached.len});
+    logger.global_logger.info("storeMasterKey: key_len={d}", .{key.len});
+    const svc = try getGlobalSecretService();
+    try svc.store(LINUX_SERVICE_NAME, MASTER_KEY_KEY, key);
+    logger.global_logger.info("storeMasterKey: stored", .{});
 }
 
-pub fn retrieveMasterKey() SecretError![]u8 {
-    if (master_key_instance) |key| {
-        return key;
-    }
-
-    const allocator = std.heap.page_allocator;
-    const key_desc = "little_timer:master_key";
-
-    _ = keyring.joinOrCreateSessionKeyring() catch |err| switch (err) {
-        error.KeyringNotFound, error.KeyringCreateFailed => return SecretError.NotFound,
-        else => return SecretError.PlatformError,
-    };
-
-    const key_data = keyring.retrieveKeyFromKeyring(key_desc, allocator) catch |err| switch (err) {
-        error.KeyringNotFound => {
-            logger.global_logger.warn("retrieveMasterKey: key not found: {any}", .{err});
-            return SecretError.NotFound;
-        },
-        error.KeyringRetrieveFailed => {
-            logger.global_logger.warn("retrieveMasterKey: key read failed, regenerate: {any}", .{err});
-            return SecretError.NotFound;
-        },
-        else => {
-            logger.global_logger.err("retrieveMasterKey: key retrieval failed: {any}", .{err});
-            return SecretError.PlatformError;
-        },
-    };
-    master_key_instance = key_data;
-    return key_data;
+pub fn retrieveMasterKey(allocator: std.mem.Allocator) SecretError![]u8 {
+    const svc = try getGlobalSecretService();
+    return try svc.retrieve(allocator, LINUX_SERVICE_NAME, MASTER_KEY_KEY);
 }
 
 pub fn deleteMasterKey() void {
-    const allocator = std.heap.page_allocator;
-
-    if (master_key_instance) |key| {
-        allocator.free(key);
-        master_key_instance = null;
+    if (global_service_init) {
+        _ = global_service.delete(LINUX_SERVICE_NAME, MASTER_KEY_KEY) catch {};
     }
 }

@@ -53,6 +53,8 @@ comptime {
         _ = @import("test/test_settings_validator.zig");
         _ = @import("test/test_boundary_conditions.zig");
         _ = @import("test/test_error_recovery.zig");
+        _ = @import("test/test_secret_storage.zig");
+        _ = @import("test/test_crypto.zig");
     }
 }
 

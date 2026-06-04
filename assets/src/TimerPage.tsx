@@ -16,7 +16,7 @@ import { TimerConfig as TimerConfigComponent } from "./components/TimerConfig";
 import { StarIconComponent } from "./utils/icons";
 import { useSSE } from "./hooks/useSSE";
 import { useTimer } from "./hooks/useTimer";
-import type { TimerConfig, TimerMode } from "./hooks/useTimer";
+import type { TimerMode } from "./hooks/useTimer";
 
 interface TimerPageProps {
     onHabitsClick?: () => void;
@@ -59,7 +59,6 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
         isResting,
         currentRound,
         elapsedSeconds,
-        remainingSeconds,
         displayTime,
         start,
         pause,
@@ -125,9 +124,11 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
         if (timerConfig.mode === "stopwatch" && habitDetail && elapsedSeconds > 0 && !sessionRecordedRef.current) {
             const totalTodaySeconds = habitDetail.today_seconds + elapsedSeconds;
             if (totalTodaySeconds >= habitDetail.goal_seconds) {
-                setIsFinished(true);
-                setIsRunning(false);
-                void recordSession();
+                sessionRecordedRef.current = true;
+                void finish().then(() => {
+                    void reset();
+                    void recordSession();
+                });
             }
         }
     }, [elapsedSeconds, habitDetail, timerConfig.mode]);
@@ -187,7 +188,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             await apiClientRef.current.createSession(habitId, totalSeconds, 1, today);
             logSuccess("✓ Session 已自动记录");
             void loadHabitDetail(habitId);
-        } catch (e: any) {
+        } catch (e) {
             logError(`记录 session 失败: ${e}`);
         }
 
@@ -257,12 +258,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
     const handleHabitSelect = async (habitId: number) => {
         audioEngine.stopTick();
-        setIsRunning(false);
-        setIsPaused(false);
-        setIsFinished(false);
-        setIsResting(false);
-        setElapsedSeconds(0);
-        setCurrentRound(0);
+        void reset();
         sessionRecordedRef.current = false;
 
         setSelectedHabitId(habitId);

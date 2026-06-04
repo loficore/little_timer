@@ -8,10 +8,17 @@ import { StopwatchSettings } from "./components/StopwatchSettings";
 import { BackupTab } from "./components/settings/BackupTab";
 import { t, setLanguage } from "./utils/i18n";
 import { getAPIClient } from "./utils/apiClientSingleton";
+import type { BackupConfig } from "./utils/apiClient";
 import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
 import { ClockIconComponent, CheckIconComponent, ResetIcon } from "./utils/icons";
 import { loadAudioPreferences, normalizeAudioPreferences, saveAudioPreferences } from "./utils/audio";
 import { STORAGE_KEYS } from "./utils/constants";
+
+interface SettingsPageProps {
+  onBackClick?: () => void;
+  wallpaper?: string;
+  onWallpaperChange?: (wallpaper: string) => void;
+}
 
 const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "basic", labelKey: "settings.tabs.basic" },
@@ -213,7 +220,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
 
   useEffect(() => {
     const startAt = performance.now();
-    const themeMode = config.basic.theme_mode || "dark";
+    const themeMode: string = config.basic.theme_mode != null ? String(config.basic.theme_mode) : "dark";
     applyTheme(themeMode);
     localStorage.setItem(THEME_MODE_STORAGE_KEY, themeMode);
     logPerf("Settings.theme.applied", {
@@ -224,26 +231,29 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
 
   useEffect(() => {
     const startAt = performance.now();
-    applyLightStyle(config.basic.light_style || "paper");
+    const lightStyle: string = config.basic.light_style != null ? String(config.basic.light_style) : "paper";
+    applyLightStyle(lightStyle);
     logPerf("Settings.lightStyle.applied", {
-      lightStyle: config.basic.light_style || "paper",
+      lightStyle,
       durationMs: Math.round(performance.now() - startAt),
     });
   }, [config.basic.light_style]);
 
   useEffect(() => {
     const startAt = performance.now();
-    setLanguage(config.basic.language).catch((err) =>
-      console.error("加载语言失败", err),
+    const lang = String(config.basic.language ?? "ZH");
+    setLanguage(lang).catch((err: unknown) =>
+      console.error("加载语言失败", String(err)),
     );
     logPerf("Settings.language.changed", {
-      language: config.basic.language,
+      language: lang,
       scheduleMs: Math.round(performance.now() - startAt),
     });
   }, [config.basic.language]);
 
   useEffect(() => {
-    onWallpaperChange?.(config.basic.wallpaper || "");
+    const wallpaper = String(config.basic.wallpaper ?? "");
+    onWallpaperChange?.(wallpaper);
   }, [config.basic.wallpaper, onWallpaperChange]);
 
   const handleSave = () => {
@@ -260,18 +270,18 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     saveAudioPreferences(audioPreferences);
     
     // 保存布局密度到localStorage
-    localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, config.basic.layout_density || "normal");
-    localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, config.basic.time_display_style || "classic");
-    localStorage.setItem(LIGHT_STYLE_STORAGE_KEY, config.basic.light_style || "paper");
+    localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, String(config.basic.layout_density ?? "normal"));
+    localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, String(config.basic.time_display_style ?? "classic"));
+    localStorage.setItem(LIGHT_STYLE_STORAGE_KEY, String(config.basic.light_style ?? "paper"));
 
     const {
-      sound_enabled,
-      sound_tick,
-      sound_finish,
-      sound_volume,
-      layout_density,
-      time_display_style,
-      light_style,
+      sound_enabled: _sound_enabled,
+      sound_tick: _sound_tick,
+      sound_finish: _sound_finish,
+      sound_volume: _sound_volume,
+      layout_density: _layout_density,
+      time_display_style: _time_display_style,
+      light_style: _light_style,
       ...serverBasic
     } =
       config.basic;
@@ -281,6 +291,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     };
 
     if (apiClientRef.current) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       void apiClientRef.current.updateSettings(serverConfig)
         .then(() => {
           setSaveMessage(t("common.save_success"));
@@ -301,9 +312,9 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           setIsSaving(false);
         });
 
-      const backupConfig: any = {
+      const backupConfig: BackupConfig = {
         enabled: config.backup_enabled ?? false,
-        target_type: config.backup_target_type ?? 'local',
+        target_type: (config.backup_target_type ?? 'local') as 'local' | 'webdav' | 's3',
         local_path: config.backup_local_path ?? '',
         webdav_url: config.backup_webdav_url ?? '',
         webdav_username: config.backup_webdav_username ?? '',
@@ -316,8 +327,8 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         s3_path_prefix: config.backup_s3_path_prefix ?? '',
       };
       void apiClientRef.current.updateBackupConfig(backupConfig)
-        .catch((err) => {
-          console.error('Failed to save backup config:', err);
+        .catch((err: unknown) => {
+          console.error('Failed to save backup config:', String(err));
         });
     }
   };
@@ -326,6 +337,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     if (confirm(t("common.reset_confirm"))) {
       const startAt = performance.now();
       setConfig(DEFAULT_CONFIG);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       saveAudioPreferences(DEFAULT_AUDIO_PREFERENCES);
       localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, "normal");
       localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, "classic");
@@ -475,7 +487,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           {activeTab === "backup" && (
             <BackupTab
               config={config}
-              onChange={async (newConfig) => {
+              onChange={(newConfig) => {
                 setConfig(newConfig);
               }}
             />

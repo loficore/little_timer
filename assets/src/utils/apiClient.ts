@@ -34,6 +34,7 @@ export interface Settings {
  */
 export class APIClient {
     public baseUrl: string;
+    private authToken: string | null = null;
 
     /**
      * 构造函数，接受 API 基础 URL
@@ -41,6 +42,35 @@ export class APIClient {
      */
     constructor(baseUrl: string) {
         this.baseUrl = baseUrl;
+    }
+
+    /**
+     * 设置认证 Token（用于 Authorization header）
+     * @param {string | null} token 认证 Token，设为 null 可清除
+     */
+    setAuthToken(token: string | null): void {
+        this.authToken = token;
+    }
+
+    /**
+     * 获取当前认证 Token
+     * @returns {string | null} 当前 Token
+     */
+    getAuthToken(): string | null {
+        return this.authToken;
+    }
+
+    /**
+     * 构建包含认证的请求头
+     * @param {Record<string, string>} additionalHeaders 额外的请求头
+     * @returns {Record<string, string>} 合并后的请求头
+     */
+    private buildHeaders(additionalHeaders: Record<string, string> = {}): Record<string, string> {
+        const headers: Record<string, string> = { ...additionalHeaders };
+        if (this.authToken) {
+            headers['Authorization'] = `Bearer ${this.authToken}`;
+        }
+        return headers;
     }
 
     /**
@@ -440,13 +470,21 @@ export class APIClient {
 
     // === 备份 API ===
 
+    /**
+     * 创建数据库备份
+     * @returns Promise resolving to result object with success status, backup_path, or error message
+     */
     async createBackup(): Promise<{ success: boolean; backup_path?: string; error?: string }> {
         const response = await fetch(`${this.baseUrl}/api/backup/create`, { method: 'POST' });
         const data = await response.json();
         return data;
     }
 
-    async listBackups(): Promise<{ success: boolean; backups: Array<{ name: string; timestamp: number; size_bytes: number }>; error?: string }> {
+    /**
+     * 获取备份列表
+     * @returns Promise resolving to array of backup info (name, timestamp, size_bytes)
+     */
+    async listBackups(): Promise<{ success: boolean; backups: { name: string; timestamp: number; size_bytes: number }[]; error?: string }> {
         const response = await fetch(`${this.baseUrl}/api/backup/list`);
         if (!response.ok) {
             throw new Error(`Error listing backups: ${response.statusText}`);
@@ -454,6 +492,11 @@ export class APIClient {
         return await response.json();
     }
 
+    /**
+     * 从备份恢复数据库
+     * @param name - Backup filename to restore from
+     * @returns Promise resolving to success status or error message
+     */
     async restoreBackup(name: string): Promise<{ success: boolean; error?: string }> {
         const response = await fetch(`${this.baseUrl}/api/backup/restore`, {
             method: 'POST',
@@ -463,6 +506,11 @@ export class APIClient {
         return await response.json();
     }
 
+    /**
+     * 删除指定备份
+     * @param name - Backup filename to delete
+     * @returns Promise resolving to success status or error message
+     */
     async deleteBackup(name: string): Promise<{ success: boolean; error?: string }> {
         const response = await fetch(`${this.baseUrl}/api/backup/${encodeURIComponent(name)}`, {
             method: 'DELETE'
@@ -470,11 +518,19 @@ export class APIClient {
         return await response.json();
     }
 
+    /**
+     * 验证备份目标配置是否有效
+     * @returns Promise resolving to success status or error message
+     */
     async verifyBackup(): Promise<{ success: boolean; error?: string }> {
         const response = await fetch(`${this.baseUrl}/api/backup/verify`, { method: 'POST' });
         return await response.json();
     }
 
+    /**
+     * 获取当前备份配置
+     * @returns Promise resolving to BackupConfig object
+     */
     async getBackupConfig(): Promise<BackupConfig> {
         const response = await fetch(`${this.baseUrl}/api/backup/config`);
         if (!response.ok) {
@@ -483,6 +539,11 @@ export class APIClient {
         return await response.json();
     }
 
+    /**
+     * 更新备份配置
+     * @param config - BackupConfig object with updated settings
+     * @returns Promise resolving to success status or error message
+     */
     async updateBackupConfig(config: BackupConfig): Promise<{ success: boolean; error?: string }> {
         const response = await fetch(`${this.baseUrl}/api/backup/config`, {
             method: 'POST',

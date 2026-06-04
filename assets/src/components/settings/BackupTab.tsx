@@ -25,7 +25,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [backupConfig, setBackupConfig] = useState<BackupConfig>({
     enabled: config?.backup_enabled ?? false,
-    target_type: config?.backup_target ?? 'local',
+    target_type: config?.backup_target_type ?? 'local',
     local_path: config?.backup_local_path ?? '',
     webdav_url: config?.backup_webdav_url ?? '',
     webdav_username: config?.backup_webdav_username ?? '',
@@ -40,9 +40,45 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
     max_backups: config?.backup_max_backups ?? 7,
   });
 
+  useEffect(() => {
+    setBackupConfig({
+      enabled: config?.backup_enabled ?? false,
+      target_type: config?.backup_target_type ?? 'local',
+      local_path: config?.backup_local_path ?? '',
+      webdav_url: config?.backup_webdav_url ?? '',
+      webdav_username: config?.backup_webdav_username ?? '',
+      webdav_password: config?.backup_webdav_password ?? '',
+      s3_endpoint: config?.backup_s3_endpoint ?? '',
+      s3_bucket: config?.backup_s3_bucket ?? '',
+      s3_region: config?.backup_s3_region ?? '',
+      s3_access_key: config?.backup_s3_access_key ?? '',
+      s3_secret_key: config?.backup_s3_secret_key ?? '',
+      s3_path_prefix: config?.backup_s3_path_prefix ?? '',
+      auto_interval_hours: config?.backup_auto_interval_hours ?? 24,
+      max_backups: config?.backup_max_backups ?? 7,
+    });
+  }, [config]);
+
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 4000);
+  };
+
+  const getBackupErrorText = (code: string | undefined): string | null => {
+    if (!code) return null;
+    const map: Record<string, string> = {
+      'FileNotFound': '',
+      'BackupFailed': '',
+      'NetworkError': '网络连接失败，请检查网络后重试',
+      'ConnectionFailed': '连接失败，请检查服务器地址',
+      'AuthenticationFailed': '认证失败，请检查用户名和密码',
+      'PermissionDenied': '权限不足，请检查访问权限',
+    };
+    if (code in map) {
+      const text = map[code];
+      return text || null;
+    }
+    return code;
   };
 
   const loadBackups = async () => {
@@ -51,10 +87,14 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       const result = await apiClient.listBackups();
       if (result.success) {
         setBackups(result.backups);
-      } else {
-        showMessage('error', result.error || 'Failed to load backups');
+      } else if (result.error) {
+        const friendly = getBackupErrorText(result.error);
+        if (friendly) {
+          showMessage('error', friendly);
+        }
       }
     } catch (err) {
+      console.error('Failed to load backups:', err);
       showMessage('error', 'Failed to load backups');
     } finally {
       setIsLoading(false);
@@ -73,6 +113,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         showMessage('error', result.error || 'Failed to create backup');
       }
     } catch (err) {
+      console.error('Failed to create backup:', err);
       showMessage('error', 'Failed to create backup');
     } finally {
       setIsCreating(false);
@@ -93,6 +134,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         showMessage('error', result.error || 'Failed to restore backup');
       }
     } catch (err) {
+      console.error('Failed to restore backup:', err);
       showMessage('error', 'Failed to restore backup');
     } finally {
       setIsRestoring(false);
@@ -112,6 +154,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         showMessage('error', result.error || 'Failed to delete backup');
       }
     } catch (err) {
+      console.error('Failed to delete backup:', err);
       showMessage('error', 'Failed to delete backup');
     }
   };
@@ -127,6 +170,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         showMessage('error', result.error || 'Backup verification failed');
       }
     } catch (err) {
+      console.error('Failed to verify backup:', err);
       showMessage('error', 'Failed to verify backup');
     } finally {
       setIsVerifying(false);
@@ -144,7 +188,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
   };
 
   useEffect(() => {
-    loadBackups();
+    void loadBackups();
   }, []);
 
   const formatSize = (bytes: number): string => {
@@ -326,7 +370,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       <div className="flex gap-2 mt-6">
         <button
           className="btn btn-primary"
-          onClick={handleCreateBackup}
+          onClick={() => { void handleCreateBackup(); }}
           disabled={isCreating}
         >
           {isCreating ? (
@@ -337,7 +381,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         </button>
         <button
           className="btn btn-secondary"
-          onClick={handleVerifyBackup}
+          onClick={() => { void handleVerifyBackup(); }}
           disabled={isVerifying}
         >
           {isVerifying ? (
@@ -369,14 +413,14 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
                 <div className="flex gap-2">
                   <button
                     className="btn btn-sm btn-ghost"
-                    onClick={() => handleRestoreBackup(backup.name)}
+                    onClick={() => { void handleRestoreBackup(backup.name); }}
                     disabled={isRestoring}
                   >
                     恢复
                   </button>
                   <button
                     className="btn btn-sm btn-ghost text-error"
-                    onClick={() => handleDeleteBackup(backup.name)}
+                    onClick={() => { void handleDeleteBackup(backup.name); }}
                   >
                     删除
                   </button>

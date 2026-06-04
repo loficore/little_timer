@@ -1,24 +1,9 @@
 import { defineConfig } from "@playwright/test";
-import { execSync } from "child_process";
-import { existsSync, mkdirSync, rmSync } from "fs";
-import { dirname, resolve } from "path";
+import { dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const testDbPath = resolve(__dirname, "../test_tmp/e2e.db");
-
-function cleanupTestDatabase() {
-  const testTmpDir = resolve(__dirname, "../test_tmp");
-  if (!existsSync(testTmpDir)) {
-    mkdirSync(testTmpDir, { recursive: true });
-  }
-  if (existsSync(testDbPath)) {
-    rmSync(testDbPath);
-  }
-  console.log("✅ Test database cleaned up");
-}
 
 export default defineConfig({
   testDir: "./src/test/visual",

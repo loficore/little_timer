@@ -91,6 +91,7 @@ pub const BackupManager = struct {
         const backup_filename = try std.fmt.bufPrint(&backup_buf, "presets_backup_{}.db", .{timestamp});
 
         if (self.has_adapter) {
+            logger.global_logger.info("[Backup] Starting WebDAV backup: db_path={s}, backup_name={s}", .{ self.db_path, backup_filename });
             try self.closeDbForBackup();
             errdefer self.reopenDb() catch {};
 
@@ -113,7 +114,7 @@ pub const BackupManager = struct {
         }
     }
 
-    fn closeDbForBackup(self: *BackupManager) !void {
+    pub fn closeDbForBackup(self: *BackupManager) !void {
         if (self.db) |conn| {
             conn.close();
             self.db = null;
@@ -121,7 +122,7 @@ pub const BackupManager = struct {
         }
     }
 
-    fn reopenDb(self: *BackupManager) !void {
+    pub fn reopenDb(self: *BackupManager) !void {
         const flags = zqlite.OpenFlags.ReadWrite;
         self.db = zqlite.open(self.db_path, flags) catch |err| {
             logger.global_logger.err("❌ 重新打开数据库失败: {any}", .{err});
@@ -213,7 +214,12 @@ pub const BackupManager = struct {
     }
 
     fn cleanupOldBackups(self: *BackupManager) !void {
-        var backup_dir = try std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true });
+        var backup_dir = std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true }) catch |err| {
+            if (err == error.FileNotFound) {
+                return;
+            }
+            return err;
+        };
         defer backup_dir.close();
 
         var backup_count: usize = 0;
@@ -279,7 +285,12 @@ pub const BackupManager = struct {
         oldest_backup: ?[]const u8,
         newest_backup: ?[]const u8,
     } {
-        var backup_dir = try std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true });
+        var backup_dir = std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true }) catch |err| {
+            if (err == error.FileNotFound) {
+                return .{ .total_backups = 0, .total_size_bytes = 0, .oldest_backup = null, .newest_backup = null };
+            }
+            return err;
+        };
         defer backup_dir.close();
 
         var total_size: u64 = 0;
@@ -370,7 +381,12 @@ pub const BackupManager = struct {
             self.adapter.freeList(items);
             return result;
         } else {
-            var backup_dir = try std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true });
+            var backup_dir = std.fs.cwd().openDir(self.backup_dir, .{ .iterate = true }) catch |err| {
+                if (err == error.FileNotFound) {
+                    return &.{};
+                }
+                return err;
+            };
             defer backup_dir.close();
 
             var list = makeBackupList();

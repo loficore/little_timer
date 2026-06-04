@@ -154,6 +154,12 @@ fn readRequestBody(request: *http.Server.Request, allocator: std.mem.Allocator) 
 
 fn handleRequest(request: *http.Server.Request) !void {
     const target = request.head.target;
+
+    if (request.head.content_length == null and request.head.transfer_encoding == .none) {
+        if (request.head.method.requestHasBody()) {
+            request.head.content_length = 0;
+        }
+    }
     const path = if (std.mem.indexOfScalar(u8, target, '?')) |query_idx|
         target[0..query_idx]
     else
@@ -291,12 +297,12 @@ fn getAllocator() std.mem.Allocator {
 }
 
 /// 验证请求认证
-/// 如果 auth_enabled 为 true，则检查 Authorization 头
+/// 如果 auth_enabled 为 true，则检查 Authorization 头或 URL query 参数
 /// 返回 true 表示认证通过，false 表示认证失败（已发送 401 响应）
 ///
-/// 注意: Zig 0.15.2 std.http.Server.Request.Head 不直接暴露 headers，
-/// 当前只能通过 URL query 参数进行认证。这是已知限制，
-/// 当 Zig HTTP server 支持 headers 访问后应改为读取 Authorization header。
+/// 优先级:
+/// 1. Authorization: Bearer <token> header (推荐)
+/// 2. URL query 参数 auth_token=xxx (向后兼容)
 fn validateAuth(request: *http.Server.Request) bool {
     const app = getApp();
     const auth_config = app.settings_manager.getConfig().auth;
@@ -310,6 +316,21 @@ fn validateAuth(request: *http.Server.Request) bool {
         return true;
     }
 
+    // 优先检查 Authorization header
+    var it = request.iterateHeaders();
+    while (it.next()) |header| {
+        if (std.mem.eql(u8, header.name, "Authorization")) {
+            const bearer_prefix = "Bearer ";
+            if (std.mem.startsWith(u8, header.value, bearer_prefix)) {
+                const provided_token = header.value[bearer_prefix.len..];
+                if (std.mem.eql(u8, provided_token, auth_token)) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 向后兼容：检查 URL query 参数
     const target = request.head.target;
     const auth_param = "auth_token=";
     if (std.mem.indexOf(u8, target, auth_param)) |idx| {
@@ -791,6 +812,7 @@ fn handleUpdateBackupConfig(request: *http.Server.Request) !void {
 
 fn handleBackupCreate(request: *http.Server.Request) !void {
     logger.global_logger.info("[API] POST /api/backup/create", .{});
+    const allocator = getAllocator();
     const app = getApp();
     const db = app.settings_manager.sqlite_db orelse {
         try request.respond("{\"success\":false,\"error\":\"database not open\"}", .{
@@ -799,17 +821,73 @@ fn handleBackupCreate(request: *http.Server.Request) !void {
         return;
     };
 
-    const result = db.backup_manager.createBackup() catch |err| {
-        const err_msg = std.fmt.allocPrint(getAllocator(), "{{\"success\":false,\"error\":\"{s}\"}}", .{@errorName(err)}) catch unreachable;
-        defer getAllocator().free(err_msg);
+    const backup_config = app.settings_manager.getBackupConfig();
+    if (!backup_config.enabled) {
+        try request.respond("{\"success\":false,\"error\":\"backup not enabled\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+
+    const timestamp = std.time.timestamp();
+    var backup_buf: [512]u8 = undefined;
+    const backup_name = try std.fmt.bufPrint(&backup_buf, "presets_backup_{}.db", .{timestamp});
+
+    const adapter: backup_mod.BackupAdapter = switch (backup_config.target_type) {
+        .local => blk: {
+            const local_path = if (backup_config.local_path.len > 0) backup_config.local_path else "";
+            break :blk backup_mod.createLocalAdapter(allocator, .{ .path = local_path });
+        },
+        .webdav => backup_mod.createWebDAVAdapter(allocator, .{
+            .url = backup_config.webdav_url,
+            .username = backup_config.webdav_username,
+            .password = backup_config.webdav_password,
+            .base_path = "/",
+        }),
+        .s3 => backup_mod.createS3Adapter(allocator, .{
+            .endpoint = backup_config.s3_endpoint,
+            .bucket = backup_config.s3_bucket,
+            .region = backup_config.s3_region,
+            .access_key = backup_config.s3_access_key,
+            .secret_key = backup_config.s3_secret_key,
+            .path_prefix = if (backup_config.s3_path_prefix.len > 0) backup_config.s3_path_prefix else "little_timer/",
+        }),
+    };
+    defer {
+        adapter.vtable.freeList(adapter.ptr, &[_]backup_mod.BackupInfo{});
+    }
+
+    const db_file_path = db.db_path;
+
+    logger.global_logger.info("[Backup] Starting backup: db_path={s}, backup_name={s}", .{ db_file_path, backup_name });
+
+    db.backup_manager.closeDbForBackup() catch |err| {
+        logger.global_logger.err("[Backup] Failed to close DB: {any}", .{err});
+    };
+    errdefer {
+        db.backup_manager.reopenDb() catch |err| {
+            logger.global_logger.err("[Backup] Failed to reopen DB: {any}", .{err});
+        };
+    }
+
+    adapter.push(db_file_path, backup_name) catch |err| {
+        logger.global_logger.err("[Backup] Push failed: {any}", .{err});
+        db.backup_manager.reopenDb() catch {};
+        const err_msg = std.fmt.allocPrint(allocator, "{{\"success\":false,\"error\":\"{s}\"}}", .{@errorName(err)}) catch unreachable;
+        defer allocator.free(err_msg);
         try request.respond(err_msg, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return;
     };
 
-    const resp = try std.fmt.allocPrint(getAllocator(), "{{\"success\":true,\"backup_path\":\"{s}\"}}", .{result});
-    defer getAllocator().free(resp);
+    db.backup_manager.reopenDb() catch |err| {
+        logger.global_logger.err("[Backup] Failed to reopen DB: {any}", .{err});
+    };
+
+    logger.global_logger.info("[Backup] Backup created successfully: {s}", .{backup_name});
+    const resp = try std.fmt.allocPrint(allocator, "{{\"success\":true,\"backup_path\":\"{s}\"}}", .{backup_name});
+    defer allocator.free(resp);
     try request.respond(resp, .{
         .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
     });
@@ -875,9 +953,8 @@ fn handleBackupList(request: *http.Server.Request) !void {
     };
 
     const backups = db.backup_manager.listBackups() catch |err| {
-        const err_msg = std.fmt.allocPrint(getAllocator(), "{{\"success\":false,\"error\":\"{s}\"}}", .{@errorName(err)}) catch unreachable;
-        defer getAllocator().free(err_msg);
-        try request.respond(err_msg, .{
+        logger.global_logger.warn("[Backup] listBackups failed: {any}, returning empty list", .{err});
+        try request.respond("{\"success\":true,\"backups\":[]}", .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return;
@@ -914,7 +991,9 @@ fn handleBackupDelete(request: *http.Server.Request) !void {
     const backup_name = target[name_start + 1..];
 
     // 防止路径遍历攻击
-    if (backup_name.len == 0 or std.mem.indexOfAny(u8, backup_name, "/\\..") != null) {
+    if (backup_name.len == 0 or
+        std.mem.indexOf(u8, backup_name, "..") != null or
+        std.mem.indexOfAny(u8, backup_name, "/\\") != null) {
         try request.respond("{\"success\":false,\"error\":\"invalid backup name\"}", .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
@@ -1020,9 +1099,12 @@ fn handleAuthStatus(request: *http.Server.Request) !void {
 
 fn handleAuthEnable(request: *http.Server.Request) !void {
     logger.global_logger.info("[API] POST /api/auth/enable", .{});
-    const app = getApp();
     const allocator = getAllocator();
 
+    const body = try readRequestBody(request, allocator);
+    defer allocator.free(body);
+
+    const app = getApp();
     const token = crypto.generateToken(allocator) catch {
         try request.respond("{\"err\":\"token generation failed\"}", .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -1057,6 +1139,11 @@ fn handleAuthEnable(request: *http.Server.Request) !void {
 
 fn handleAuthDisable(request: *http.Server.Request) !void {
     logger.global_logger.info("[API] POST /api/auth/disable", .{});
+    const allocator = getAllocator();
+
+    const body = try readRequestBody(request, allocator);
+    defer allocator.free(body);
+
     const app = getApp();
 
     var new_config = app.settings_manager.getConfig();

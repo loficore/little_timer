@@ -89,7 +89,8 @@ pub const SettingsManager = struct {
         logger.global_logger.info("初始化 SQLite: {s}", .{db_path_full});
 
         var sqlite_db_ptr = try allocator.create(settings_sqlite.SqliteManager);
-        sqlite_db_ptr.* = try settings_sqlite.SqliteManager.init(allocator, db_path_full, "");
+        const db_dir = std.fs.path.dirname(db_path_full) orelse ".";
+        sqlite_db_ptr.* = try settings_sqlite.SqliteManager.init(allocator, db_path_full, db_dir);
         sqlite_db_ptr.open() catch |err| {
             logger.global_logger.err("❌ SQLite 打开失败: {any}", .{err});
             return error.DatabaseOpenFailed;

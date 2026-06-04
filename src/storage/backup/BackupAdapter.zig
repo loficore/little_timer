@@ -104,7 +104,12 @@ const LocalAdapterState = struct {
     fn listImpl(ptr: *anyopaque) BackupError![]BackupInfo {
         const self: *LocalAdapterState = @ptrCast(@alignCast(ptr));
 
-        var dir = std.fs.cwd().openDir(self.backup_path, .{ .iterate = true }) catch return BackupError.BackupFailed;
+        var dir = std.fs.cwd().openDir(self.backup_path, .{ .iterate = true }) catch |err| {
+            if (err == error.FileNotFound) {
+                return &.{};
+            }
+            return BackupError.BackupFailed;
+        };
         defer dir.close();
 
         var list = std.ArrayListUnmanaged(BackupInfo){};

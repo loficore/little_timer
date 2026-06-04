@@ -6,6 +6,10 @@ const logger = @import("../core/logger.zig");
 const interface = @import("../core/interface.zig");
 const backup = @import("backup/BackupAdapter.zig");
 
+fn logWebdavErr(msg: []const u8) void {
+    logger.global_logger.err("[WebDAV] {s}", .{msg});
+}
+
 pub const BackupError = error{
     BackupFailed,
     RestoreFailed,
@@ -65,7 +69,7 @@ pub const BackupManager = struct {
                     .password = config.webdav_password,
                     .base_path = "/",
                 };
-                return backup.createWebDAVAdapter(self.allocator, webdav_config);
+                return backup.createWebDAVAdapter(self.allocator, webdav_config, &logWebdavErr);
             },
             .s3 => {
                 const s3_config = backup.S3Config{

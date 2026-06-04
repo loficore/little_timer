@@ -10,6 +10,10 @@ const build_options = @import("build_options");
 const backup_mod = @import("../../storage/backup/BackupAdapter.zig");
 const crypto = @import("../utils/crypto.zig");
 
+fn logWebdavErr(msg: []const u8) void {
+    logger.global_logger.err("[WebDAV] {s}", .{msg});
+}
+
 const ClockState = clock.ClockState;
 const ModeEnumT = clock.ModeEnumT;
 
@@ -206,6 +210,7 @@ fn handleRequest(request: *http.Server.Request) !void {
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/timer/rest")) {
         try handleStartRest(request);
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/timer/finish")) {
+
         try handleFinish(request);
     } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/timer/progress")) {
         try handleGetProgress(request);
@@ -281,9 +286,24 @@ fn handleRequest(request: *http.Server.Request) !void {
         try handleAuthDisable(request);
 
     // ============================================
+    // Wallpapers 路由
+    // ============================================
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/wallpapers")) {
+        try handleUploadWallpaper(request);
+    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/wallpapers")) {
+        try handleListWallpapers(request);
+    } else if (request.head.method == .GET and std.mem.startsWith(u8, path, "/api/wallpapers/")) {
+        try handleServeWallpaper(request);
+    } else if (request.head.method == .DELETE and std.mem.startsWith(u8, path, "/api/wallpapers/")) {
+        try handleDeleteWallpaper(request);
+
+    // ============================================
     // 404 Fallback
     // ============================================
     } else {
+        if (std.mem.indexOf(u8, path, "finish") != null) {
+
+        }
         try request.respond("", .{ .status = .not_found });
     }
 }
@@ -384,7 +404,7 @@ fn handleRoot(request: *http.Server.Request) !void {
             },
         });
     } else {
-        const html = "<html><body><h1>Little Timer</h1><p>请先构建前端: cd assets && bun run build</p></body></html>";
+        const html = "<html><body><h1>Little Timer</h1><p>请先构建前端: cd assets && pnpm run build</p></body></html>";
         try request.respond(html, .{
             .extra_headers = &.{
                 .{ .name = "Content-Type", .value = "text/html; charset=utf-8" },
@@ -506,6 +526,8 @@ fn handleStart(request: *http.Server.Request) !void {
     const body = try readRequestBody(request, allocator);
     defer allocator.free(body);
     const app = getApp();
+    app.mutex.lock();
+    defer app.mutex.unlock();
 
     var habit_id: ?i64 = null;
     var mode: []const u8 = "stopwatch";
@@ -609,12 +631,9 @@ fn handleStart(request: *http.Server.Request) !void {
         app.resetTimerSession();
     }
 
-    const session_id = app.createTimerSession(habit_id, mode, work_duration, rest_duration, loop_count) catch {
-        app.current_habit_id = habit_id;
-        app.clock_manager.handleEvent(.user_start_timer);
-        const resp = try std.fmt.allocPrint(allocator, "{{\"status\":\"started\",\"habit_id\":{?}}}", .{habit_id});
-        defer allocator.free(resp);
-        try request.respond(resp, .{
+    const session_id = app.createTimerSession(habit_id, mode, work_duration, rest_duration, loop_count) catch |err| {
+        logger.global_logger.err("创建计时会话失败: {any}", .{err});
+        try request.respond("{\"err\":\"Failed to create timer session\"}", .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return;
@@ -657,6 +676,8 @@ fn handleStartRest(request: *http.Server.Request) !void {
 fn handlePause(request: *http.Server.Request) !void {
     logger.global_logger.info("[API] POST /api/pause", .{});
     const app = getApp();
+    app.mutex.lock();
+    defer app.mutex.unlock();
     app.clock_manager.handleEvent(.user_pause_timer);
     app.saveTimerProgress();
 
@@ -668,6 +689,8 @@ fn handlePause(request: *http.Server.Request) !void {
 fn handleReset(request: *http.Server.Request) !void {
     logger.global_logger.info("[API] POST /api/reset", .{});
     const app = getApp();
+    app.mutex.lock();
+    defer app.mutex.unlock();
     app.resetTimerSession();
     app.current_habit_id = null;
     app.clock_manager.handleEvent(.user_reset_timer);
@@ -678,21 +701,45 @@ fn handleReset(request: *http.Server.Request) !void {
 }
 
 fn handleFinish(request: *http.Server.Request) !void {
+
     logger.global_logger.info("[API] POST /api/finish", .{});
     const app = getApp();
+    app.mutex.lock();
+    defer app.mutex.unlock();
 
     const habit_id = app.current_habit_id;
     const session_id = app.current_timer_session_id;
 
-    const elapsed = app.finishTimerSession() catch {
+    const elapsed = app.finishTimerSession() catch |err| {
+        logger.global_logger.err("完成计时会话失败: {any}", .{err});
         app.clock_manager.handleEvent(.user_finish_timer);
         const clock_state = app.clock_manager.update();
         const elapsed_seconds = clock_state.getElapsedSeconds();
+
+        if (habit_id != null and elapsed_seconds > 0) {
+            const timestamp: i64 = @intCast(std.time.timestamp());
+            const es = std.time.epoch.EpochSeconds{ .secs = @as(u64, @intCast(timestamp)) };
+            const yd = es.getEpochDay().calculateYearDay();
+            const md = yd.calculateMonthDay();
+            var buffer: [10]u8 = undefined;
+            const today = std.fmt.bufPrint(&buffer, "{d:0>4}-{d:0>2}-{d:0>2}", .{ yd.year, md.month.numeric(), md.day_index + 1 }) catch "";
+
+            _ = app.settings_manager.sqlite_db.?.habit_manager.createSession(
+                habit_id.?,
+                elapsed_seconds,
+                1,
+                today,
+            ) catch |e2| {
+                logger.global_logger.err("错误恢复期间创建日统计记录也失败: {any}", .{e2});
+            };
+        }
+
         const resp = try std.fmt.allocPrint(getAllocator(), "{{\"status\":\"finished\",\"elapsed_seconds\":{}}}", .{elapsed_seconds});
         defer getAllocator().free(resp);
         try request.respond(resp, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
+        app.resetTimerSession();
         return;
     };
 
@@ -843,7 +890,7 @@ fn handleBackupCreate(request: *http.Server.Request) !void {
             .username = backup_config.webdav_username,
             .password = backup_config.webdav_password,
             .base_path = "/",
-        }),
+        }, &logWebdavErr),
         .s3 => backup_mod.createS3Adapter(allocator, .{
             .endpoint = backup_config.s3_endpoint,
             .bucket = backup_config.s3_bucket,
@@ -1043,7 +1090,7 @@ fn handleBackupVerify(request: *http.Server.Request) !void {
             .username = backup_config.webdav_username,
             .password = backup_config.webdav_password,
             .base_path = "/",
-        }),
+        }, &logWebdavErr),
         .s3 => backup_mod.createS3Adapter(allocator, .{
             .endpoint = backup_config.s3_endpoint,
             .bucket = backup_config.s3_bucket,
@@ -1222,7 +1269,6 @@ fn handleSSE(request: *http.Server.Request) !void {
 
     const app = getApp();
     var buffer: [8192]u8 = undefined;
-    var last_tick_ts = std.time.timestamp();
     var last_heartbeat_ts = std.time.timestamp();
 
     // SSE 安全限制
@@ -1259,13 +1305,7 @@ fn handleSSE(request: *http.Server.Request) !void {
             break;
         }
 
-        const delta_s = now - last_tick_ts;
-        last_tick_ts = now;
-
-        if (delta_s > 0) {
-            app.clock_manager.handleEvent(.{ .tick = delta_s * 1000 });
-        }
-
+        // 不再调用 clock.tick()——状态由用户事件驱动，SSE 只推送状态
         const display_data = app.clock_manager.update();
         const timezone: i8 = app.settings_manager.config.basic.timezone;
         const habit_id = app.current_habit_id;
@@ -1841,6 +1881,318 @@ fn handleGetHabitDetail(request: *http.Server.Request) !void {
     });
     defer getAllocator().free(resp);
     try request.respond(resp, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+// ============================================
+// Wallpaper 辅助函数
+// ============================================
+
+fn getWallpapersDir() ![]const u8 {
+    const allocator = getAllocator();
+    const app = getApp();
+    const db_path = app.settings_manager.sqlite_db.?.*.db_path;
+    const db_dir = std.fs.path.dirname(db_path) orelse ".";
+    const wallpapers_dir = try std.fs.path.join(allocator, &[_][]const u8{ db_dir, "wallpapers" });
+    std.fs.cwd().makeDir(wallpapers_dir) catch |err| {
+        if (err != error.PathAlreadyExists) {
+            logger.global_logger.err("创建wallpapers目录失败: {any}", .{err});
+            return error.WallpapersDirCreateFailed;
+        }
+    };
+    return wallpapers_dir;
+}
+
+fn sanitizeFilename(name: []const u8, allocator: std.mem.Allocator) ![]const u8 {
+    var buf = try allocator.alloc(u8, name.len);
+    var out_len: usize = 0;
+    for (name) |c| {
+        if ((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
+            (c >= '0' and c <= '9') or c == '-' or c == '_' or c == '.')
+        {
+            buf[out_len] = c;
+            out_len += 1;
+        } else {
+            buf[out_len] = '_';
+            out_len += 1;
+        }
+    }
+    return allocator.realloc(buf, out_len);
+}
+
+fn extractMultipartBoundary(request: *http.Server.Request) ?[]const u8 {
+    var it = request.iterateHeaders();
+    while (it.next()) |header| {
+        if (std.ascii.eqlIgnoreCase(header.name, "content-type")) {
+            const prefix = "multipart/form-data; boundary=";
+            if (std.mem.startsWith(u8, header.value, prefix)) {
+                return header.value[prefix.len..];
+            }
+        }
+    }
+    return null;
+}
+
+fn parseMultipartFile(
+    body: []const u8,
+    boundary: []const u8,
+    allocator: std.mem.Allocator,
+) !struct { filename: []const u8, data: []const u8 } {
+    const dash = "--";
+    const crlf = "\r\n";
+    const crlfcrlf = "\r\n\r\n";
+
+    const opening = try std.mem.concat(allocator, u8, &[_][]const u8{ dash, boundary, crlf });
+    defer allocator.free(opening);
+    const closing = try std.mem.concat(allocator, u8, &[_][]const u8{ crlf, dash, boundary, dash, crlf });
+    defer allocator.free(closing);
+
+    if (!std.mem.startsWith(u8, body, opening)) {
+        return error.InvalidMultipartFormat;
+    }
+
+    var remaining = body[opening.len..];
+
+    if (std.mem.endsWith(u8, remaining, closing)) {
+        remaining = remaining[0 .. remaining.len - closing.len];
+    } else {
+        const end_dash = try std.mem.concat(allocator, u8, &[_][]const u8{ crlf, dash, boundary, dash });
+        defer allocator.free(end_dash);
+        if (std.mem.endsWith(u8, remaining, end_dash)) {
+            remaining = remaining[0 .. remaining.len - end_dash.len];
+        }
+    }
+
+    const header_end = std.mem.indexOf(u8, remaining, crlfcrlf) orelse return error.InvalidMultipartFormat;
+
+    const header_section = remaining[0..header_end];
+    remaining = remaining[header_end + crlfcrlf.len ..];
+
+    var filename: []const u8 = "upload";
+    var lines = std.mem.splitScalar(u8, header_section, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trimRight(u8, line, "\r");
+        if (std.mem.startsWith(u8, trimmed, "Content-Disposition:")) {
+            const needle = "filename=\"";
+            if (std.mem.indexOf(u8, trimmed, needle)) |idx| {
+                const start = idx + needle.len;
+                if (std.mem.indexOfScalarPos(u8, trimmed, start, '"')) |end_idx| {
+                    filename = trimmed[start..end_idx];
+                    if (filename.len == 0) filename = "upload";
+                }
+            }
+        }
+    }
+
+    return .{ .filename = filename, .data = remaining };
+}
+
+// ============================================
+// Wallpaper 处理函数
+// ============================================
+
+fn handleUploadWallpaper(request: *http.Server.Request) !void {
+    const allocator = getAllocator();
+    const boundary = extractMultipartBoundary(request) orelse {
+        try request.respond("{\"err\":\"Missing boundary\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const body = try readRequestBody(request, allocator);
+    defer allocator.free(body);
+
+    const parsed = parseMultipartFile(body, boundary, allocator) catch |err| {
+        logger.global_logger.err("解析multipart失败: {any}", .{err});
+        try request.respond("{\"err\":\"Failed to parse upload\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const wallpapers_dir = try getWallpapersDir();
+    const safe_name = try sanitizeFilename(parsed.filename, allocator);
+    defer allocator.free(safe_name);
+
+    const basename = std.fs.path.basename(safe_name);
+    const ext = std.fs.path.extension(basename);
+    const stem = if (ext.len > 0 and ext.len < basename.len) basename[0 .. basename.len - ext.len] else basename;
+
+    const timestamp = @as(u64, @intCast(std.time.timestamp()));
+    const unique_name = try std.fmt.allocPrint(allocator, "{d}_{s}{s}", .{ timestamp, stem, ext });
+    defer allocator.free(unique_name);
+
+    const file_path = try std.fs.path.join(allocator, &[_][]const u8{ wallpapers_dir, unique_name });
+    defer allocator.free(file_path);
+
+    const file = try std.fs.cwd().createFile(file_path, .{});
+    defer file.close();
+    try file.writeAll(parsed.data);
+
+    logger.global_logger.info("壁纸上载成功: {s}", .{unique_name});
+
+    const resp = try std.fmt.allocPrint(allocator, "{{\"filename\":\"{s}\"}}", .{unique_name});
+    defer allocator.free(resp);
+    try request.respond(resp, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleListWallpapers(request: *http.Server.Request) !void {
+    const allocator = getAllocator();
+    const wallpapers_dir = getWallpapersDir() catch {
+        try request.respond("[]", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    var dir = std.fs.cwd().openDir(wallpapers_dir, .{ .iterate = true }) catch {
+        try request.respond("[]", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer dir.close();
+
+    // Build JSON manually to avoid ArrayList API issues
+    var json_buf = std.ArrayList(u8).initCapacity(allocator, 4096) catch {
+        try request.respond("[]", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer json_buf.deinit(allocator);
+
+    try json_buf.append(allocator, '[');
+
+    var first = true;
+    var it = dir.iterate();
+    while (it.next() catch null) |entry| {
+        if (entry.kind != .file) continue;
+
+        if (!first) try json_buf.append(allocator, ',');
+        first = false;
+
+        const entry_json = try std.fmt.allocPrint(allocator, "{{\"name\":\"{s}\"}}", .{entry.name});
+        defer allocator.free(entry_json);
+        try json_buf.appendSlice(allocator, entry_json);
+    }
+
+    try json_buf.append(allocator, ']');
+
+    try request.respond(json_buf.items, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleServeWallpaper(request: *http.Server.Request) !void {
+    const target = request.head.target;
+    const path = if (std.mem.indexOfScalar(u8, target, '?')) |q_idx| target[0..q_idx] else target;
+
+    const filename = path["/api/wallpapers/".len..];
+    if (filename.len == 0 or std.mem.indexOfScalar(u8, filename, '/') != null) {
+        try request.respond("{\"err\":\"Invalid filename\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+
+    const allocator = getAllocator();
+    const wallpapers_dir = getWallpapersDir() catch {
+        try request.respond("{\"err\":\"Wallpapers dir not found\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer allocator.free(wallpapers_dir);
+
+    const file_path = try std.fs.path.join(allocator, &[_][]const u8{ wallpapers_dir, filename });
+    defer allocator.free(file_path);
+
+    const file = std.fs.cwd().openFile(file_path, .{}) catch {
+        try request.respond("{\"err\":\"File not found\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer file.close();
+
+    const file_size = (try file.stat()).size;
+    if (file_size > 50 * 1024 * 1024) {
+        try request.respond("{\"err\":\"File too large\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+
+    const file_data = try allocator.alloc(u8, @intCast(file_size));
+    defer allocator.free(file_data);
+    _ = try file.readAll(file_data);
+
+    const ext = std.fs.path.extension(filename);
+    const content_type = if (std.ascii.eqlIgnoreCase(ext, ".jpg") or std.ascii.eqlIgnoreCase(ext, ".jpeg"))
+        "image/jpeg"
+    else if (std.ascii.eqlIgnoreCase(ext, ".png"))
+        "image/png"
+    else if (std.ascii.eqlIgnoreCase(ext, ".gif"))
+        "image/gif"
+    else if (std.ascii.eqlIgnoreCase(ext, ".webp"))
+        "image/webp"
+    else if (std.ascii.eqlIgnoreCase(ext, ".svg"))
+        "image/svg+xml"
+    else if (std.ascii.eqlIgnoreCase(ext, ".bmp"))
+        "image/bmp"
+    else
+        "application/octet-stream";
+
+    const content_type_header = try std.fmt.allocPrint(allocator, "{s}", .{content_type});
+    defer allocator.free(content_type_header);
+
+    try request.respond(file_data, .{
+        .extra_headers = &.{
+            .{ .name = "Content-Type", .value = content_type_header },
+            .{ .name = "Cache-Control", .value = "public, max-age=86400" },
+        },
+    });
+}
+
+fn handleDeleteWallpaper(request: *http.Server.Request) !void {
+    const target = request.head.target;
+    const path = if (std.mem.indexOfScalar(u8, target, '?')) |q_idx| target[0..q_idx] else target;
+
+    const filename = path["/api/wallpapers/".len..];
+    if (filename.len == 0 or std.mem.indexOfScalar(u8, filename, '/') != null) {
+        try request.respond("{\"err\":\"Invalid filename\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+
+    const allocator = getAllocator();
+    const wallpapers_dir = getWallpapersDir() catch {
+        try request.respond("{\"err\":\"Wallpapers dir not found\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer allocator.free(wallpapers_dir);
+
+    const file_path = try std.fs.path.join(allocator, &[_][]const u8{ wallpapers_dir, filename });
+    defer allocator.free(file_path);
+
+    std.fs.cwd().deleteFile(file_path) catch {
+        try request.respond("{\"err\":\"Failed to delete file\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    logger.global_logger.info("壁纸已删除: {s}", .{filename});
+
+    try request.respond("{\"success\":true}", .{
         .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
     });
 }

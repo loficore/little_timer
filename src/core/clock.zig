@@ -21,6 +21,9 @@ const CountdownState = struct {
     rest_remaining_ms: i64 = 0,
     is_paused: bool = true,
     is_finished: bool = false,
+    start_time_ms: i64 = 0,       // wall-clock ms，timer 开始时间
+    paused_ms: i64 = 0,             // 累计暂停时长（ms）
+    elapsed_at_pause: i64 = 0, // pause 瞬间的 elapsed（ms）
 
     /// 更新倒计时状态
     ///
@@ -89,6 +92,9 @@ const StopwatchState = struct {
     max_ms: i64,
     is_paused: bool = true,
     is_finished: bool = false,
+    start_time_ms: i64 = 0,       // wall-clock ms，timer 开始时间
+    paused_ms: i64 = 0,             // 累计暂停时长（ms）
+    elapsed_at_pause: i64 = 0, // pause 瞬间的 elapsed（ms）
 
     /// 更新秒表状态
     ///
@@ -180,18 +186,30 @@ pub const ClockState = union(ModeEnumT) {
         };
     }
 
-    /// 获取已用时间（秒数），仅正计时支持
+    /// 获取已用时间（秒数），基于 wall-clock 计算
     pub fn getElapsedSeconds(self: *const ClockState) i64 {
+        const now_ms: i64 = @intCast(@divTrunc(std.time.nanoTimestamp(), 1_000_000));
         return switch (self.*) {
-            .COUNTDOWN_MODE => |*countdown| @divTrunc(@as(i64, @intCast(countdown.duration_ms)) - @as(i64, @intCast(countdown.remaining_ms)), 1000),
-            .STOPWATCH_MODE => |*stopwatch| @divTrunc(@as(i64, @intCast(stopwatch.elapsed_ms)), 1000),
+            .COUNTDOWN_MODE => |*countdown| blk: {
+                const e = @divTrunc(now_ms - countdown.start_time_ms - countdown.paused_ms, 1000);
+                break :blk e;
+            },
+            .STOPWATCH_MODE => |*stopwatch| blk: {
+                const e = @divTrunc(now_ms - stopwatch.start_time_ms - stopwatch.paused_ms, 1000);
+                break :blk e;
+            },
         };
     }
 
-    /// 获取剩余时间（秒数），仅倒计时支持
+    /// 获取剩余时间（秒数），基于 wall-clock 计算
     pub fn getRemainingSeconds(self: *const ClockState) i64 {
+        const now_ms: i64 = @intCast(@divTrunc(std.time.nanoTimestamp(), 1_000_000));
         return switch (self.*) {
-            .COUNTDOWN_MODE => |*countdown| @divTrunc(countdown.remaining_ms, 1000),
+            .COUNTDOWN_MODE => |*countdown| blk: {
+                const elapsed_ms = now_ms - countdown.start_time_ms - countdown.paused_ms;
+                const remaining_ms = @as(i64, @intCast(countdown.duration_ms)) - elapsed_ms;
+                break :blk @divTrunc(remaining_ms, 1000);
+            },
             .STOPWATCH_MODE => 0,
         };
     }
@@ -304,9 +322,17 @@ pub const ClockManager = struct {
                 self.OnTick(event);
             },
             .user_start_timer => {
+                const now_ms: i64 = @intCast(@divTrunc(std.time.nanoTimestamp(), 1_000_000));
                 switch (self.state) {
                     .COUNTDOWN_MODE => {
                         if (self.state.COUNTDOWN_MODE.is_paused) {
+                            if (self.state.COUNTDOWN_MODE.start_time_ms == 0) {
+                                self.state.COUNTDOWN_MODE.start_time_ms = now_ms;
+                            } else {
+                                self.state.COUNTDOWN_MODE.start_time_ms =
+                                    now_ms - self.state.COUNTDOWN_MODE.elapsed_at_pause
+                                    - self.state.COUNTDOWN_MODE.paused_ms;
+                            }
                             self.state.COUNTDOWN_MODE.is_paused = false;
                             logger.global_logger.info("Clock: 倒计时进入运行状态", .{});
                         } else {
@@ -315,6 +341,13 @@ pub const ClockManager = struct {
                     },
                     .STOPWATCH_MODE => {
                         if (self.state.STOPWATCH_MODE.is_paused) {
+                            if (self.state.STOPWATCH_MODE.start_time_ms == 0) {
+                                self.state.STOPWATCH_MODE.start_time_ms = now_ms;
+                            } else {
+                                self.state.STOPWATCH_MODE.start_time_ms =
+                                    now_ms - self.state.STOPWATCH_MODE.elapsed_at_pause
+                                    - self.state.STOPWATCH_MODE.paused_ms;
+                            }
                             self.state.STOPWATCH_MODE.is_paused = false;
                             logger.global_logger.info("Clock: 正计时进入运行状态", .{});
                         } else {
@@ -324,9 +357,13 @@ pub const ClockManager = struct {
                 }
             },
             .user_pause_timer => {
+                const now_ms: i64 = @intCast(@divTrunc(std.time.nanoTimestamp(), 1_000_000));
                 switch (self.state) {
                     .COUNTDOWN_MODE => {
                         if (!self.state.COUNTDOWN_MODE.is_paused) {
+                            self.state.COUNTDOWN_MODE.elapsed_at_pause =
+                                now_ms - self.state.COUNTDOWN_MODE.start_time_ms
+                                - self.state.COUNTDOWN_MODE.paused_ms;
                             self.state.COUNTDOWN_MODE.is_paused = true;
                             logger.global_logger.info("Clock: 倒计时进入暂停状态", .{});
                         } else {
@@ -335,6 +372,9 @@ pub const ClockManager = struct {
                     },
                     .STOPWATCH_MODE => {
                         if (!self.state.STOPWATCH_MODE.is_paused) {
+                            self.state.STOPWATCH_MODE.elapsed_at_pause =
+                                now_ms - self.state.STOPWATCH_MODE.start_time_ms
+                                - self.state.STOPWATCH_MODE.paused_ms;
                             self.state.STOPWATCH_MODE.is_paused = true;
                             logger.global_logger.info("Clock: 正计时进入暂停状态", .{});
                         } else {
@@ -345,9 +385,11 @@ pub const ClockManager = struct {
             },
             .user_reset_timer => {
                 logger.global_logger.info("Clock: 当前时钟状态已重置为初始值", .{});
-                // 重置计时器
                 switch (self.state) {
                     .COUNTDOWN_MODE => {
+                        self.state.COUNTDOWN_MODE.start_time_ms = 0;
+                        self.state.COUNTDOWN_MODE.paused_ms = 0;
+                        self.state.COUNTDOWN_MODE.elapsed_at_pause = 0;
                         self.state.COUNTDOWN_MODE.remaining_ms = @as(i64, @intCast(self.initial_config.countdown.duration_seconds * 1000));
                         self.state.COUNTDOWN_MODE.loop_remaining = self.initial_config.countdown.loop_count;
                         self.state.COUNTDOWN_MODE.loop_completed = false;
@@ -357,6 +399,9 @@ pub const ClockManager = struct {
                         self.state.COUNTDOWN_MODE.is_finished = false;
                     },
                     .STOPWATCH_MODE => {
+                        self.state.STOPWATCH_MODE.start_time_ms = 0;
+                        self.state.STOPWATCH_MODE.paused_ms = 0;
+                        self.state.STOPWATCH_MODE.elapsed_at_pause = 0;
                         self.state.STOPWATCH_MODE.elapsed_ms = 0;
                         self.state.STOPWATCH_MODE.is_paused = true;
                         self.state.STOPWATCH_MODE.is_finished = false;
@@ -394,6 +439,9 @@ pub const ClockManager = struct {
                                 .loop_remaining = 0,
                                 .loop_completed = false,
                                 .is_paused = true,
+                                .start_time_ms = 0,
+                                .paused_ms = 0,
+                                .elapsed_at_pause = 0,
                             },
                         };
                         self.initial_config = .{
@@ -414,6 +462,9 @@ pub const ClockManager = struct {
                                 .elapsed_ms = 0,
                                 .max_ms = @as(i64, @intCast(default_max_seconds * 1000)),
                                 .is_paused = true,
+                                .start_time_ms = 0,
+                                .paused_ms = 0,
+                                .elapsed_at_pause = 0,
                             },
                         };
                         self.initial_config = .{
@@ -427,7 +478,6 @@ pub const ClockManager = struct {
             },
             .user_change_config => {
                 logger.global_logger.info("Clock: 收到更改配置事件", .{});
-                // 根据 new_config 的 default_mode 切换到相应的模式
                 const new_config = event.user_change_config;
                 self.state = switch (new_config.default_mode) {
                     .COUNTDOWN_MODE => ClockState{
@@ -440,6 +490,9 @@ pub const ClockManager = struct {
                             .loop_remaining = new_config.countdown.loop_count,
                             .loop_completed = false,
                             .is_paused = true,
+                            .start_time_ms = 0,
+                            .paused_ms = 0,
+                            .elapsed_at_pause = 0,
                         },
                     },
                     .STOPWATCH_MODE => ClockState{
@@ -447,6 +500,9 @@ pub const ClockManager = struct {
                             .elapsed_ms = 0,
                             .max_ms = @as(i64, @intCast(new_config.stopwatch.max_seconds * 1000)),
                             .is_paused = true,
+                            .start_time_ms = 0,
+                            .paused_ms = 0,
+                            .elapsed_at_pause = 0,
                         },
                     },
                 };

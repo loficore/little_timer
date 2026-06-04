@@ -199,9 +199,20 @@ pub fn createLocalAdapter(allocator: std.mem.Allocator, config: struct { path: [
     };
 }
 
+fn encodeBasicAuth(allocator: std.mem.Allocator, username: []const u8, password: []const u8) BackupError![]const u8 {
+    const credentials = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ username, password });
+    defer allocator.free(credentials);
+    const encoded_len = std.base64.standard.Encoder.calcSize(credentials.len);
+    const encoded = try allocator.alloc(u8, encoded_len);
+    defer allocator.free(encoded);
+    const cred_slice = std.base64.standard.Encoder.encode(encoded, credentials);
+    return try std.fmt.allocPrint(allocator, "Basic {s}", .{cred_slice});
+}
+
 const WebDAVAdapterState = struct {
     allocator: std.mem.Allocator,
     config: WebDAVConfig,
+    on_log: ?*const fn ([]const u8) void,
 
     fn pushImpl(ptr: *anyopaque, db_path: []const u8, backup_name: []const u8) BackupError!void {
         const self: *WebDAVAdapterState = @ptrCast(@alignCast(ptr));
@@ -215,15 +226,23 @@ const WebDAVAdapterState = struct {
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
 
-        const uri = std.Uri.parse(self.config.url) catch return BackupError.ConnectionFailed;
+        const push_url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.config.url, remote_path });
+        defer self.allocator.free(push_url);
+
+        const uri = std.Uri.parse(push_url) catch return BackupError.ConnectionFailed;
 
         var request = client.request(.PUT, uri, .{
             .extra_headers = &.{
                 .{ .name = "Content-Type", .value = "application/octet-stream" },
-                .{ .name = "Destination", .value = remote_path },
             },
         }) catch return BackupError.NetworkError;
         defer request.deinit();
+
+        if (self.config.username.len > 0) {
+            const auth = try encodeBasicAuth(self.allocator, self.config.username, self.config.password);
+            defer self.allocator.free(auth);
+            request.headers.authorization = .{ .override = auth };
+        }
 
         request.sendBodyComplete(file_data) catch return BackupError.NetworkError;
 
@@ -231,6 +250,14 @@ const WebDAVAdapterState = struct {
         const response = request.receiveHead(&redirect_buffer) catch return BackupError.NetworkError;
 
         if (response.head.status != .ok and response.head.status != .created and response.head.status != .no_content) {
+            if (self.on_log) |log| {
+                if (std.fmt.allocPrint(self.allocator, "push failed: http_status={d}", .{@intFromEnum(response.head.status)})) |msg| {
+                    defer self.allocator.free(msg);
+                    log(msg);
+                } else |_| {
+                    log("push failed: http_status=?");
+                }
+            }
             return BackupError.BackupFailed;
         }
     }
@@ -244,16 +271,35 @@ const WebDAVAdapterState = struct {
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
 
-        const uri = std.Uri.parse(self.config.url) catch return BackupError.ConnectionFailed;
+        const get_url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.config.url, remote_path });
+        defer self.allocator.free(get_url);
+
+        const uri = std.Uri.parse(get_url) catch return BackupError.ConnectionFailed;
 
         var request = client.request(.GET, uri, .{}) catch return BackupError.NetworkError;
         defer request.deinit();
+
+        if (self.config.username.len > 0) {
+            const auth = try encodeBasicAuth(self.allocator, self.config.username, self.config.password);
+            defer self.allocator.free(auth);
+            request.headers.authorization = .{ .override = auth };
+        }
 
         var redirect_buffer: [8192]u8 = undefined;
         var response = request.receiveHead(&redirect_buffer) catch return BackupError.NetworkError;
 
         if (response.head.status == .not_found) return BackupError.FileNotFound;
-        if (response.head.status != .ok) return BackupError.RestoreFailed;
+        if (response.head.status != .ok) {
+            if (self.on_log) |log| {
+                if (std.fmt.allocPrint(self.allocator, "pull failed: http_status={d}", .{@intFromEnum(response.head.status)})) |msg| {
+                    defer self.allocator.free(msg);
+                    log(msg);
+                } else |_| {
+                    log("pull failed: http_status=?");
+                }
+            }
+            return BackupError.RestoreFailed;
+        }
 
         const body = response.reader(&.{});
 
@@ -277,7 +323,10 @@ const WebDAVAdapterState = struct {
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
 
-        const uri = std.Uri.parse(self.config.url) catch return BackupError.ConnectionFailed;
+        const list_url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.config.url, self.config.base_path });
+        defer self.allocator.free(list_url);
+
+        const uri = std.Uri.parse(list_url) catch return BackupError.ConnectionFailed;
 
         const propfind_body = "<?xml version=\"1.0\" encoding=\"utf-8\"?><D:propfind xmlns:D=\"DAV:\"><D:prop><D:getlastmodified/><D:getcontentlength/></D:prop></D:propfind>";
         const body_copy = try self.allocator.dupe(u8, propfind_body);
@@ -291,12 +340,28 @@ const WebDAVAdapterState = struct {
         }) catch return BackupError.NetworkError;
         defer request.deinit();
 
+        if (self.config.username.len > 0) {
+            const auth = try encodeBasicAuth(self.allocator, self.config.username, self.config.password);
+            defer self.allocator.free(auth);
+            request.headers.authorization = .{ .override = auth };
+        }
+
         request.sendBodyComplete(body_copy) catch return BackupError.NetworkError;
 
         var redirect_buffer: [8192]u8 = undefined;
         var response = request.receiveHead(&redirect_buffer) catch return BackupError.NetworkError;
 
-        if (response.head.status != .multi_status) return BackupError.BackupFailed;
+        if (response.head.status != .multi_status) {
+            if (self.on_log) |log| {
+                if (std.fmt.allocPrint(self.allocator, "list failed: http_status={d}", .{@intFromEnum(response.head.status)})) |msg| {
+                    defer self.allocator.free(msg);
+                    log(msg);
+                } else |_| {
+                    log("list failed: http_status=?");
+                }
+            }
+            return BackupError.BackupFailed;
+        }
 
         var list = std.ArrayListUnmanaged(BackupInfo){};
         errdefer {
@@ -349,10 +414,24 @@ const WebDAVAdapterState = struct {
         var request = client.request(.DELETE, delete_uri, .{}) catch return BackupError.NetworkError;
         defer request.deinit();
 
+        if (self.config.username.len > 0) {
+            const auth = try encodeBasicAuth(self.allocator, self.config.username, self.config.password);
+            defer self.allocator.free(auth);
+            request.headers.authorization = .{ .override = auth };
+        }
+
         var redirect_buffer: [8192]u8 = undefined;
         const response = request.receiveHead(&redirect_buffer) catch return BackupError.NetworkError;
 
         if (response.head.status != .ok and response.head.status != .no_content and response.head.status != .not_found) {
+            if (self.on_log) |log| {
+                if (std.fmt.allocPrint(self.allocator, "delete failed: http_status={d}", .{@intFromEnum(response.head.status)})) |msg| {
+                    defer self.allocator.free(msg);
+                    log(msg);
+                } else |_| {
+                    log("delete failed: http_status=?");
+                }
+            }
             return BackupError.BackupFailed;
         }
     }
@@ -378,11 +457,12 @@ const WebDAVAdapterState = struct {
 
 var webdav_vtable_storage: ?BackupAdapter.VTable = null;
 
-pub fn createWebDAVAdapter(allocator: std.mem.Allocator, config: WebDAVConfig) BackupAdapter {
+pub fn createWebDAVAdapter(allocator: std.mem.Allocator, config: WebDAVConfig, on_log: ?*const fn ([]const u8) void) BackupAdapter {
     const state = allocator.create(WebDAVAdapterState) catch unreachable;
     state.* = .{
         .allocator = allocator,
         .config = config,
+        .on_log = on_log,
     };
     if (webdav_vtable_storage == null) {
         webdav_vtable_storage = WebDAVAdapterState.createVTable();

@@ -57,12 +57,20 @@ fn updatePauseAccounting(session: *const habit_crud.TimerSessionRow, now_ts: i64
     };
 }
 
+fn isValidTimestamp(ts: i64) bool {
+    return ts > 0 and ts < 2208988800;
+}
+
 fn computeElapsedFromAccounting(
     started_at: i64,
     paused_total_seconds: i64,
     pause_started_at: ?i64,
     now_ts: i64,
 ) i64 {
+    if (!isValidTimestamp(started_at)) {
+
+        return 0;
+    }
     var effective_paused_seconds = paused_total_seconds;
 
     if (pause_started_at) |started_pause_at| {
@@ -72,10 +80,13 @@ fn computeElapsedFromAccounting(
     }
 
     if (now_ts <= started_at or now_ts <= effective_paused_seconds) {
+
         return 0;
     }
 
-    return now_ts - started_at - effective_paused_seconds;
+    const result = now_ts - started_at - effective_paused_seconds;
+
+    return result;
 }
 
 /// 全局 App 实例指针，用于回调函数访问
@@ -330,10 +341,20 @@ pub const MainApplication = struct {
         var paused_total_seconds: i64 = 0;
         var pause_started_at: ?i64 = null;
 
-        if (session) |s| {
-            const pause_state = updatePauseAccounting(&s, now_ts);
-            paused_total_seconds = pause_state.paused_total_seconds;
-            pause_started_at = pause_state.pause_started_at;
+        if (session != null) {
+            // 基于 clock 实时状态而非 DB 旧状态的暂停会计
+            if (is_paused) {
+                if (self.current_timer_session_pause_started_at == null) {
+                    self.current_timer_session_pause_started_at = now_ts;
+                }
+            } else if (self.current_timer_session_pause_started_at) |started_at| {
+                if (now_ts > started_at) {
+                    self.current_timer_session_paused_total_seconds += now_ts - started_at;
+                }
+                self.current_timer_session_pause_started_at = null;
+            }
+            paused_total_seconds = self.current_timer_session_paused_total_seconds;
+            pause_started_at = self.current_timer_session_pause_started_at;
         }
 
         if (self.current_timer_session_started_at == null) {
@@ -379,6 +400,14 @@ pub const MainApplication = struct {
 
         const s = session.?;
         defer self.allocator.free(s.mode);
+
+        // 数据完整性校验：检查 started_at 是否为有效时间戳
+        if (!isValidTimestamp(s.started_at)) {
+            logger.global_logger.err("⚠ loadTimerProgress: DB 中 session ID {} 的 started_at={} 是损坏数据，删除该行", .{ s.id, s.started_at });
+            db.habit_manager.deleteTimerSession(s.id) catch |e| logger.global_logger.err("删除损坏 session 失败: {any}", .{e});
+            return;
+        }
+
         self.current_timer_session_id = s.id;
         self.current_habit_id = s.habit_id;
         self.current_timer_session_started_at = s.started_at;
@@ -454,47 +483,30 @@ pub const MainApplication = struct {
 
     /// 完成并记录计时会话
     pub fn finishTimerSession(self: *MainApplication) !i64 {
-        const session_id = self.current_timer_session_id orelse return 0;
+        const session_id = self.current_timer_session_id orelse {
+            logger.global_logger.err("⚠ finishTimerSession: current_timer_session_id 为 null，跳过完成", .{});
+            return 0;
+        };
         const db = self.settings_manager.sqlite_db orelse return error.DatabaseNotOpen;
 
         const session = db.habit_manager.getTimerSessionById(session_id) catch null;
         const clock_state = self.clock_manager.update();
         const now_ts: i64 = @intCast(std.time.timestamp());
 
-        // 触发 clock 结束事件
         self.clock_manager.handleEvent(.user_finish_timer);
 
-        // 标记 session 为完成
         try db.habit_manager.finishTimerSession(session_id);
 
-        // 以会话账本为准计算累计运行时间，避免依赖 SSE tick。
-        var elapsed: i64 = if (self.current_timer_session_started_at) |started_at|
-            computeElapsedFromAccounting(
-                started_at,
-                self.current_timer_session_paused_total_seconds,
-                self.current_timer_session_pause_started_at,
-                now_ts,
-            )
-        else
-            clock_state.getElapsedSeconds();
+        var elapsed: i64 = clock_state.getElapsedSeconds();
 
         if (session) |s| {
             defer self.allocator.free(s.mode);
-
             const db_elapsed = computeSessionElapsedSeconds(&s, now_ts);
-
-            if (db_elapsed > elapsed) {
-                elapsed = db_elapsed;
-            }
-
-            if (s.elapsed_seconds > elapsed) {
-                elapsed = s.elapsed_seconds;
-            }
+            if (db_elapsed > elapsed) elapsed = db_elapsed;
+            if (s.elapsed_seconds > elapsed) elapsed = s.elapsed_seconds;
         }
 
-        if (elapsed <= 0) {
-            elapsed = clock_state.getElapsedSeconds();
-        }
+        if (elapsed <= 0) elapsed = clock_state.getElapsedSeconds();
 
         logger.global_logger.info("✓ 会话统计已完成，累计运行时间: {} 秒", .{elapsed});
 

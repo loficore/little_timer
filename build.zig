@@ -56,12 +56,9 @@ fn linkWebviewDesktopDeps(b: *std.Build, exe: *std.Build.Step.Compile, target: s
             }
 
             exe.root_module.linkSystemLibrary("dl", .{ .use_pkg_config = .no });
-            // 添加libsecret的链接 (可选，如果不可用则跳过)
-            if (pkgConfigModuleExists(b.allocator, "libsecret-1")) {
-                exe.root_module.linkSystemLibrary("secret-1", .{ .use_pkg_config = .force });
-            } else {
-                std.debug.print("⚠️ libsecret-1 未安装，Linux密钥存储将使用内存模式\n", .{});
-            }
+            exe.root_module.linkSystemLibrary("secret-1", .{ .use_pkg_config = .force });
+            exe.root_module.linkSystemLibrary("glib-2.0", .{ .use_pkg_config = .force });
+            exe.root_module.link_libc = true;
         },
         .macos => {
             exe.root_module.linkFramework("WebKit", .{});

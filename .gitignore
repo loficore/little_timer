@@ -14,7 +14,7 @@ test-tmp/
 *.sln
 *.sw?
 
-QWEN.md
+*.md
 
 *.sh
 !scripts/

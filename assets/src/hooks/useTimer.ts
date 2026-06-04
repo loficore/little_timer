@@ -41,7 +41,9 @@ export interface UseTimerReturn {
 
 export const useTimer = (): UseTimerReturn => {
   const apiClientRef = useRef(getAPIClient());
-  const timerIntervalRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const startTimeRef = useRef<number>(0);
+  const totalElapsedRef = useRef<number>(0);
   const sessionRecordedRef = useRef(false);
 
   const [timerConfig, setTimerConfigState] = useState<TimerConfig>({
@@ -73,6 +75,7 @@ export const useTimer = (): UseTimerReturn => {
     }
 
     sessionRecordedRef.current = false;
+    startTimeRef.current = Date.now();
     setIsRunning(true);
     setIsPaused(false);
 
@@ -106,6 +109,11 @@ export const useTimer = (): UseTimerReturn => {
   }, []);
 
   const resume = useCallback(async (habitId?: number) => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    startTimeRef.current = Date.now() - totalElapsedRef.current * 1000;
     setIsPaused(false);
     try {
       await apiClientRef.current.resumeTimer(habitId);
@@ -123,6 +131,8 @@ export const useTimer = (): UseTimerReturn => {
     setRemainingSeconds(timerConfig.workDuration);
     setCurrentRound(0);
     sessionRecordedRef.current = false;
+    startTimeRef.current = 0;
+    totalElapsedRef.current = 0;
 
     try {
       await apiClientRef.current.resetTimer();
@@ -173,51 +183,60 @@ export const useTimer = (): UseTimerReturn => {
   }, [timerConfig, isRunning, isResting, currentRound]);
 
   useEffect(() => {
-    if (isRunning && !isPaused && !isFinished) {
-      timerIntervalRef.current = window.setInterval(() => {
-        if (timerConfig.mode === "stopwatch") {
-          setElapsedSeconds((prev) => prev + 1);
-        } else {
-          if (isResting) {
-            setRemainingSeconds((prev) => {
-              const newVal = prev - 1;
-              if (newVal <= 0) {
-                setIsResting(false);
-                setRemainingSeconds(timerConfig.workDuration);
-                setCurrentRound((prev) => prev + 1);
-                return 0;
-              }
-              return newVal;
-            });
-          } else {
-            setRemainingSeconds((prev) => {
-              const newVal = prev - 1;
-              if (newVal <= 0) {
-                if (timerConfig.loopCount > 0 && currentRound >= timerConfig.loopCount) {
-                  setIsFinished(true);
-                  setIsRunning(false);
-                  return 0;
-                } else if (timerConfig.restDuration > 0) {
-                  setIsResting(true);
-                  setRemainingSeconds(timerConfig.restDuration);
-                  return timerConfig.restDuration;
-                } else {
-                  setCurrentRound((prev) => prev + 1);
-                  setRemainingSeconds(timerConfig.workDuration);
-                  return timerConfig.workDuration;
-                }
-              }
-              return newVal;
-            });
-          }
-        }
-      }, 1000);
+    if (!isRunning || isPaused || isFinished) {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      return;
     }
 
+    const tick = () => {
+      const wallElapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+
+      if (timerConfig.mode === "stopwatch") {
+        totalElapsedRef.current = wallElapsed;
+        setElapsedSeconds(wallElapsed);
+      } else {
+        if (isResting) {
+          const restElapsed = wallElapsed - timerConfig.workDuration;
+          const newVal = timerConfig.restDuration - restElapsed;
+          if (newVal <= 0) {
+            setIsResting(false);
+            setRemainingSeconds(timerConfig.workDuration);
+            setCurrentRound((prev) => prev + 1);
+          } else {
+            setRemainingSeconds(newVal);
+          }
+        } else {
+          const newVal = timerConfig.workDuration - wallElapsed;
+          if (newVal <= 0) {
+            if (timerConfig.loopCount > 0 && currentRound >= timerConfig.loopCount) {
+              setIsFinished(true);
+              setIsRunning(false);
+              return;
+            } else if (timerConfig.restDuration > 0) {
+              setIsResting(true);
+              setRemainingSeconds(timerConfig.restDuration);
+            } else {
+              setCurrentRound((prev) => prev + 1);
+              setRemainingSeconds(timerConfig.workDuration);
+            }
+          } else {
+            setRemainingSeconds(newVal);
+          }
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+
     return () => {
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
       }
     };
   }, [isRunning, isPaused, isFinished, timerConfig, isResting, currentRound]);

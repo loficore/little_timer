@@ -148,9 +148,12 @@ describe("useTimer Hook", () => {
         await result.current.start();
       });
 
-      act(() => {
-        vi.advanceTimersByTime(3000);
-      });
+      for (let i = 0; i < 3000; i += 16) {
+        act(() => vi.advanceTimersByTime(16));
+        // RAF fires once per event loop tick in jsdom
+      }
+
+      await act(async () => {});
 
       expect(result.current.elapsedSeconds).toBe(3);
     });
@@ -162,17 +165,17 @@ describe("useTimer Hook", () => {
         await result.current.start();
       });
 
-      act(() => {
-        vi.advanceTimersByTime(2000);
-      });
+      for (let i = 0; i < 2000; i += 16) {
+        act(() => vi.advanceTimersByTime(16));
+      }
 
       await act(async () => {
         await result.current.pause();
       });
 
-      act(() => {
-        vi.advanceTimersByTime(3000);
-      });
+      for (let i = 0; i < 3000; i += 16) {
+        act(() => vi.advanceTimersByTime(16));
+      }
 
       expect(result.current.elapsedSeconds).toBe(2);
     });
@@ -190,9 +193,11 @@ describe("useTimer Hook", () => {
         await result.current.start();
       });
 
-      act(() => {
-        vi.advanceTimersByTime(3000);
-      });
+      for (let i = 0; i < 3000; i += 16) {
+        act(() => vi.advanceTimersByTime(16));
+      }
+
+      await act(async () => {});
 
       expect(result.current.remainingSeconds).toBe(7);
     });

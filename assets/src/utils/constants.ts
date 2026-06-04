@@ -49,6 +49,21 @@ export type Page = "timer" | "habits" | "stats" | "settings";
 export const WALLPAPER_FALLBACK_GRADIENT =
   "linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 50%, #0d0d0d 100%)";
 
+export const WALLPAPER_LOCAL_PREFIX = "local:";
+
+/**
+ * 解析壁纸 URL：如果是 local: 前缀，拼接为后端图片服务路径
+ * @param value 壁纸原始值
+ * @param baseUrl API 基础 URL
+ */
+export function resolveWallpaperUrl(value: string): string {
+    if (value.startsWith(WALLPAPER_LOCAL_PREFIX)) {
+        const filename = value.slice(WALLPAPER_LOCAL_PREFIX.length);
+        return `/api/wallpapers/${filename}`;
+    }
+    return value;
+}
+
 // API 端点
 export const API_ENDPOINTS = {
   STATE: "/api/state",
@@ -64,6 +79,7 @@ export const API_ENDPOINTS = {
   HABITS: "/api/habits",
   SESSIONS: "/api/sessions",
   EVENTS: "/api/events",
+  WALLPAPERS: "/api/wallpapers",
 } as const;
 
 // 应用版本

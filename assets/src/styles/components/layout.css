@@ -10,9 +10,9 @@
 
   .my-topbar {
     position: relative;
-    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface-strong) 96%, transparent) 0%, color-mix(in oklab, var(--my-surface) 90%, transparent) 100%);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface-strong) 60%, transparent) 0%, color-mix(in oklab, var(--my-surface) 50%, transparent) 100%);
     border: none;
-    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 80%, transparent), inset 0 -1px 0 color-mix(in oklab, var(--my-glass-shadow) 60%, transparent), 0 10px 26px color-mix(in oklab, var(--my-glass-shadow) 86%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 52%, transparent), inset 0 -1px 0 color-mix(in oklab, var(--my-glass-shadow) 40%, transparent), 0 10px 26px color-mix(in oklab, var(--my-glass-shadow) 60%, transparent);
     backdrop-filter: blur(22px) saturate(136%);
     -webkit-backdrop-filter: blur(22px) saturate(136%);
     color: var(--my-on-surface);
@@ -25,7 +25,7 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    border-bottom: 1px solid color-mix(in oklab, var(--my-outline) 34%, transparent);
+    border-bottom: 1px solid color-mix(in oklab, var(--my-outline) 15%, transparent);
   }
 
   .my-topbar-title {
@@ -36,45 +36,36 @@
 
   .my-sidebar {
     position: relative;
-    background: linear-gradient(170deg, color-mix(in oklab, var(--my-surface-strong) 96%, transparent) 0%, color-mix(in oklab, var(--my-surface) 88%, transparent) 72%);
+    background: linear-gradient(170deg, color-mix(in oklab, var(--my-surface-strong) 60%, transparent) 0%, color-mix(in oklab, var(--my-surface) 50%, transparent) 72%);
     border-right: none;
-    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 76%, transparent), 10px 0 26px color-mix(in oklab, var(--my-glass-shadow) 80%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 52%, transparent), 10px 0 26px color-mix(in oklab, var(--my-glass-shadow) 55%, transparent);
     backdrop-filter: blur(24px) saturate(136%);
     -webkit-backdrop-filter: blur(24px) saturate(136%);
     background-clip: padding-box;
     isolation: isolate;
   }
 
-  .my-sidebar::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 14px;
-    height: 100%;
-    pointer-events: none;
-    background: linear-gradient(90deg, color-mix(in oklab, var(--my-outline) 18%, transparent) 0%, transparent 100%);
-  }
+
 
   html.light-mode .my-topbar {
-    background: var(--my-surface-strong);
-    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 48%, transparent), var(--my-elevation-2);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
+    background: color-mix(in oklab, var(--my-surface-strong) 65%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 36%, transparent), var(--my-elevation-2);
+    backdrop-filter: blur(22px) saturate(136%);
+    -webkit-backdrop-filter: blur(22px) saturate(136%);
   }
 
   html.light-mode .my-sidebar {
-    background: var(--my-surface);
-    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 44%, transparent), var(--my-elevation-1);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
+    background: color-mix(in oklab, var(--my-surface) 65%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 34%, transparent), var(--my-elevation-1);
+    backdrop-filter: blur(24px) saturate(136%);
+    -webkit-backdrop-filter: blur(24px) saturate(136%);
   }
 
   html.light-mode .my-bottom-nav {
-    background: var(--my-surface-strong);
-    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 42%, transparent), var(--my-elevation-2);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
+    background: color-mix(in oklab, var(--my-surface-strong) 65%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 34%, transparent), var(--my-elevation-2);
+    backdrop-filter: blur(22px) saturate(128%);
+    -webkit-backdrop-filter: blur(22px) saturate(128%);
   }
 
   .my-sidebar-nav-btn {
@@ -117,6 +108,10 @@
     margin: 0 !important;
     padding-top: 0;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: translateY(var(--clock-vertical-offset, 10px));
   }
 
   .my-bottom-nav {
@@ -124,9 +119,9 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.25rem;
     padding: 0.35rem max(0.5rem, env(safe-area-inset-right)) calc(0.35rem + env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
-    background: linear-gradient(180deg, color-mix(in oklab, var(--my-surface) 90%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 96%, transparent) 100%);
-    border-top: 1px solid color-mix(in oklab, var(--my-outline) 72%, transparent);
-    box-shadow: inset 0 1px 0 var(--my-glass-highlight), 0 -8px 24px rgba(0, 0, 0, 0.2);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--my-surface) 55%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 55%, transparent) 100%);
+    border-top: 1px solid color-mix(in oklab, var(--my-outline) 50%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 52%, transparent), 0 -8px 24px rgba(0, 0, 0, 0.12);
     backdrop-filter: blur(22px) saturate(128%);
     -webkit-backdrop-filter: blur(22px) saturate(128%);
   }

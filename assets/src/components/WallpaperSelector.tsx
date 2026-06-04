@@ -1,6 +1,8 @@
 import { useState, useEffect } from "preact/hooks";
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
+import { getAPIClient } from "../utils/apiClientSingleton";
+import { WALLPAPER_LOCAL_PREFIX } from "../utils/constants";
 
 interface WallpaperSelectorProps {
   value: string;
@@ -34,7 +36,13 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
 }) => {
   const [wallpaperType, setWallpaperType] = useState<"gradient" | "color" | "image">("gradient");
   const [imageUrl, setImageUrl] = useState("");
+  const [localImages, setLocalImages] = useState<{ name: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
+  const api = getAPIClient();
+
+  const isLocal = value.startsWith(WALLPAPER_LOCAL_PREFIX);
   const isGradient = value.startsWith("linear");
   const isColor = !isGradient && value.startsWith("#");
   const isImage = !isGradient && !isColor && value.length > 0;
@@ -46,11 +54,21 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
       setWallpaperType("color");
     } else if (isImage) {
       setWallpaperType("image");
-      setImageUrl(value);
+      if (isLocal) {
+        setImageUrl(value.slice(WALLPAPER_LOCAL_PREFIX.length));
+      } else {
+        setImageUrl(value);
+      }
     } else {
       setWallpaperType("gradient");
     }
-  }, [value, isGradient, isColor, isImage]);
+  }, [value, isGradient, isColor, isImage, isLocal]);
+
+  useEffect(() => {
+    if (wallpaperType === "image") {
+      api.listWallpapers().then(setLocalImages).catch(() => setLocalImages([]));
+    }
+  }, [wallpaperType]);
 
   const handleGradientSelect = (gradientValue: string) => {
     onChange(gradientValue);
@@ -65,6 +83,42 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
     if (url.trim()) {
       onChange(url.trim());
     }
+  };
+
+  const handleUpload = async (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const result = await api.uploadWallpaper(file);
+      const localValue = `${WALLPAPER_LOCAL_PREFIX}${result.filename}`;
+      onChange(localValue);
+      setLocalImages((prev) => [...prev, { name: result.filename }]);
+    } catch {
+      setUploadError(t("upload_fail") || "Upload failed");
+    } finally {
+      setUploading(false);
+      input.value = "";
+    }
+  };
+
+  const handleDeleteLocal = async (filename: string) => {
+    try {
+      await api.deleteWallpaper(filename);
+      setLocalImages((prev) => prev.filter((img) => img.name !== filename));
+      if (isLocal && value.slice(WALLPAPER_LOCAL_PREFIX.length) === filename) {
+        onChange("");
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSelectLocal = (filename: string) => {
+    onChange(`${WALLPAPER_LOCAL_PREFIX}${filename}`);
   };
 
   return (
@@ -150,10 +204,23 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
             type="text"
             className="my-input w-full text-sm"
             placeholder={t("modal.image_url_placeholder")}
-            value={imageUrl}
+            value={isLocal ? "" : imageUrl}
             onInput={(e) => handleImageUrlChange((e.target as HTMLInputElement).value)}
           />
-          {imageUrl && (
+          <div className="flex items-center gap-2">
+            <label className="btn btn-sm btn-outline cursor-pointer">
+              {uploading ? (t("upload_progress") || "Uploading...") : (t("upload_image") || "Upload")}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => { void handleUpload(e); }}
+                disabled={uploading}
+              />
+            </label>
+            {uploadError && <span className="text-xs text-red-400">{uploadError}</span>}
+          </div>
+          {imageUrl && !isLocal && (
             <div className="h-20 rounded-lg overflow-hidden bg-[color:color-mix(in_oklab,var(--my-surface-strong)_86%,transparent)] border border-[color:color-mix(in_oklab,var(--my-outline)_42%,transparent)]">
               <img
                 src={imageUrl}
@@ -163,6 +230,41 @@ export const WallpaperSelector: FunctionalComponent<WallpaperSelectorProps> = ({
                   // 忽略图片加载错误
                 }}
               />
+            </div>
+          )}
+          {localImages.length > 0 && (
+            <div>
+              <div className="text-xs text-base-content/60 mb-1">{t("local_images") || "Local images"}</div>
+              <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                {localImages.map((img) => (
+                  <div
+                    key={img.name}
+                    className={`relative group rounded-lg overflow-hidden border-2 cursor-pointer ${
+                      isLocal && value.slice(WALLPAPER_LOCAL_PREFIX.length) === img.name
+                        ? "border-primary ring-2 ring-primary/30"
+                        : "border-[color:color-mix(in_oklab,var(--my-outline)_56%,transparent)] hover:border-primary/50"
+                    }`}
+                    onClick={() => handleSelectLocal(img.name)}
+                  >
+                    <img
+                      src={`/api/wallpapers/${img.name}`}
+                      alt={img.name}
+                      className="w-full h-16 object-cover"
+                    />
+                    <button
+                      type="button"
+                      className="absolute top-0.5 right-0.5 w-5 h-5 flex items-center justify-center rounded-full bg-red-600/80 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDeleteLocal(img.name);
+                      }}
+                      title={t("delete_image") || "Delete"}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

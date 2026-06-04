@@ -19,7 +19,7 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
   options,
   onChange,
   disabled = false,
-  minWidth = "130px",
+  minWidth = "170px",
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,7 +58,7 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
     >
       {/* 选择器按钮 */}
       <button
-        className={`my-field-surface dropdown-select-btn flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl transition-all duration-200 ${
+        className={`my-field-surface dropdown-select-btn flex items-center justify-between w-full h-11 px-4 py-3 rounded-xl transition-all duration-200 ${
           disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
         }`}
         style={{
@@ -70,7 +70,7 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
       >
-        <span className="flex-1 text-left text-sm">
+        <span className="flex-1 text-left text-base">
           {selectedOption?.label || "选择"}
         </span>
         <svg

@@ -52,28 +52,15 @@ export class APIClient {
         this.authToken = token;
     }
 
-    /**
-     * 获取当前认证 Token
-     * @returns {string | null} 当前 Token
-     */
-    getAuthToken(): string | null {
-        return this.authToken;
-    }
+  /**
+   * 获取当前认证 Token
+   * @returns {string | null} 当前 Token
+   */
+  getAuthToken(): string | null {
+    return this.authToken;
+  }
 
-    /**
-     * 构建包含认证的请求头
-     * @param {Record<string, string>} additionalHeaders 额外的请求头
-     * @returns {Record<string, string>} 合并后的请求头
-     */
-    private buildHeaders(additionalHeaders: Record<string, string> = {}): Record<string, string> {
-        const headers: Record<string, string> = { ...additionalHeaders };
-        if (this.authToken) {
-            headers['Authorization'] = `Bearer ${this.authToken}`;
-        }
-        return headers;
-    }
-
-    /**
+  /**
      * 获取当前计时器状态
      * @returns {Promise<TimerState>} 返回一个 Promise，解析为 TimerState 对象
      */
@@ -550,6 +537,53 @@ export class APIClient {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
         });
+        return await response.json();
+    }
+
+    // === 壁纸 API ===
+
+    /**
+     * 上传壁纸图片
+     * @param {File} file 图片文件
+     * @returns {Promise<{filename: string}>} 上传后的文件名
+     */
+    async uploadWallpaper(file: File): Promise<{ filename: string }> {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch(`${this.baseUrl}/api/wallpapers`, {
+            method: 'POST',
+            body: formData,
+        });
+        if (!response.ok) {
+            throw new Error(`Error uploading wallpaper: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 获取已上传的壁纸列表
+     * @returns {Promise<{name: string}[]>}
+     */
+    async listWallpapers(): Promise<{ name: string }[]> {
+        const response = await fetch(`${this.baseUrl}/api/wallpapers`);
+        if (!response.ok) {
+            throw new Error(`Error listing wallpapers: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * 删除指定壁纸
+     * @param {string} filename 文件名
+     */
+    async deleteWallpaper(filename: string): Promise<{ success: boolean }> {
+        const response = await fetch(`${this.baseUrl}/api/wallpapers/${encodeURIComponent(filename)}`, {
+            method: 'DELETE',
+        });
+        if (!response.ok) {
+            throw new Error(`Error deleting wallpaper: ${response.statusText}`);
+        }
         return await response.json();
     }
 }

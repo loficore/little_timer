@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useCallback } from "preact/hooks";
 import { Header } from "./components/Header";
 import { TabPanel } from "./components/TabPanel";
 import { BasicSettings } from "./components/BasicSettings";
+import { WallpaperModal } from "./components/WallpaperModal";
 import { CountdownSettings } from "./components/CountdownSettings";
 import { StopwatchSettings } from "./components/StopwatchSettings";
 import { BackupTab } from "./components/settings/BackupTab";
@@ -10,8 +11,8 @@ import { t, setLanguage } from "./utils/i18n";
 import { getAPIClient } from "./utils/apiClientSingleton";
 import type { BackupConfig } from "./utils/apiClient";
 import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
-import { ClockIconComponent, CheckIconComponent, ResetIcon } from "./utils/icons";
-import { loadAudioPreferences, normalizeAudioPreferences, saveAudioPreferences } from "./utils/audio";
+import { ClockIconComponent, CheckIconComponent, ResetIcon, SettingsIcon, BackupIcon } from "./utils/icons";
+import { loadAudioPreferences, normalizeAudioPreferences, saveAudioPreferences, DEFAULT_AUDIO_PREFERENCES } from "./utils/audio";
 import { STORAGE_KEYS } from "./utils/constants";
 
 interface SettingsPageProps {
@@ -21,14 +22,64 @@ interface SettingsPageProps {
 }
 
 const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
-  { id: "basic", labelKey: "settings.tabs.basic" },
+  { id: "basic", labelKey: "settings.tabs.basic", icon: <SettingsIcon /> },
   { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
   { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
-  { id: "backup", labelKey: "settings.tabs.backup" },
+  { id: "backup", labelKey: "settings.tabs.backup", icon: <BackupIcon /> },
 ];
 
 const LIGHT_STYLE_STORAGE_KEY = "lt_light_style";
 const THEME_MODE_STORAGE_KEY = "lt_theme_mode";
+
+interface BasicSettingsConfig {
+  timezone: number;
+  language: string;
+  default_mode: string;
+  theme_mode: string;
+  wallpaper: string;
+  sound_enabled: boolean;
+  sound_tick: boolean;
+  sound_finish: boolean;
+  sound_volume: number;
+  layout_density: string;
+  time_display_style: string;
+  light_style: string;
+}
+
+interface ClockDefault {
+  duration_seconds: number;
+  loop: boolean;
+  loop_count: number;
+  loop_interval_seconds: number;
+}
+
+interface StopwatchDefault {
+  max_seconds: number;
+}
+
+interface ClockDefaults {
+  countdown: ClockDefault;
+  stopwatch: StopwatchDefault;
+}
+
+interface SettingsConfig {
+  basic: BasicSettingsConfig;
+  clock_defaults: ClockDefaults;
+  backup_enabled?: boolean;
+  backup_target_type?: string;
+  backup_local_path?: string;
+  backup_webdav_url?: string;
+  backup_webdav_username?: string;
+  backup_webdav_password?: string;
+  backup_s3_endpoint?: string;
+  backup_s3_bucket?: string;
+  backup_s3_region?: string;
+  backup_s3_access_key?: string;
+  backup_s3_secret_key?: string;
+  backup_s3_path_prefix?: string;
+  backup_auto_interval_hours?: number;
+  backup_max_backups?: number;
+}
 
 const DEFAULT_CONFIG: SettingsConfig = {
   basic: {
@@ -68,6 +119,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   const [activeTab, setActiveTab] = useState("basic");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const [showWallpaperModal, setShowWallpaperModal] = useState(false);
   const animationsEnabled = !isWebViewRuntime();
   const pendingInteractionLabelRef = useRef<string | null>(null);
   const pendingInteractionStartRef = useRef<number>(0);
@@ -151,7 +203,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           language: s?.basic?.language ?? "ZH",
           default_mode: s?.basic?.default_mode ?? "countdown",
           theme_mode: s?.basic?.theme_mode ?? "dark",
-          wallpaper: s?.basic?.wallpaper ?? "",
+          wallpaper: wallpaper || s?.basic?.wallpaper || "",
           sound_enabled: audioPreferences.sound_enabled,
           sound_tick: audioPreferences.sound_tick,
           sound_finish: audioPreferences.sound_finish,
@@ -271,8 +323,17 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     
     // 保存布局密度到localStorage
     localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, String(config.basic.layout_density ?? "normal"));
+    window.dispatchEvent(new CustomEvent("setting-change", {
+      detail: { key: "layout_density", value: String(config.basic.layout_density ?? "normal") }
+    }));
     localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, String(config.basic.time_display_style ?? "classic"));
+    window.dispatchEvent(new CustomEvent("setting-change", {
+      detail: { key: "time_display_style", value: String(config.basic.time_display_style ?? "classic") }
+    }));
     localStorage.setItem(LIGHT_STYLE_STORAGE_KEY, String(config.basic.light_style ?? "paper"));
+    window.dispatchEvent(new CustomEvent("setting-change", {
+      detail: { key: "light_style", value: String(config.basic.light_style ?? "paper") }
+    }));
 
     const {
       sound_enabled: _sound_enabled,
@@ -291,7 +352,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     };
 
     if (apiClientRef.current) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       void apiClientRef.current.updateSettings(serverConfig)
         .then(() => {
           setSaveMessage(t("common.save_success"));
@@ -337,7 +397,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     if (confirm(t("common.reset_confirm"))) {
       const startAt = performance.now();
       setConfig(DEFAULT_CONFIG);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       saveAudioPreferences(DEFAULT_AUDIO_PREFERENCES);
       localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, "normal");
       localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, "classic");
@@ -390,7 +449,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     });
 
     try {
-      observer.observe({ type: "longtask", buffered: true } as PerformanceObserverInit);
+      observer.observe({ type: "longtask", buffered: true });
     } catch {
       // 部分 WebView 不支持 longtask，忽略即可。
     }
@@ -427,6 +486,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
             <BasicSettings
               config={config.basic}
               isAnimated={animationsEnabled}
+              onWallpaperClick={() => setShowWallpaperModal(true)}
               onChange={(newBasic) => {
                 markInteraction("basic.config.change");
                 setConfig((prev) => {
@@ -488,6 +548,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
             <BackupTab
               config={config}
               onChange={(newConfig) => {
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
                 setConfig(newConfig);
               }}
             />
@@ -519,6 +580,19 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           )}
         </div>
       </div>
+
+      <WallpaperModal
+        isOpen={showWallpaperModal}
+        value={config.basic.wallpaper || ""}
+        onClose={() => setShowWallpaperModal(false)}
+        onChange={(wallpaper) => {
+          setConfig((prev) => ({
+            ...prev,
+            basic: { ...prev.basic, wallpaper },
+          }));
+          onWallpaperChange?.(wallpaper);
+        }}
+      />
     </div>
   );
 };

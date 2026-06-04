@@ -6,7 +6,7 @@ import { SettingsPage } from "./Settings.tsx";
 import { StatsPage } from "./Stats.tsx";
 import { ErrorNotification } from "./components/ErrorNotification.tsx";
 import { getAPIClient } from "./utils/apiClientSingleton";
-import { WALLPAPER_FALLBACK_GRADIENT, STORAGE_KEYS } from "./utils/constants";
+import { WALLPAPER_FALLBACK_GRADIENT, STORAGE_KEYS, resolveWallpaperUrl } from "./utils/constants";
 import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, logLifecycle, logPerf } from "./utils/logger";
 
 type Page = "timer" | "habits" | "stats" | "settings";
@@ -65,7 +65,7 @@ const sanitizeWallpaperUrl = (url: string): string => {
   const trimmed = url.trim();
   if (!trimmed) return "";
   const lower = trimmed.toLowerCase();
-  if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("data:image/")) {
+  if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("data:image/") || lower.startsWith("/api/")) {
     return trimmed;
   }
   return "";
@@ -154,8 +154,8 @@ export const App = () => {
         cachedWallpaper,
       });
 
-      // 服务端空值时保留本地最近一次有效值，避免刷新后背景闪回黑色
-      updateGlobalWallpaper(serverWallpaper || cachedWallpaper, "server-settings");
+      // 本地缓存优先：保留用户最新选择（即使未保存到服务端）
+      updateGlobalWallpaper(cachedWallpaper || serverWallpaper, "server-settings");
     }).catch(() => {
       // 忽略设置获取错误
       applyThemeMode(localStorage.getItem(THEME_MODE_STORAGE_KEY) || "dark");
@@ -239,8 +239,9 @@ export const App = () => {
         html.style.background = wallpaperInfo.value;
       } else if (wallpaperInfo.type === "image") {
         // 图片层失败时仍显示兜底渐变，避免退化成纯黑背景
+        const resolvedUrl = resolveWallpaperUrl(wallpaperInfo.value);
         html.style.backgroundColor = "#0d0d0d";
-        html.style.backgroundImage = `url("${sanitizeWallpaperUrl(wallpaperInfo.value).replace(/"/g, '\\"')}"), ${WALLPAPER_FALLBACK_GRADIENT}`;
+        html.style.backgroundImage = `url("${sanitizeWallpaperUrl(resolvedUrl).replace(/"/g, '\\"')}"), ${WALLPAPER_FALLBACK_GRADIENT}`;
         html.style.backgroundSize = "cover, 140% 140%";
         html.style.backgroundPosition = "center center, center center";
         html.style.backgroundRepeat = "no-repeat, no-repeat";

@@ -52,6 +52,12 @@ describe("集成测试 - 计时器流程", () => {
     vi.useRealTimers();
   });
 
+  const advanceBy = (ms: number) => {
+    for (let i = 0; i < ms; i += 16) {
+      act(() => vi.advanceTimersByTime(16));
+    }
+  };
+
   describe("stopwatch 完整流程", () => {
     it("start → tick → pause → resume → reset 状态流转", async () => {
       const { result } = renderHook(() => useTimer());
@@ -67,9 +73,7 @@ describe("集成测试 - 计时器流程", () => {
       expect(result.current.isPaused).toBe(false);
       expect(result.current.elapsedSeconds).toBe(0);
 
-      act(() => {
-        vi.advanceTimersByTime(5000);
-      });
+      advanceBy(5000);
 
       expect(result.current.elapsedSeconds).toBe(5);
 
@@ -79,9 +83,7 @@ describe("集成测试 - 计时器流程", () => {
 
       expect(result.current.isPaused).toBe(true);
 
-      act(() => {
-        vi.advanceTimersByTime(3000);
-      });
+      advanceBy(3000);
 
       expect(result.current.elapsedSeconds).toBe(5);
 
@@ -91,9 +93,7 @@ describe("集成测试 - 计时器流程", () => {
 
       expect(result.current.isPaused).toBe(false);
 
-      act(() => {
-        vi.advanceTimersByTime(2000);
-      });
+      advanceBy(2000);
 
       expect(result.current.elapsedSeconds).toBe(7);
 
@@ -147,23 +147,17 @@ describe("集成测试 - 计时器流程", () => {
       expect(result.current.isResting).toBe(false);
       expect(result.current.remainingSeconds).toBe(5);
 
-      act(() => {
-        vi.advanceTimersByTime(5000);
-      });
+      advanceBy(5000);
 
       expect(result.current.isResting).toBe(true);
       expect(result.current.remainingSeconds).toBe(3);
 
-      act(() => {
-        vi.advanceTimersByTime(3000);
-      });
+      advanceBy(3000);
 
       expect(result.current.currentRound).toBe(2);
       expect(result.current.isResting).toBe(false);
 
-      act(() => {
-        vi.advanceTimersByTime(5000);
-      });
+      advanceBy(5000);
 
       expect(result.current.isFinished).toBe(true);
       expect(result.current.isRunning).toBe(false);

@@ -15,6 +15,7 @@ import {
   ChevronUpIcon,
   ArrowLeftIcon,
   ChartBarIcon,
+  ArchiveBoxIcon,
 } from "@heroicons/react/24/outline";
 
 export const PlayIconComponent: FunctionalComponent = () => (
@@ -79,4 +80,8 @@ export const ArrowLeftIconComponent: FunctionalComponent = () => (
 
 export const ChartIcon: FunctionalComponent = () => (
   <ChartBarIcon className="w-5 h-5" />
+);
+
+export const BackupIcon: FunctionalComponent = () => (
+  <ArchiveBoxIcon className="w-5 h-5" />
 );

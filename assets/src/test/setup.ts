@@ -47,6 +47,7 @@ vi.mock('../utils/icons', async () => {
     ChevronDownIconComponent: MockIcon,
     ChevronUpIconComponent: MockIcon,
     ChartIcon: MockIcon,
+    BackupIcon: MockIcon,
     PlayIcon: MockIcon,
     PauseIcon: MockIcon,
     ArrowPathIcon: MockIcon,
@@ -62,6 +63,7 @@ vi.mock('../utils/icons', async () => {
     ChevronUpIcon: MockIcon,
     ArrowLeftIcon: MockIcon,
     ChartBarIcon: MockIcon,
+    ArchiveBoxIcon: MockIcon,
   };
 });
 

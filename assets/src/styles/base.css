@@ -162,8 +162,8 @@
     inset: -15%;
     pointer-events: none;
     z-index: 0;
-    backdrop-filter: blur(26px) saturate(120%);
-    -webkit-backdrop-filter: blur(26px) saturate(120%);
+    backdrop-filter: blur(18px) saturate(120%);
+    -webkit-backdrop-filter: blur(18px) saturate(120%);
     background:
       radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.16) 0 2px, transparent 2px 100%),
       radial-gradient(circle at 78% 28%, rgba(255, 255, 255, 0.12) 0 1.5px, transparent 1.5px 100%),
@@ -171,28 +171,28 @@
       linear-gradient(115deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.06) 42%, rgba(255, 255, 255, 0.12) 58%, rgba(255, 255, 255, 0.05) 100%),
       radial-gradient(42% 38% at 18% 22%, rgba(74, 158, 255, 0.18) 0%, rgba(74, 158, 255, 0.02) 70%),
       radial-gradient(35% 32% at 80% 76%, rgba(255, 179, 71, 0.14) 0%, rgba(255, 179, 71, 0.02) 72%);
-    background-color: rgba(10, 12, 18, 0.36);
+    background-color: rgba(10, 12, 18, 0.18);
     animation: ambientPulse 7.5s ease-in-out infinite;
   }
 
   html.light-mode body::before {
-    backdrop-filter: blur(26px) saturate(100%);
-    -webkit-backdrop-filter: blur(26px) saturate(100%);
+    backdrop-filter: blur(18px) saturate(100%);
+    -webkit-backdrop-filter: blur(18px) saturate(100%);
     background:
       radial-gradient(42% 34% at 18% 22%, rgba(122, 90, 62, 0.05) 0%, rgba(122, 90, 62, 0.01) 70%),
       radial-gradient(32% 28% at 80% 76%, rgba(105, 80, 56, 0.04) 0%, rgba(105, 80, 56, 0.01) 72%);
-    background-color: rgba(188, 166, 136, 0.1);
+    background-color: rgba(188, 166, 136, 0.06);
     animation: none;
-    opacity: 0.62;
+    opacity: 0.55;
   }
 
   html.light-mode.light-style-mist body::before {
     background:
       radial-gradient(42% 34% at 18% 22%, rgba(95, 114, 122, 0.05) 0%, rgba(95, 114, 122, 0.01) 70%),
       radial-gradient(32% 28% at 80% 76%, rgba(110, 118, 122, 0.04) 0%, rgba(110, 118, 122, 0.01) 72%);
-    background-color: rgba(170, 178, 184, 0.1);
+    background-color: rgba(170, 178, 184, 0.06);
     animation: none;
-    opacity: 0.58;
+    opacity: 0.50;
   }
 
   html.webview-stats-lite {
@@ -204,6 +204,26 @@
     backdrop-filter: blur(8px) saturate(108%);
     -webkit-backdrop-filter: blur(8px) saturate(108%);
     opacity: 0.58;
+  }
+
+  html.breathing-blur body::before {
+    animation: ambientPulse 7.5s ease-in-out infinite, breatheBlur 5s ease-in-out infinite;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html.breathing-blur.light-mode body::before {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    animation: breatheBlur 5s ease-in-out infinite;
+    opacity: 1;
+  }
+
+  html.breathing-blur.light-mode.light-style-mist body::before {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    animation: breatheBlur 5s ease-in-out infinite;
+    opacity: 1;
   }
 
   button, input[type="button"], input[type="checkbox"], input[type="radio"] {
@@ -278,4 +298,15 @@
 @keyframes ambientPulse {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
+}
+
+@keyframes breatheBlur {
+  0%, 100% {
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+  }
+  50% {
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+  }
 }

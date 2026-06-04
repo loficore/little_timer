@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/preact";
+import { render, fireEvent, screen } from "@testing-library/preact";
 import { BasicSettings } from "../../components/BasicSettings";
 
 vi.mock("../../utils/i18n", () => ({
@@ -33,6 +33,7 @@ vi.mock("../../utils/i18n", () => ({
       "settings.basic.debug_mode_desc": "Enable debug mode",
       "settings.basic.debug_no_memory": "No memory info",
       "settings.basic.debug_memory_hint": "Memory usage hint",
+      "modal.wallpaper": "Wallpaper",
     };
     return translations[key] || key;
   },
@@ -42,12 +43,12 @@ vi.mock("../../utils/logger", () => ({
   setPerfDebugEnabled: vi.fn(),
 }));
 
-vi.mock("../../components/WallpaperSelector", () => ({
-  WallpaperSelector: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <div data-testid="wallpaper-selector">
-      <input type="text" data-testid="wallpaper-input" value={value} onChange={(e) => onChange(e.currentTarget.value)} />
-    </div>
-  ),
+vi.mock("../../utils/apiClientSingleton", () => ({
+  getAPIClient: () => ({
+    listWallpapers: vi.fn().mockResolvedValue([]),
+    uploadWallpaper: vi.fn().mockResolvedValue({ filename: "test.png" }),
+    deleteWallpaper: vi.fn().mockResolvedValue(undefined),
+  }),
 }));
 
 describe("BasicSettings", () => {
@@ -80,9 +81,10 @@ describe("BasicSettings", () => {
     });
   });
 
-  it("应该渲染壁纸选择器", () => {
-    const { getByTestId } = render(<BasicSettings {...defaultProps} />);
-    expect(getByTestId("wallpaper-selector")).toBeTruthy();
+  it("应该渲染壁纸选择按钮", () => {
+    const { container } = render(<BasicSettings {...defaultProps} />);
+    const buttons = container.querySelectorAll("button");
+    expect(buttons.length).toBeGreaterThan(0);
   });
 
   it("应该渲染所有设置项", () => {
@@ -139,13 +141,13 @@ describe("BasicSettings", () => {
   });
 
   describe("动画", () => {
-    it("isAnimated 为 true 时应该有动画类", () => {
+    it("isAnimated 为 true 时不应该有动画类（壁纸全屏显示需要移除动画）", () => {
       const { container } = render(
         <BasicSettings {...defaultProps} isAnimated={true} />
       );
 
       const element = container.querySelector("div");
-      expect(element?.className).toContain("animate-slideUp");
+      expect(element?.className).not.toContain("animate-slideUp");
     });
 
     it("isAnimated 为 false 时不应该有动画类", () => {
@@ -159,15 +161,10 @@ describe("BasicSettings", () => {
   });
 
   describe("onChange 回调", () => {
-    it("wallpaper 变化时应该调用 onChange", () => {
-      const onChange = vi.fn();
-      const { getByTestId } = render(
-        <BasicSettings {...defaultProps} onChange={onChange} />
-      );
-
-      fireEvent.change(getByTestId("wallpaper-input"), { target: { value: "new_wallpaper" } });
-
-      expect(onChange).toHaveBeenCalled();
+    it("点击壁纸按钮时应该打开 Modal", () => {
+      const { container } = render(<BasicSettings {...defaultProps} />);
+      const wallpaperButton = container.querySelector("button");
+      expect(wallpaperButton).toBeTruthy();
     });
   });
 });

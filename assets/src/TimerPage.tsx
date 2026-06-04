@@ -15,6 +15,7 @@ import { DropdownSelect } from "./components/DropdownSelect";
 import { TimerConfig as TimerConfigComponent } from "./components/TimerConfig";
 import { StarIconComponent } from "./utils/icons";
 import { useSSE } from "./hooks/useSSE";
+import { useFinishTransition } from "./hooks/useFinishTransition";
 import { useTimer } from "./hooks/useTimer";
 import type { TimerMode } from "./hooks/useTimer";
 
@@ -68,26 +69,46 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
         finish,
     } = useTimer();
 
-    const { isConnected: sseConnected } = useSSE();
+    const { isConnected: sseConnected, lastState } = useSSE();
+    const { displayValue: transitionDisplayValue, isTransitioning, startTransition } = useFinishTransition(lastState);
 
     useEffect(() => {
+        const handleSettingChange = (e: Event) => {
+            const { key, value } = (e as CustomEvent).detail;
+            if (key === "layout_density") {
+                setLayoutDensity(value as LayoutDensity);
+            }
+            if (key === "time_display_style") {
+                setTimeDisplayStyle(value as TimeDisplayStyle);
+            }
+        };
+
         const handleStorageChange = (e: StorageEvent) => {
             if (e.key === "layout_density" && e.newValue) {
                 setLayoutDensity(e.newValue as LayoutDensity);
             }
-
             if (e.key === "time_display_style" && e.newValue) {
                 setTimeDisplayStyle(e.newValue as TimeDisplayStyle);
             }
         };
 
+        window.addEventListener("setting-change", handleSettingChange);
         window.addEventListener("storage", handleStorageChange);
-        return () => window.removeEventListener("storage", handleStorageChange);
+        return () => {
+            window.removeEventListener("setting-change", handleSettingChange);
+            window.removeEventListener("storage", handleStorageChange);
+        };
     }, []);
 
     useEffect(() => {
         void loadData();
     }, []);
+
+    useEffect(() => {
+        if (showHabitPicker) {
+            void loadData();
+        }
+    }, [showHabitPicker]);
 
     // 当 SSE 连接成功且初始数据还未加载时，重新尝试加载数据
     useEffect(() => {
@@ -106,6 +127,18 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
     useEffect(() => {
         audioEngine.setPreferences(audioPreferences);
     }, [audioPreferences]);
+
+    useEffect(() => {
+        const html = document.documentElement;
+        if (isRunning && !isPaused) {
+            html.classList.add("breathing-blur");
+        } else {
+            html.classList.remove("breathing-blur");
+        }
+        return () => {
+            html.classList.remove("breathing-blur");
+        };
+    }, [isRunning, isPaused]);
 
     useEffect(() => {
         if (selectedHabitId) {
@@ -242,6 +275,10 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             if (selectedHabitId) {
                 void loadHabitDetail(selectedHabitId);
             }
+            const localTime = timerConfig.mode === "stopwatch" ? elapsedSeconds : remainingSeconds;
+            const authoritativeTime = lastState?.time ?? localTime;
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+            startTransition(localTime, authoritativeTime);
         } catch (e) {
             logError(`结束计时失败: ${e}`);
         }
@@ -275,7 +312,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
         }
     };
 
-    const timeDisplay = displayTime;
+    const timeDisplay = isTransitioning ? transitionDisplayValue : displayTime;
     const timeStateClass = isFinished
         ? "time-state-finished"
         : isResting
@@ -290,7 +327,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
     return (
         <div className="flex flex-col flex-1 bg-transparent overflow-hidden">
             <header className="navbar my-topbar shrink-0 px-2 sm:px-3">
-                <div className="flex-1">
+                <div className="flex-1 flex justify-center">
                     <span className="my-topbar-title text-xl font-bold">{t("timer.title")}</span>
                 </div>
                 <div className="flex-none">
@@ -314,7 +351,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     gap: 'var(--layout-control-gap)',
                 }}>
                     <button
-                        className="my-surface-card flex items-center gap-2 sm:gap-3 min-w-[170px] justify-between px-4 py-3 rounded-xl cursor-pointer"
+                        className="my-surface-card flex items-center gap-2 sm:gap-3 min-w-[170px] h-11 justify-between px-4 py-3 rounded-xl cursor-pointer"
                         onClick={() => setShowHabitPicker(true)}
                     >
                         {selectedHabit ? (
@@ -335,7 +372,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                         </svg>
                     </button>
 
-<DropdownSelect
+                    <DropdownSelect
                         value={timerConfig.mode}
                         options={[
                             { value: "stopwatch", label: t("timer.stopwatch") },
@@ -343,7 +380,6 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                         ]}
                         onChange={(value) => setTimerConfig({...timerConfig, mode: value as TimerMode})}
                         disabled={isRunning}
-                        minWidth="130px"
                     />
                 </div>
 
@@ -356,7 +392,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
                 <div className="flex flex-1 flex-col items-center justify-center">
                 <div className="my-clock-glass mb-3 sm:mb-4">
-                                    <div className={`text-[clamp(3.2rem,13vw,8rem)] leading-none font-mono font-semibold time-transition ${timeDisplayStyle === "seven_segment" ? "time-style-seven-segment" : "time-style-classic"} ${timeStateClass} ${isRunning && timeDisplayStyle === "seven_segment" ? "time-running-segment" : ""}`}>
+                                    <div className={`text-[clamp(3.2rem,13vw,8rem)] leading-none font-mono font-semibold time-transition flex items-center justify-center ${timeDisplayStyle === "seven_segment" ? "time-style-seven-segment" : "time-style-classic"} ${timeStateClass} ${isRunning && timeDisplayStyle === "seven_segment" ? "time-running-segment" : ""}`}>
                       {timeDisplayStyle === "seven_segment" ? (
                           <SevenSegmentDisplay value={timeDisplay} />
                       ) : (
@@ -485,7 +521,12 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                         <div className="flex-1 overflow-y-auto p-2">
                             {habitSets.length === 0 ? (
                                 <div className="text-center py-8 text-[var(--my-on-surface-variant)]">
-                                    <p>{t("habit.no_habits")}</p>
+                                    <p className="mb-3">{t("habit.no_habits")}</p>
+                                    {onHabitsClick && (
+                                        <button className="btn btn-primary btn-sm" onClick={onHabitsClick}>
+                                            {t("habit.management")}
+                                        </button>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="space-y-2">

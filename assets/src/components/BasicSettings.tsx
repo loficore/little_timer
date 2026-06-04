@@ -1,6 +1,5 @@
 import { SettingItem } from "./SettingItem";
 import { SelectInput } from "./SelectInput";
-import { WallpaperSelector } from "./WallpaperSelector";
 import { t } from "../utils/i18n";
 import { setPerfDebugEnabled } from "../utils/logger";
 import { useState, useEffect } from "preact/hooks";
@@ -22,6 +21,7 @@ interface BasicSettingsProps {
     debug_mode?: boolean;
   };
   isAnimated?: boolean;
+  onWallpaperClick?: () => void;
   onChange: (config: any) => void;
 }
 
@@ -50,7 +50,8 @@ const saveDebugMode = (enabled: boolean) => {
   }
 };
 
-export const BasicSettings = ({ config, onChange, isAnimated = true }: BasicSettingsProps) => {
+export const BasicSettings = ({ config, onChange, isAnimated = true, onWallpaperClick }: BasicSettingsProps) => {
+
   const timezones = Array.from({ length: 27 }, (_, i) => i - 12).map((tz) => ({
     value: tz,
     label: `UTC${tz >= 0 ? "+" : ""}${tz}`,
@@ -131,13 +132,24 @@ export const BasicSettings = ({ config, onChange, isAnimated = true }: BasicSett
 
   return (
     <div
-      className={`space-y-4 sm:space-y-6 ${isAnimated ? "animate-slideUp" : ""}`}
+      className={`space-y-4 sm:space-y-6`}
       style={isAnimated ? { animationDelay: "0.3s", animationFillMode: "both" } : undefined}
     >
-      <WallpaperSelector
-        value={config.wallpaper || ""}
-        onChange={(wallpaper) => onChange({ ...config, wallpaper })}
-      />
+      <div className="form-control mb-6">
+        <label className="label">
+          <span className="label-text">{t("modal.wallpaper")}</span>
+        </label>
+        <button
+          type="button"
+          className="w-full h-24 rounded-xl border-2 border-[var(--my-outline)] bg-[var(--my-surface-strong)] hover:border-[var(--my-primary)] transition-colors flex items-center justify-center gap-3"
+          onClick={() => onWallpaperClick?.()}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-[var(--my-on-surface-variant)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          <span className="text-[var(--my-on-surface-variant)] font-medium">{t("modal.select_wallpaper")}</span>
+        </button>
+      </div>
 
       <SettingItem label={t("settings.basic.timezone")}>
         <SelectInput

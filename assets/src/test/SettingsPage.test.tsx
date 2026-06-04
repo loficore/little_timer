@@ -56,6 +56,8 @@ vi.mock("../utils/logger", () => ({
 }));
 
 vi.mock("../utils/constants", () => ({
+  WALLPAPER_LOCAL_PREFIX: "local://",
+  resolveWallpaperUrl: (value: string) => value,
   STORAGE_KEYS: {
     LAYOUT_DENSITY: "lt_layout_density",
     TIME_DISPLAY_STYLE: "lt_time_display_style",

@@ -40,11 +40,11 @@ trap cleanup SIGINT SIGTERM
 
 echo "=== 启动前端 Dev Server ==="
 cd assets
-if command -v bun &> /dev/null; then
-    bun run dev &
+if command -v pnpm &> /dev/null; then
+    pnpm run dev &
     VITE_PID=$!
 else
-    echo "错误: 未找到 bun"
+    echo "错误: 未找到 pnpm"
     exit 1
 fi
 cd ..

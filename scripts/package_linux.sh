@@ -11,7 +11,7 @@ VERSION="$(date +%Y%m%d)"
 TAR_NAME="${APP_NAME}-${VERSION}-linux-x64.tar.gz"
 
 ZIG_CMD="${ZIG_CMD:-zig}"
-PKG_CMD="${PKG_CMD:-bun}"
+PKG_CMD="${PKG_CMD:-pnpm}"
 EMBED_UI="${EMBED_UI:-false}"
 # Zig 0.15+ 使用具体 OptimizeMode：ReleaseFast/ReleaseSafe/ReleaseSmall/Debug
 OPTIMIZE_MODE="${OPTIMIZE_MODE:-ReleaseFast}"

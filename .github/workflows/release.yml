@@ -49,10 +49,15 @@ jobs:
         run: |
           git-cliff --config cliff-release.toml --latest --strip header > release_notes.md
 
-      - name: Setup Bun (frontend build)
-        uses: oven-sh/setup-bun@v2.2.0
+      - name: Setup Node.js (frontend build)
+        uses: actions/setup-node@v4
         with:
-          bun-version: "1.x"
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
 
       - name: Setup Zig
         # 升级到 v2 版本，它拥有更可靠的镜像下载逻辑

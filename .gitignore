@@ -65,4 +65,6 @@ temp.txt
 
 assets/test-results
 
-assets/src/test/visual/
+# Visual regression test — ignore runtime diff files, keep baseline snapshots
+assets/src/test/visual/specs/snapshots/
+!assets/src/test/visual/specs/snapshots/

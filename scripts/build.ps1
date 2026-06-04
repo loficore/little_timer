@@ -51,14 +51,14 @@ foreach ($arg in $args) {
 }
 
 Write-Host "=== 构建前端 ==="
-if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
-    Write-Host "错误: 未找到 bun"
+if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+    Write-Host "错误: 未找到 pnpm"
     exit 1
 }
 
 Push-Location assets
-& bun install
-& bun run build
+& pnpm install
+& pnpm run build
 Pop-Location
 
 Write-Host "=== 构建后端 (Optimize=$optimize, EmbedUI=$embedUi) ==="

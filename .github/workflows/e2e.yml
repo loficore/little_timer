@@ -24,10 +24,15 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
 
       - name: Setup Zig
         # 升级到 v2 版本，它拥有更可靠的镜像下载逻辑
@@ -37,10 +42,13 @@ jobs:
           version: 0.15.2
 
       - name: Install dependencies
-        run: bun install
+        working-directory: assets
+        run: pnpm install
 
       - name: Build frontend
-        run: bun run build
+        working-directory: assets
+        run: pnpm run build
 
       - name: Run E2E tests
-        run: bun run test:vrt
+        working-directory: assets
+        run: pnpm run test:vrt

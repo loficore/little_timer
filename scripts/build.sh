@@ -52,11 +52,11 @@ done
 
 echo "=== 构建前端 ==="
 cd assets
-if command -v bun &> /dev/null; then
-    bun install
-    bun run build
+if command -v pnpm &> /dev/null; then
+    pnpm install
+    pnpm run build
 else
-    echo "错误: 未找到 bun"
+    echo "错误: 未找到 pnpm"
     exit 1
 fi
 cd ..

@@ -11,7 +11,7 @@ VERSION="$(date +%Y%m%d)"
 TAR_NAME="${APP_NAME}-${VERSION}-windows-x64.tar.gz"
 
 ZIG_CMD="${ZIG_CMD:-zig}"
-PKG_CMD="${PKG_CMD:-bun}"
+PKG_CMD="${PKG_CMD:-pnpm}"
 EMBED_UI="${EMBED_UI:-true}"
 OPTIMIZE_MODE="${OPTIMIZE_MODE:-ReleaseFast}"
 TARGET_TRIPLE="${TARGET_TRIPLE:-x86_64-windows-gnu}"

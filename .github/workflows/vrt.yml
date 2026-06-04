@@ -21,22 +21,27 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
 
       - name: Install frontend deps
         working-directory: assets
-        run: bun install
+        run: pnpm install
 
       - name: Install Playwright browser
         working-directory: assets
-        run: bunx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run visual regression tests
         working-directory: assets
-        run: bun run test:vrt
+        run: pnpm run test:vrt
 
       - name: Upload Playwright report
         if: always()

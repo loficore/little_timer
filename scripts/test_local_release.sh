@@ -10,7 +10,7 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT_DIR"
 
 ZIG_CMD="${ZIG_CMD:-zig}"
-PKG_CMD="${PKG_CMD:-bun}"
+PKG_CMD="${PKG_CMD:-pnpm}"
 CARGO_CMD="${CARGO_CMD:-cargo}"
 
 DRY_RUN=0

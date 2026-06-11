@@ -346,6 +346,10 @@ pub const MigrationManager = struct {
             \\    s3_access_key_encrypted BLOB,
             \\    s3_secret_key_encrypted BLOB,
             \\    s3_path_prefix TEXT,
+            \\    has_master_password INTEGER DEFAULT 0,
+            \\    credentials_unlock_time INTEGER DEFAULT 0,
+            \\    credential_unlock_attempts INTEGER DEFAULT 0,
+            \\    credential_locked_until INTEGER DEFAULT 0,
             \\    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             \\);
         ;

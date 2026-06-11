@@ -210,9 +210,9 @@ test "saveBackupConfig and loadBackupConfig local roundtrip" {
     };
     defer allocator.free(config.local_path);
 
-    try crud_manager.saveBackupConfig(config);
+    try crud_manager.saveBackupConfig(config, null);
 
-    const loaded = try crud_manager.loadBackupConfig(allocator);
+    const loaded = try crud_manager.loadBackupConfig(allocator, null);
     defer {
         allocator.free(loaded.local_path);
         allocator.free(loaded.webdav_url);
@@ -238,14 +238,14 @@ test "saveBackupConfig with null db returns error" {
     var crud_manager = crud.CrudManager.init(allocator, null);
 
     const config = interface.BackupConfig{};
-    try std.testing.expectError(crud.CrudError.DatabaseOpenFailed, crud_manager.saveBackupConfig(config));
+    try std.testing.expectError(crud.CrudError.DatabaseOpenFailed, crud_manager.saveBackupConfig(config, null));
 }
 
 test "loadBackupConfig with null db returns error" {
     const allocator = std.testing.allocator;
     var crud_manager = crud.CrudManager.init(allocator, null);
 
-    try std.testing.expectError(crud.CrudError.DatabaseOpenFailed, crud_manager.loadBackupConfig(allocator));
+    try std.testing.expectError(crud.CrudError.DatabaseOpenFailed, crud_manager.loadBackupConfig(allocator, null));
 }
 
 test "loadBackupConfig returns defaults when empty" {
@@ -255,7 +255,7 @@ test "loadBackupConfig returns defaults when empty" {
 
     var crud_manager = crud.CrudManager.init(test_allocator, test_db);
 
-    const loaded = try crud_manager.loadBackupConfig(allocator);
+    const loaded = try crud_manager.loadBackupConfig(allocator, null);
     defer {
         allocator.free(loaded.local_path);
         allocator.free(loaded.webdav_url);

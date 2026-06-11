@@ -230,3 +230,321 @@ test "toJsonAlloc() 动态分配 JSON" {
     try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, ":7"));
     try std.testing.expect(std.mem.containsAtLeast(u8, json_str, 1, "2000"));
 }
+
+test "UnlockResult 默认值" {
+    const result: interface.UnlockResult = .{};
+    try std.testing.expect(result.success == false);
+    try std.testing.expect(result.locked_until == 0);
+}
+
+test "UnlockResult 自定义值" {
+    const result: interface.UnlockResult = .{
+        .success = true,
+        .locked_until = 1234567890,
+    };
+    try std.testing.expect(result.success == true);
+    try std.testing.expect(result.locked_until == 1234567890);
+}
+
+test "unlockCredentials 首次解锁成功" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    const before = std.time.timestamp();
+    const result = manager.unlockCredentials("password123");
+    const after = std.time.timestamp();
+
+    try std.testing.expect(result.success == true);
+    try std.testing.expect(result.locked_until == 0);
+    try std.testing.expect(manager.backup_config.credentials_unlock_time >= before);
+    try std.testing.expect(manager.backup_config.credentials_unlock_time <= after);
+    try std.testing.expect(manager.backup_config.credential_unlock_attempts == 0);
+}
+
+test "unlockCredentials 5次失败后锁定" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.credential_unlock_attempts = 5;
+
+    const now = std.time.timestamp();
+    const result = manager.unlockCredentials("wrong_password");
+
+    try std.testing.expect(result.success == false);
+    try std.testing.expect(result.locked_until >= now);
+    try std.testing.expect(result.locked_until <= now + 301);
+}
+
+test "unlockCredentials 锁定期间拒绝解锁" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    const future_lock = std.time.timestamp() + 3600;
+    manager.backup_config.credential_locked_until = future_lock;
+
+    const result = manager.unlockCredentials("any_password");
+
+    try std.testing.expect(result.success == false);
+    try std.testing.expect(result.locked_until == future_lock);
+}
+
+test "unlockCredentials 成功解锁重置计数器" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.credential_unlock_attempts = 3;
+
+    const result = manager.unlockCredentials("correct_password");
+
+    try std.testing.expect(result.success == true);
+    try std.testing.expect(manager.backup_config.credential_unlock_attempts == 0);
+    try std.testing.expect(manager.backup_config.credential_locked_until == 0);
+}
+
+test "setCredentialPassword 存储密码" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.setCredentialPassword("my_secret_password");
+
+    const result = manager.unlockCredentials("my_secret_password");
+    try std.testing.expect(result.success == true);
+}
+
+test "setCredentialPassword 密码覆盖" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.setCredentialPassword("password1");
+    const result1 = manager.unlockCredentials("password1");
+    try std.testing.expect(result1.success == true);
+
+    manager.setCredentialPassword("password2");
+    const result2 = manager.unlockCredentials("password2");
+    try std.testing.expect(result2.success == true);
+}
+
+test "hasMasterPassword 未设置时返回 false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    try std.testing.expect(manager.hasMasterPassword() == false);
+}
+
+test "hasMasterPassword 设置后返回 true" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+
+    try std.testing.expect(manager.hasMasterPassword() == true);
+}
+
+test "isUnlocked 无主密码时返回 false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    try std.testing.expect(manager.isUnlocked() == false);
+}
+
+test "isUnlocked 有主密码但未解锁时返回 false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+
+    try std.testing.expect(manager.isUnlocked() == false);
+}
+
+test "isUnlocked 已解锁时返回 true" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+    manager.backup_config.credentials_unlock_time = std.time.timestamp();
+    manager.setCredentialPassword("secret");
+
+    try std.testing.expect(manager.isUnlocked() == true);
+}
+
+test "isUnlocked 锁定期间返回 false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+    manager.backup_config.credentials_unlock_time = std.time.timestamp();
+    manager.backup_config.credential_locked_until = std.time.timestamp() + 3600;
+    manager.setCredentialPassword("secret");
+
+    try std.testing.expect(manager.isUnlocked() == false);
+}
+
+test "isUnlocked 超过60天TTL返回 false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+    manager.backup_config.credentials_unlock_time = std.time.timestamp() - (61 * 24 * 60 * 60);
+    manager.setCredentialPassword("secret");
+
+    try std.testing.expect(manager.isUnlocked() == false);
+}
+
+test "getMasterPasswordStatus 默认状态" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    const status = manager.getMasterPasswordStatus();
+
+    try std.testing.expect(status.has_password == false);
+    try std.testing.expect(status.unlocked == false);
+    try std.testing.expect(status.locked_until == 0);
+    try std.testing.expect(status.unlock_time == 0);
+}
+
+test "getMasterPasswordStatus 已解锁状态" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+    manager.backup_config.credentials_unlock_time = std.time.timestamp();
+    manager.setCredentialPassword("secret");
+
+    const status = manager.getMasterPasswordStatus();
+
+    try std.testing.expect(status.has_password == true);
+    try std.testing.expect(status.unlocked == true);
+    try std.testing.expect(status.unlock_time > 0);
+}
+
+test "hasMasterPassword 无密码时返回false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    try std.testing.expect(manager.hasMasterPassword() == false);
+}
+
+test "hasMasterPassword 有密码时返回true" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+
+    try std.testing.expect(manager.hasMasterPassword() == true);
+}
+
+test "isUnlocked 未设置密码时返回false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = false;
+    manager.backup_config.credentials_unlock_time = std.time.timestamp();
+    manager.setCredentialPassword("secret");
+
+    try std.testing.expect(manager.isUnlocked() == false);
+}
+
+test "isUnlocked 已锁定时返回false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+    manager.backup_config.credential_locked_until = std.time.timestamp() + 3600;
+    manager.setCredentialPassword("secret");
+
+    try std.testing.expect(manager.isUnlocked() == false);
+}
+
+test "isUnlocked 已过期时返回false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    const ttl_seconds: i64 = 60 * 24 * 60 * 60;
+    manager.backup_config.has_master_password = true;
+    manager.backup_config.credentials_unlock_time = std.time.timestamp() - ttl_seconds - 1;
+    manager.setCredentialPassword("secret");
+
+    try std.testing.expect(manager.isUnlocked() == false);
+}
+
+test "isUnlocked 密码为空时返回false" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+    manager.backup_config.credentials_unlock_time = std.time.timestamp();
+    manager.credential_unlock_password = null;
+
+    try std.testing.expect(manager.isUnlocked() == false);
+}
+
+test "isUnlocked 已解锁且有效时返回true" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.backup_config.has_master_password = true;
+    manager.backup_config.credentials_unlock_time = std.time.timestamp();
+    manager.setCredentialPassword("secret");
+
+    try std.testing.expect(manager.isUnlocked() == true);
+}
+
+test "unlockCredentials 成功解锁" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.setCredentialPassword("secret");
+
+    const result = manager.unlockCredentials("secret");
+
+    try std.testing.expect(result.success == true);
+    try std.testing.expect(result.locked_until == 0);
+    try std.testing.expect(manager.backup_config.credential_unlock_attempts == 0);
+}
+
+test "unlockCredentials 密码错误" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    manager.setCredentialPassword("secret");
+
+    const result = manager.unlockCredentials("wrong");
+
+    try std.testing.expect(result.success == false);
+    try std.testing.expect(manager.backup_config.credential_unlock_attempts == 1);
+}
+
+test "setMasterPassword 成功设置" {
+    const allocator = std.testing.allocator;
+    var manager = try settings_module.SettingsManager.init(allocator, "");
+    defer manager.deinit();
+
+    try manager.setMasterPassword("secret123");
+
+    try std.testing.expect(manager.hasMasterPassword() == true);
+    try std.testing.expect(manager.isUnlocked() == true);
+}

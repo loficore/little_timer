@@ -19,7 +19,10 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.reload();
     await page.waitForTimeout(1500);
     await expect(page.locator(".my-clock-glass")).toBeVisible();
-    await expect(page.locator(".my-sidebar")).toBeVisible();
+    const viewport = page.viewportSize();
+    if (viewport && viewport.width >= 1024) {
+      await expect(page.locator(".my-sidebar")).toBeVisible();
+    }
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-display-seven-segment.png", {
       maxDiffPixels: 100,
@@ -71,6 +74,8 @@ test.describe("TimerPage VRT 截图测试", () => {
   });
 
   test("侧边栏和顶栏视觉（分界线减弱后）", async ({ page }) => {
+    const viewport = page.viewportSize();
+    test.skip(viewport && viewport.width < 1024, "移动端无侧边栏");
     await page.waitForTimeout(1500);
     await expect(page.locator(".my-sidebar")).toBeVisible();
     await expect(page.locator(".my-topbar")).toBeVisible();

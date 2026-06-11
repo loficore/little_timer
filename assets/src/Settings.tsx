@@ -7,13 +7,15 @@ import { WallpaperModal } from "./components/WallpaperModal";
 import { CountdownSettings } from "./components/CountdownSettings";
 import { StopwatchSettings } from "./components/StopwatchSettings";
 import { BackupTab } from "./components/settings/BackupTab";
+import { MasterPasswordModal } from "./components/MasterPasswordModal";
 import { t, setLanguage } from "./utils/i18n";
 import { getAPIClient } from "./utils/apiClientSingleton";
-import type { BackupConfig } from "./utils/apiClient";
+import type { BackupConfig } from "./types/api";
 import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
 import { ClockIconComponent, CheckIconComponent, ResetIcon, SettingsIcon, BackupIcon } from "./utils/icons";
 import { loadAudioPreferences, normalizeAudioPreferences, saveAudioPreferences, DEFAULT_AUDIO_PREFERENCES } from "./utils/audio";
 import { STORAGE_KEYS } from "./utils/constants";
+import { applyTheme, applyLightStyle } from "./hooks/useAppSettings";
 
 interface SettingsPageProps {
   onBackClick?: () => void;
@@ -27,9 +29,6 @@ const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
   { id: "backup", labelKey: "settings.tabs.backup", icon: <BackupIcon /> },
 ];
-
-const LIGHT_STYLE_STORAGE_KEY = "lt_light_style";
-const THEME_MODE_STORAGE_KEY = "lt_theme_mode";
 
 interface BasicSettingsConfig {
   timezone: number;
@@ -120,6 +119,8 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
+  const [masterPasswordModalOpen, setMasterPasswordModalOpen] = useState(false);
+  const [masterPasswordModalMode, setMasterPasswordModalMode] = useState<"setup" | "unlock">("setup");
   const animationsEnabled = !isWebViewRuntime();
   const pendingInteractionLabelRef = useRef<string | null>(null);
   const pendingInteractionStartRef = useRef<number>(0);
@@ -143,32 +144,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     const modeTab = config.basic.default_mode === "countdown" ? "countdown" : "stopwatch";
     setActiveTab(modeTab);
   }, [config.basic.default_mode]);
-
-  const applyTheme = (themeMode = "dark") => {
-    const html = document.documentElement;
-    const theme =
-      themeMode === "auto"
-        ? window.matchMedia("(prefers-color-scheme: light)").matches
-          ? "light"
-          : "dark"
-        : themeMode;
-
-    if (theme === "light") {
-      html.classList.add("light-mode");
-      document.body.classList.add("light-mode");
-    } else {
-      html.classList.remove("light-mode");
-      document.body.classList.remove("light-mode");
-    }
-  };
-
-  const applyLightStyle = (lightStyle = "paper") => {
-    const html = document.documentElement;
-    html.classList.remove("light-style-mist");
-    if (lightStyle === "mist") {
-      html.classList.add("light-style-mist");
-    }
-  };
 
   const loadSettings = async () => {
     const startAt = performance.now();
@@ -195,7 +170,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       
       const localLayoutDensity = localStorage.getItem(STORAGE_KEYS.LAYOUT_DENSITY) || "normal";
       const localTimeDisplayStyle = localStorage.getItem(STORAGE_KEYS.TIME_DISPLAY_STYLE) || "classic";
-      const localLightStyle = localStorage.getItem(LIGHT_STYLE_STORAGE_KEY) || "paper";
+      const localLightStyle = localStorage.getItem(STORAGE_KEYS.LIGHT_STYLE) || "paper";
       
       const loadedConfig: SettingsConfig = {
         basic: {
@@ -274,7 +249,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     const startAt = performance.now();
     const themeMode: string = config.basic.theme_mode != null ? String(config.basic.theme_mode) : "dark";
     applyTheme(themeMode);
-    localStorage.setItem(THEME_MODE_STORAGE_KEY, themeMode);
     logPerf("Settings.theme.applied", {
       themeMode,
       durationMs: Math.round(performance.now() - startAt),
@@ -330,7 +304,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     window.dispatchEvent(new CustomEvent("setting-change", {
       detail: { key: "time_display_style", value: String(config.basic.time_display_style ?? "classic") }
     }));
-    localStorage.setItem(LIGHT_STYLE_STORAGE_KEY, String(config.basic.light_style ?? "paper"));
+    localStorage.setItem(STORAGE_KEYS.LIGHT_STYLE, String(config.basic.light_style ?? "paper"));
     window.dispatchEvent(new CustomEvent("setting-change", {
       detail: { key: "light_style", value: String(config.basic.light_style ?? "paper") }
     }));
@@ -388,7 +362,14 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       };
       void apiClientRef.current.updateBackupConfig(backupConfig)
         .catch((err: unknown) => {
-          console.error('Failed to save backup config:', String(err));
+          const errObj = err as { action?: { type: string; target: string; params?: { mode: string } } };
+          if (errObj.action && errObj.action.type === "show_modal" && errObj.action.target === "master_password") {
+            const mode = errObj.action.params?.mode as "setup" | "unlock" || "setup";
+            setMasterPasswordModalMode(mode);
+            setMasterPasswordModalOpen(true);
+          } else {
+            console.error('Failed to save backup config:', String(err));
+          }
         });
     }
   };
@@ -400,7 +381,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       saveAudioPreferences(DEFAULT_AUDIO_PREFERENCES);
       localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, "normal");
       localStorage.setItem(STORAGE_KEYS.TIME_DISPLAY_STYLE, "classic");
-      localStorage.setItem(LIGHT_STYLE_STORAGE_KEY, "paper");
+      localStorage.setItem(STORAGE_KEYS.LIGHT_STYLE, "paper");
       setSaveMessage(t("common.save_hint"));
       logPerf("Settings.reset", {
         durationMs: Math.round(performance.now() - startAt),
@@ -592,6 +573,17 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           }));
           onWallpaperChange?.(wallpaper);
         }}
+      />
+
+      <MasterPasswordModal
+        isOpen={masterPasswordModalOpen}
+        mode={masterPasswordModalMode}
+        onSuccess={() => {
+          setMasterPasswordModalOpen(false);
+          setSaveMessage(t("master_password.unlock_success"));
+          setTimeout(() => setSaveMessage(""), 3000);
+        }}
+        onClose={() => setMasterPasswordModalOpen(false)}
       />
     </div>
   );

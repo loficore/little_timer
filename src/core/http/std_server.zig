@@ -14,6 +14,15 @@ fn logWebdavErr(msg: []const u8) void {
     logger.global_logger.err("[WebDAV] {s}", .{msg});
 }
 
+fn createMasterPasswordError(allocator: std.mem.Allocator, error_code: []const u8, message: []const u8, action_mode: []const u8) ![]u8 {
+    _ = error_code;
+    _ = message;
+    if (action_mode.len > 0) {
+        return allocator.dupe(u8, "{\"success\":false,\"error\":\"error\",\"message\":\"msg\",\"action\":{\"type\":\"show_modal\",\"target\":\"master_password\",\"params\":{\"mode\":\"unlock\"}}}");
+    }
+    return allocator.dupe(u8, "{\"success\":false,\"error\":\"error\",\"message\":\"msg\",\"action\":{\"type\":\"show_modal\",\"target\":\"master_password\"}}");
+}
+
 const ClockState = clock.ClockState;
 const ModeEnumT = clock.ModeEnumT;
 
@@ -274,6 +283,14 @@ fn handleRequest(request: *http.Server.Request) !void {
         try handleBackupDelete(request);
     } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/verify")) {
         try handleBackupVerify(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/unlock")) {
+        try handleBackupUnlock(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/lock")) {
+        try handleBackupLock(request);
+    } else if (request.head.method == .GET and std.mem.eql(u8, path, "/api/backup/master-password")) {
+        try handleGetMasterPasswordStatus(request);
+    } else if (request.head.method == .POST and std.mem.eql(u8, path, "/api/backup/master-password")) {
+        try handleSetMasterPassword(request);
 
     // ============================================
     // Auth 路由
@@ -845,6 +862,49 @@ fn handleUpdateBackupConfig(request: *http.Server.Request) !void {
     const body = try readRequestBody(request, allocator);
     defer allocator.free(body);
 
+    const body_json = std.json.parseFromSlice(json.Value, allocator, body, .{}) catch {
+        try request.respond("{\"success\":false,\"error\":\"invalid json\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer body_json.deinit();
+
+    if (body_json.value.object.get("target_type")) |target_type_val| {
+        const target_type_str = target_type_val.string;
+        const is_webdav = std.mem.eql(u8, target_type_str, "webdav");
+        const is_s3 = std.mem.eql(u8, target_type_str, "s3");
+        const is_cloud = is_webdav or is_s3;
+
+        if (is_cloud) {
+            const current_config = app.settings_manager.getBackupConfig();
+            const current_has_creds = if (is_webdav)
+                current_config.webdav_password.len > 0
+            else
+                current_config.s3_access_key.len > 0 and current_config.s3_secret_key.len > 0;
+
+            if (!current_has_creds) {
+                if (!app.settings_manager.hasMasterPassword()) {
+                    const err_msg = try std.fmt.allocPrint(allocator, "{{\"success\":false,\"error\":\"master_password_required\",\"message\":\"请先设置主密码才能使用云端备份\",\"action\":{{\"type\":\"show_modal\",\"target\":\"master_password\",\"params\":{{\"mode\":\"setup\"}}}}}}", .{});
+                    defer allocator.free(err_msg);
+                    try request.respond(err_msg, .{
+                        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+                    });
+                    return;
+                }
+
+                if (!app.settings_manager.isUnlocked()) {
+                    const err_msg = try std.fmt.allocPrint(allocator, "{{\"success\":false,\"error\":\"master_password_not_unlocked\",\"message\":\"凭证已过期，请重新解锁\",\"action\":{{\"type\":\"show_modal\",\"target\":\"master_password\",\"params\":{{\"mode\":\"unlock\"}}}}}}", .{});
+                    defer allocator.free(err_msg);
+                    try request.respond(err_msg, .{
+                        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+                    });
+                    return;
+                }
+            }
+        }
+    }
+
     const body_copy: [:0]u8 = try allocator.allocSentinel(u8, body.len, 0);
     @memcpy(body_copy[0..body.len], body);
 
@@ -874,6 +934,34 @@ fn handleBackupCreate(request: *http.Server.Request) !void {
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return;
+    }
+
+    if (backup_config.target_type == .webdav or backup_config.target_type == .s3) {
+        const credentials_available = switch (backup_config.target_type) {
+            .webdav => backup_config.webdav_password.len > 0,
+            .s3 => backup_config.s3_access_key.len > 0 and backup_config.s3_secret_key.len > 0,
+            else => true,
+        };
+
+        if (!credentials_available) {
+            const has_pwd = app.settings_manager.hasMasterPassword();
+            const action_target = if (has_pwd) "unlock" else "setup";
+            const err_msg = try createMasterPasswordError(allocator, "credentials_not_available", "凭证不可用，请先设置主密码", action_target);
+            defer allocator.free(err_msg);
+            try request.respond(err_msg, .{
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return;
+        }
+
+        if (!app.settings_manager.isUnlocked()) {
+            const err_msg = try createMasterPasswordError(allocator, "master_password_not_unlocked", "凭证已过期，请重新解锁", "unlock");
+            defer allocator.free(err_msg);
+            try request.respond(err_msg, .{
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return;
+        }
     }
 
     const timestamp = std.time.timestamp();
@@ -966,6 +1054,35 @@ fn handleBackupRestore(request: *http.Server.Request) !void {
     }
 
     const backup_name = name_val.?.string;
+
+    const backup_config = app.settings_manager.getBackupConfig();
+    if (backup_config.target_type == .webdav or backup_config.target_type == .s3) {
+        const credentials_available = switch (backup_config.target_type) {
+            .webdav => backup_config.webdav_password.len > 0,
+            .s3 => backup_config.s3_access_key.len > 0 and backup_config.s3_secret_key.len > 0,
+            else => true,
+        };
+
+        if (!credentials_available) {
+            const has_pwd = app.settings_manager.hasMasterPassword();
+            const action_mode: []const u8 = if (has_pwd) "unlock" else "setup";
+            const err_msg = try createMasterPasswordError(allocator, "credentials_not_available", "凭证不可用，请先设置主密码", action_mode);
+            defer allocator.free(err_msg);
+            try request.respond(err_msg, .{
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return;
+        }
+
+        if (!app.settings_manager.isUnlocked()) {
+            const err_msg = try createMasterPasswordError(allocator, "master_password_not_unlocked", "凭证已过期，请重新解锁", "unlock");
+            defer allocator.free(err_msg);
+            try request.respond(err_msg, .{
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return;
+        }
+    }
 
     const db = app.settings_manager.sqlite_db orelse {
         try request.respond("{\"success\":false,\"error\":\"database not open\"}", .{
@@ -1083,6 +1200,34 @@ fn handleBackupVerify(request: *http.Server.Request) !void {
         return;
     }
 
+    if (backup_config.target_type == .webdav or backup_config.target_type == .s3) {
+        const credentials_available = switch (backup_config.target_type) {
+            .webdav => backup_config.webdav_password.len > 0,
+            .s3 => backup_config.s3_access_key.len > 0 and backup_config.s3_secret_key.len > 0,
+            else => true,
+        };
+
+        if (!credentials_available) {
+            const has_pwd = app.settings_manager.hasMasterPassword();
+            const action_mode: []const u8 = if (has_pwd) "unlock" else "setup";
+            const err_msg = try createMasterPasswordError(allocator, "credentials_not_available", "凭证不可用，请先设置主密码", action_mode);
+            defer allocator.free(err_msg);
+            try request.respond(err_msg, .{
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return;
+        }
+
+        if (!app.settings_manager.isUnlocked()) {
+            const err_msg = try createMasterPasswordError(allocator, "master_password_not_unlocked", "凭证已过期，请重新解锁", "unlock");
+            defer allocator.free(err_msg);
+            try request.respond(err_msg, .{
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return;
+        }
+    }
+
     const adapter: backup_mod.BackupAdapter = switch (backup_config.target_type) {
         .local => backup_mod.createLocalAdapter(allocator, .{ .path = if (backup_config.local_path.len > 0) backup_config.local_path else "" }),
         .webdav => backup_mod.createWebDAVAdapter(allocator, .{
@@ -1113,6 +1258,144 @@ fn handleBackupVerify(request: *http.Server.Request) !void {
         return;
     };
     adapter.freeList(test_result);
+
+    try request.respond("{\"success\":true}", .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleBackupUnlock(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] POST /api/backup/unlock", .{});
+    const app = getApp();
+    const allocator = getAllocator();
+
+    const body_bytes = readRequestBody(request, allocator) catch |err| {
+        const err_msg = switch (err) {
+            error.RequestBodyTooLarge => "body too large",
+            else => "read error",
+        };
+        try request.respond(try std.fmt.allocPrint(allocator, "{{\"success\":false,\"error\":\"{s}\"}}", .{err_msg}), .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer allocator.free(body_bytes);
+
+    const body_json = std.json.parseFromSlice(json.Value, allocator, body_bytes, .{}) catch {
+        try request.respond("{\"success\":false,\"error\":\"invalid json\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer body_json.deinit();
+
+    const password = body_json.value.object.get("password") orelse {
+        try request.respond("{\"success\":false,\"error\":\"missing password\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const password_str = password.string;
+    const unlock_result = app.settings_manager.unlockCredentials(password_str);
+
+    const resp = try std.fmt.allocPrint(allocator, "{{\"success\":{s},\"locked_until\":{d}}}", .{
+        if (unlock_result.success) "true" else "false",
+        @as(f64, @floatFromInt(unlock_result.locked_until)),
+    });
+    defer allocator.free(resp);
+
+    try request.respond(resp, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleBackupLock(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] POST /api/backup/lock", .{});
+    const app = getApp();
+
+    const now = std.time.timestamp();
+    app.settings_manager.backup_config.credential_locked_until = now + 1;
+    app.settings_manager.setCredentialPassword("");
+
+    app.settings_manager.saveUnlockState() catch |err| {
+        logger.global_logger.err("保存锁定状态失败: {any}", .{err});
+    };
+
+    try request.respond("{\"success\":true}", .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleGetMasterPasswordStatus(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] GET /api/backup/master-password", .{});
+    const app = getApp();
+    const allocator = getAllocator();
+
+    const status = app.settings_manager.getMasterPasswordStatus();
+
+    const response = try std.fmt.allocPrint(allocator,
+        \\{{"has_password":{}, "unlocked":{}, "locked_until":{d}, "unlock_time":{d}}}
+    , .{
+        status.has_password,
+        status.unlocked,
+        @as(f64, @floatFromInt(status.locked_until)),
+        @as(f64, @floatFromInt(status.unlock_time)),
+    });
+    defer allocator.free(response);
+
+    try request.respond(response, .{
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn handleSetMasterPassword(request: *http.Server.Request) !void {
+    logger.global_logger.info("[API] POST /api/backup/master-password", .{});
+    const app = getApp();
+    const allocator = getAllocator();
+
+    const body_bytes = readRequestBody(request, allocator) catch |err| {
+        const err_msg = switch (err) {
+            error.RequestBodyTooLarge => "body too large",
+            else => "read error",
+        };
+        try request.respond(try std.fmt.allocPrint(allocator, "{{\"success\":false,\"error\":\"{s}\"}}", .{err_msg}), .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer allocator.free(body_bytes);
+
+    const body_json = std.json.parseFromSlice(json.Value, allocator, body_bytes, .{}) catch {
+        try request.respond("{\"success\":false,\"error\":\"invalid json\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+    defer body_json.deinit();
+
+    const password = body_json.value.object.get("password") orelse {
+        try request.respond("{\"success\":false,\"error\":\"missing password\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
+
+    const password_str = password.string;
+
+    if (password_str.len < 4) {
+        try request.respond("{\"success\":false,\"error\":\"password too short (minimum 4 characters)\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+
+    app.settings_manager.setMasterPassword(password_str) catch |err| {
+        try request.respond(try std.fmt.allocPrint(allocator, "{{\"success\":false,\"error\":\"{s}\"}}", .{@errorName(err)}), .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    };
 
     try request.respond("{\"success\":true}", .{
         .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},

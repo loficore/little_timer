@@ -43,10 +43,12 @@ pub fn generateSalt() [16]u8 {
 }
 
 pub fn deriveKey(password: []const u8, salt: [16]u8, output_key: *[AES256GCM_KEY_SIZE]u8) CryptoError!void {
-    std.crypto.pbkdf2.pbkdf2(output_key, password, &salt, 100_000, HmacSha256) catch |err| {
+    var key: [AES256GCM_KEY_SIZE]u8 = undefined;
+    std.crypto.pbkdf2.pbkdf2(key[0..], password, &salt, 100_000, HmacSha256) catch |err| {
         _ = err;
         return CryptoError.OutOfMemory;
     };
+    output_key.* = key;
 }
 
 pub fn encrypt(plaintext: []const u8, key: [AES256GCM_KEY_SIZE]u8, nonce: [AES256GCM_NONCE_SIZE]u8, ciphertext: []u8) CryptoError!void {

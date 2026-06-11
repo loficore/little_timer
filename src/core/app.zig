@@ -322,9 +322,9 @@ pub const MainApplication = struct {
     /// 保存当前计时进度到数据库
     pub fn saveTimerProgress(self: *MainApplication) void {
         const session_id = self.current_timer_session_id orelse return;
-        const db = self.settings_manager.sqlite_db orelse return;
+        const session_mgr = self.settings_manager.session();
 
-        const session = db.habit_manager.getTimerSessionById(session_id) catch null;
+        const session = session_mgr.getTimerSessionById(session_id) catch null;
         if (session) |s| {
             defer self.allocator.free(s.mode);
         }
@@ -371,7 +371,7 @@ pub const MainApplication = struct {
         else
             clock_state.getElapsedSeconds();
 
-        db.habit_manager.updateTimerSession(
+        session_mgr.updateTimerSession(
             session_id,
             elapsed_seconds,
             remaining,
@@ -390,9 +390,9 @@ pub const MainApplication = struct {
 
     /// 加载保存的计时进度（用于页面刷新恢复）
     pub fn loadTimerProgress(self: *MainApplication) void {
-        const db = self.settings_manager.sqlite_db orelse return;
+        const session_mgr = self.settings_manager.session();
 
-        const session = db.habit_manager.getActiveTimerSession() catch null;
+        const session = session_mgr.getActiveTimerSession() catch null;
         if (session == null) {
             logger.global_logger.debug("当前没有可恢复的计时会话", .{});
             return;
@@ -404,7 +404,7 @@ pub const MainApplication = struct {
         // 数据完整性校验：检查 started_at 是否为有效时间戳
         if (!isValidTimestamp(s.started_at)) {
             logger.global_logger.err("⚠ loadTimerProgress: DB 中 session ID {} 的 started_at={} 是损坏数据，删除该行", .{ s.id, s.started_at });
-            db.habit_manager.deleteTimerSession(s.id) catch |e| logger.global_logger.err("删除损坏 session 失败: {any}", .{e});
+            session_mgr.deleteTimerSession(s.id) catch |e| logger.global_logger.err("删除损坏 session 失败: {any}", .{e});
             return;
         }
 
@@ -461,9 +461,9 @@ pub const MainApplication = struct {
 
     /// 创建新的计时会话
     pub fn createTimerSession(self: *MainApplication, habit_id: ?i64, mode: []const u8, work_duration: i64, rest_duration: i64, loop_count: i64) !i64 {
-        const db = self.settings_manager.sqlite_db orelse return error.DatabaseNotOpen;
+        const session_mgr = self.settings_manager.session();
 
-        const session_id = try db.habit_manager.createTimerSession(
+        const session_id = try session_mgr.createTimerSession(
             habit_id,
             mode,
             work_duration,
@@ -487,15 +487,15 @@ pub const MainApplication = struct {
             logger.global_logger.err("⚠ finishTimerSession: current_timer_session_id 为 null，跳过完成", .{});
             return 0;
         };
-        const db = self.settings_manager.sqlite_db orelse return error.DatabaseNotOpen;
+        const session_mgr = self.settings_manager.session();
 
-        const session = db.habit_manager.getTimerSessionById(session_id) catch null;
+        const session = session_mgr.getTimerSessionById(session_id) catch null;
         const clock_state = self.clock_manager.update();
         const now_ts: i64 = @intCast(std.time.timestamp());
 
         self.clock_manager.handleEvent(.user_finish_timer);
 
-        try db.habit_manager.finishTimerSession(session_id);
+        try session_mgr.finishTimerSession(session_id);
 
         var elapsed: i64 = clock_state.getElapsedSeconds();
 
@@ -516,12 +516,10 @@ pub const MainApplication = struct {
     /// 重置并删除计时会话
     pub fn resetTimerSession(self: *MainApplication) void {
         if (self.current_timer_session_id) |session_id| {
-            const db = self.settings_manager.sqlite_db;
-            if (db) |d| {
-                d.habit_manager.deleteTimerSession(session_id) catch |err| {
-                    logger.global_logger.err("删除计时会话失败: {any}", .{err});
-                };
-            }
+            const session_mgr = self.settings_manager.session();
+            session_mgr.deleteTimerSession(session_id) catch |err| {
+                logger.global_logger.err("重置会话失败: {any}", .{err});
+            };
         }
         self.current_timer_session_id = null;
         self.current_timer_session_started_at = null;

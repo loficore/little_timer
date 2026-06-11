@@ -117,6 +117,30 @@ pub const BackupTargetType = enum {
     s3,
 };
 
+/// 解锁结果
+pub const UnlockResult = struct {
+    success: bool,
+    locked_until: i64,
+};
+
+/// 主密码状态
+pub const MasterPasswordStatus = struct {
+    has_password: bool,    // 是否已设置主密码
+    unlocked: bool,         // 是否已解锁
+    locked_until: i64,     // 锁定截止时间戳
+    unlock_time: i64,      // 上次解锁时间戳
+};
+
+/// API 动作（用于触发 UI）
+pub const ApiAction = union(enum) {
+    show_modal: struct {
+        target: []const u8,
+        params: struct {
+            mode: []const u8, // "setup" 或 "unlock"
+        },
+    },
+};
+
 /// 备份配置
 pub const BackupConfig = struct {
     enabled: bool = false,
@@ -140,6 +164,14 @@ pub const BackupConfig = struct {
     s3_access_key: []const u8 = "",
     s3_secret_key: []const u8 = "", // 加密存储，实际不持久化明文
     s3_path_prefix: []const u8 = "little_timer/",
+
+    // 主密码管理
+    has_master_password: bool = false, // 是否已设置主密码
+
+    // 凭证解锁管理
+    credentials_unlock_time: i64 = 0, // 上次解锁时间戳
+    credential_unlock_attempts: u32 = 0, // 错误尝试次数
+    credential_locked_until: i64 = 0, // 锁定截止时间戳
 };
 
 /// 备份信息

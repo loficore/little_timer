@@ -6,6 +6,7 @@ const logger = @import("../core/logger.zig");
 const validator = @import("settings_validator.zig");
 const presets_mod = @import("settings_presets.zig");
 const settings_sqlite = @import("../storage/storage_sqlite.zig");
+const habit_crud = @import("../storage/habit_crud.zig");
 pub const SettingsConfig = interface.SettingsConfig;
 const fs = std.fs;
 
@@ -66,6 +67,8 @@ pub const SettingsManager = struct {
     owned_backup_s3_access_key: ?[]u8 = null,
     owned_backup_s3_secret_key: ?[]u8 = null,
     owned_backup_s3_path_prefix: ?[]u8 = null,
+    /// 用户设置的凭证解锁密码（临时存储，不持久化）
+    credential_unlock_password: ?[]u8 = null,
 
     /// 设置模块初始化
     ///
@@ -389,6 +392,124 @@ pub const SettingsManager = struct {
 
     pub fn getBackupConfig(self: *const SettingsManager) interface.BackupConfig {
         return self.backup_config;
+    }
+
+    pub fn session(self: *SettingsManager) *habit_crud.HabitCrudManager {
+        return &self.sqlite_db.?.habit_manager;
+    }
+
+    pub fn unlockCredentials(self: *SettingsManager, password: []const u8) interface.UnlockResult {
+        const now = std.time.timestamp();
+
+        if (self.backup_config.credential_locked_until > now) {
+            return .{
+                .success = false,
+                .locked_until = self.backup_config.credential_locked_until,
+            };
+        }
+
+        if (self.backup_config.credential_unlock_attempts >= 5) {
+            const lock_seconds: i64 = 300;
+            self.backup_config.credential_locked_until = now + lock_seconds;
+            self.saveUnlockState() catch |err| {
+                logger.global_logger.err("保存锁定状态失败: {any}", .{err});
+            };
+            return .{
+                .success = false,
+                .locked_until = self.backup_config.credential_locked_until,
+            };
+        }
+
+        self.setCredentialPassword(password);
+        self.backup_config.credentials_unlock_time = now;
+        self.backup_config.credential_unlock_attempts = 0;
+        self.backup_config.credential_locked_until = 0;
+
+        self.saveUnlockState() catch |err| {
+            logger.global_logger.err("保存解锁状态失败: {any}", .{err});
+        };
+
+        return .{
+            .success = true,
+            .locked_until = 0,
+        };
+    }
+
+    pub fn saveUnlockState(self: *SettingsManager) !void {
+        try self.sqlite_db.?.db.?.exec(
+            "UPDATE backup_config SET credentials_unlock_time = ?, credential_unlock_attempts = ?, credential_locked_until = ?",
+            .{
+                self.backup_config.credentials_unlock_time,
+                self.backup_config.credential_unlock_attempts,
+                self.backup_config.credential_locked_until,
+            },
+        );
+    }
+
+    pub fn setCredentialPassword(self: *SettingsManager, password: []const u8) void {
+        if (self.credential_unlock_password) |old| {
+            @memset(old, 0);
+            self.allocator.free(old);
+        }
+        self.credential_unlock_password = self.allocator.dupe(u8, password) catch null;
+    }
+
+    pub fn hasMasterPassword(self: *const SettingsManager) bool {
+        return self.backup_config.has_master_password;
+    }
+
+    pub fn isUnlocked(self: *const SettingsManager) bool {
+        const now = std.time.timestamp();
+
+        if (!self.backup_config.has_master_password) {
+            return false;
+        }
+
+        if (self.backup_config.credential_locked_until > now) {
+            return false;
+        }
+
+        if (self.backup_config.credentials_unlock_time == 0) {
+            return false;
+        }
+
+        const ttl_seconds: i64 = 60 * 24 * 60 * 60;
+        if (now - self.backup_config.credentials_unlock_time > ttl_seconds) {
+            return false;
+        }
+
+        return self.credential_unlock_password != null;
+    }
+
+    pub fn getMasterPasswordStatus(self: *const SettingsManager) interface.MasterPasswordStatus {
+        return .{
+            .has_password = self.backup_config.has_master_password,
+            .unlocked = self.isUnlocked(),
+            .locked_until = self.backup_config.credential_locked_until,
+            .unlock_time = self.backup_config.credentials_unlock_time,
+        };
+    }
+
+    pub fn setMasterPassword(self: *SettingsManager, password: []const u8) !void {
+        self.backup_config.has_master_password = true;
+        self.setCredentialPassword(password);
+
+        const now = std.time.timestamp();
+        self.backup_config.credentials_unlock_time = now;
+        self.backup_config.credential_unlock_attempts = 0;
+        self.backup_config.credential_locked_until = 0;
+
+        try self.saveMasterPasswordState();
+        try self.saveUnlockState();
+
+        logger.global_logger.info("主密码已设置并解锁凭证", .{});
+    }
+
+    fn saveMasterPasswordState(self: *SettingsManager) !void {
+        try self.sqlite_db.?.db.?.exec(
+            "UPDATE backup_config SET has_master_password = 1",
+            .{},
+        );
     }
 
     pub fn updateBackupConfig(self: *SettingsManager, json_str: []const u8) !void {

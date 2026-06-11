@@ -60,6 +60,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
         isResting,
         currentRound,
         elapsedSeconds,
+        remainingSeconds,
         displayTime,
         start,
         pause,
@@ -277,7 +278,6 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             }
             const localTime = timerConfig.mode === "stopwatch" ? elapsedSeconds : remainingSeconds;
             const authoritativeTime = lastState?.time ?? localTime;
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
             startTransition(localTime, authoritativeTime);
         } catch (e) {
             logError(`结束计时失败: ${e}`);

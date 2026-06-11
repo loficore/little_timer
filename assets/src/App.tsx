@@ -5,46 +5,14 @@ import { HabitsPage } from "./HabitsPage";
 import { SettingsPage } from "./Settings.tsx";
 import { StatsPage } from "./Stats.tsx";
 import { ErrorNotification } from "./components/ErrorNotification.tsx";
-import { getAPIClient } from "./utils/apiClientSingleton";
-import { WALLPAPER_FALLBACK_GRADIENT, STORAGE_KEYS, resolveWallpaperUrl } from "./utils/constants";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, logLifecycle, logPerf } from "./utils/logger";
+import {
+  useAppSettings,
+  logWallpaperDebug,
+} from "./hooks/useAppSettings";
 
 type Page = "timer" | "habits" | "stats" | "settings";
-const WALLPAPER_STORAGE_KEY = STORAGE_KEYS.WALLPAPER;
-const WALLPAPER_DEBUG_STORAGE_KEY = STORAGE_KEYS.WALLPAPER_DEBUG;
-const THEME_MODE_STORAGE_KEY = "lt_theme_mode";
-
-const normalizeWallpaper = (value: unknown): string => {
-  return typeof value === "string" ? value.trim() : "";
-};
-
-const isWallpaperDebugEnabled = (): boolean => {
-  try {
-    if (typeof window === "undefined") return false;
-
-    const search = new URLSearchParams(window.location.search);
-    if (search.has("debugWallpaper")) return true;
-
-    return localStorage.getItem(WALLPAPER_DEBUG_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-};
-
-const logWallpaperDebug = (event: string, payload?: Record<string, unknown>) => {
-  if (!isWallpaperDebugEnabled()) return;
-
-  const time = new Date().toISOString();
-  console.info("[wallpaper-debug]", time, event, payload || {});
-};
-
-const readCachedWallpaper = (): string => {
-  try {
-    return normalizeWallpaper(localStorage.getItem(WALLPAPER_STORAGE_KEY));
-  } catch {
-    return "";
-  }
-};
 
 const formatUnknownError = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -60,126 +28,16 @@ const formatUnknownError = (value: unknown): string => {
   return "未知错误";
 };
 
-const sanitizeWallpaperUrl = (url: string): string => {
-  if (!url || typeof url !== "string") return "";
-  const trimmed = url.trim();
-  if (!trimmed) return "";
-  const lower = trimmed.toLowerCase();
-  if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("data:image/") || lower.startsWith("/api/")) {
-    return trimmed;
-  }
-  return "";
-};
-
 export const App = () => {
   const [page, setPage] = useState<Page>("timer");
-  const [globalWallpaper, setGlobalWallpaper] = useState<string | null>(() => {
-    const cached = readCachedWallpaper();
-    return cached || null;
-  });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const applyThemeMode = (themeMode = "dark") => {
-    const html = document.documentElement;
-    const theme =
-      themeMode === "auto"
-        ? window.matchMedia("(prefers-color-scheme: light)").matches
-          ? "light"
-          : "dark"
-        : themeMode;
-
-    if (theme === "light") {
-      html.classList.add("light-mode");
-      document.body.classList.add("light-mode");
-    } else {
-      html.classList.remove("light-mode");
-      document.body.classList.remove("light-mode");
-    }
-  };
+  const { settings, normalizeWallpaper } = useAppSettings();
 
   const navigateTo = (newPage: Page) => {
     setPage(newPage);
   };
 
-  const updateGlobalWallpaper = (value: string, source = "unknown") => {
-    const next = normalizeWallpaper(value);
-
-    logWallpaperDebug("updateGlobalWallpaper", {
-      source,
-      incoming: value,
-      normalized: next,
-      prev: globalWallpaper,
-    });
-
-    setGlobalWallpaper(next);
-
-    try {
-      if (next) {
-        localStorage.setItem(WALLPAPER_STORAGE_KEY, next);
-      } else {
-        localStorage.removeItem(WALLPAPER_STORAGE_KEY);
-      }
-    } catch {
-      // 忽略 localStorage 不可用场景
-    }
-  };
-
-  useEffect(() => {
-    try {
-      const cachedThemeMode = localStorage.getItem(THEME_MODE_STORAGE_KEY);
-      if (cachedThemeMode) {
-        applyThemeMode(cachedThemeMode);
-      }
-    } catch {
-      // 忽略 localStorage 不可用场景
-    }
-
-    const client = getAPIClient();
-    client.getSettings().then(settings => {
-      const serverThemeMode = typeof settings.basic?.theme_mode === "string"
-        ? settings.basic.theme_mode
-        : "dark";
-      applyThemeMode(serverThemeMode);
-      try {
-        localStorage.setItem(THEME_MODE_STORAGE_KEY, serverThemeMode);
-      } catch {
-        // 忽略 localStorage 不可用场景
-      }
-
-      const serverWallpaper = normalizeWallpaper(settings.basic?.wallpaper);
-      const cachedWallpaper = readCachedWallpaper();
-
-      logWallpaperDebug("serverSettingsLoaded", {
-        serverWallpaper,
-        cachedWallpaper,
-      });
-
-      // 本地缓存优先：保留用户最新选择（即使未保存到服务端）
-      updateGlobalWallpaper(cachedWallpaper || serverWallpaper, "server-settings");
-    }).catch(() => {
-      // 忽略设置获取错误
-      applyThemeMode(localStorage.getItem(THEME_MODE_STORAGE_KEY) || "dark");
-      const cachedWallpaper = readCachedWallpaper();
-      logWallpaperDebug("serverSettingsFailed", { cachedWallpaper });
-      updateGlobalWallpaper(cachedWallpaper, "server-fallback-cache");
-    });
-  }, []);
-
-  const getWallpaperStyle = () => {
-    const wp = normalizeWallpaper(globalWallpaper);
-    if (!wp) return null;
-
-    if (wp.startsWith("linear")) {
-      return { type: "gradient" as const, value: wp };
-    }
-
-    if (wp.startsWith("#")) {
-      return { type: "color" as const, value: wp };
-    }
-
-    // 兜底：除渐变和纯色外，统一按图片 URL/路径处理（支持 https/data/blob/相对路径）
-    return { type: "image" as const, value: wp     };
-  };
+  const globalWallpaper = settings.wallpaper;
 
   // 全局错误捕获
   useEffect(() => {
@@ -208,63 +66,11 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
-    // 首次加载设置前不改动背景，避免刷新时出现黑屏闪回
-    if (globalWallpaper === null) {
-      logWallpaperDebug("skipApplyWallpaper", { reason: "pending-initial-load" });
-      return;
-    }
-
-    const html = document.documentElement;
-    const wallpaperInfo = getWallpaperStyle();
-
-    logWallpaperDebug("applyWallpaper:start", {
-      globalWallpaper,
-      wallpaperType: wallpaperInfo?.type || "none",
-      wallpaperValue: wallpaperInfo?.value || "",
-    });
-
-    // 清除 html 的所有背景样式和动画
-    html.style.background = "";
-    html.style.backgroundImage = "";
-    html.style.backgroundColor = "";
-    html.style.backgroundSize = "";
-    html.style.backgroundPosition = "";
-    html.style.backgroundRepeat = "";
-    html.style.backgroundAttachment = "";
-    html.style.animation = "none";
-
-    // 根据壁纸类型设置 html 元素背景
-    if (wallpaperInfo) {
-      if (wallpaperInfo.type === "gradient") {
-        html.style.background = wallpaperInfo.value;
-      } else if (wallpaperInfo.type === "image") {
-        // 图片层失败时仍显示兜底渐变，避免退化成纯黑背景
-        const resolvedUrl = resolveWallpaperUrl(wallpaperInfo.value);
-        html.style.backgroundColor = "#0d0d0d";
-        html.style.backgroundImage = `url("${sanitizeWallpaperUrl(resolvedUrl).replace(/"/g, '\\"')}"), ${WALLPAPER_FALLBACK_GRADIENT}`;
-        html.style.backgroundSize = "cover, 140% 140%";
-        html.style.backgroundPosition = "center center, center center";
-        html.style.backgroundRepeat = "no-repeat, no-repeat";
-      } else if (wallpaperInfo.type === "color") {
-        html.style.background = wallpaperInfo.value;
-      }
-      html.style.backgroundAttachment = isWebViewRuntime() ? "scroll" : "fixed";
-    }
-
-    logWallpaperDebug("applyWallpaper:end", {
-      htmlBackground: html.style.background,
-      htmlBackgroundImage: html.style.backgroundImage,
-      htmlAnimation: html.style.animation,
-    });
-  }, [globalWallpaper]);
-
-  useEffect(() => {
     if (typeof document === "undefined") return;
 
     const html = document.documentElement;
     const isStatsWebViewLite = isWebViewRuntime() && page === "stats";
 
-    // 仅在 WebView 的统计页启用轻量视觉，平衡风格与流畅度
     html.classList.toggle("webview-stats-lite", isStatsWebViewLite);
 
     return () => {
@@ -288,27 +94,35 @@ export const App = () => {
 
         {/* 主内容区 */}
         <main className="flex-1 flex flex-col overflow-hidden pb-20 lg:pb-0">
-          <div className={page === "timer" ? "flex-1" : "hidden"}>
-            <TimerPage
-              onHabitsClick={() => navigateTo("habits")}
-            />
-          </div>
-          {page === "habits" && (
-            <HabitsPage
-              onStatsClick={() => navigateTo("stats")}
-              onSettingsClick={() => navigateTo("settings")}
-            />
-          )}
-          {page === "stats" && (
-            <StatsPage onBackClick={() => navigateTo("timer")} />
-          )}
-          {page === "settings" && (
-            <SettingsPage 
-              onBackClick={() => navigateTo("timer")} 
-              wallpaper={globalWallpaper || ""}
-              onWallpaperChange={(wallpaper) => updateGlobalWallpaper(wallpaper, "settings-prop")}
-            />
-          )}
+          <ErrorBoundary>
+            <div className={page === "timer" ? "flex-1" : "hidden"}>
+              <TimerPage
+                onHabitsClick={() => navigateTo("habits")}
+              />
+            </div>
+            {page === "habits" && (
+              <HabitsPage
+                onStatsClick={() => navigateTo("stats")}
+                onSettingsClick={() => navigateTo("settings")}
+              />
+            )}
+            {page === "stats" && (
+              <StatsPage onBackClick={() => navigateTo("timer")} />
+            )}
+            {page === "settings" && (
+              <SettingsPage
+                onBackClick={() => navigateTo("timer")}
+                wallpaper={globalWallpaper}
+                onWallpaperChange={(wallpaper) => {
+                  logWallpaperDebug("updateGlobalWallpaper", {
+                    source: "settings-prop",
+                    incoming: wallpaper,
+                    normalized: normalizeWallpaper(wallpaper),
+                  });
+                }}
+              />
+            )}
+          </ErrorBoundary>
         </main>
       </div>
 

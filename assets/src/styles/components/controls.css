@@ -81,6 +81,9 @@
 
   .my-icon-btn {
     @apply btn btn-ghost btn-circle;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     border: 1px solid color-mix(in oklab, var(--my-outline) 46%, transparent);
     color: var(--my-on-surface-variant);
     background: linear-gradient(160deg, color-mix(in oklab, var(--my-surface) 84%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 90%, transparent) 100%);

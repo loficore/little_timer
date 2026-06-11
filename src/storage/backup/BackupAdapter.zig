@@ -217,7 +217,12 @@ const WebDAVAdapterState = struct {
     fn pushImpl(ptr: *anyopaque, db_path: []const u8, backup_name: []const u8) BackupError!void {
         const self: *WebDAVAdapterState = @ptrCast(@alignCast(ptr));
 
-        const remote_path = std.fs.path.join(self.allocator, &[_][]const u8{ self.config.base_path, backup_name }) catch return BackupError.BackupFailed;
+        const base_path = if (self.config.base_path.len > 0 and self.config.base_path[self.config.base_path.len - 1] == '/')
+            self.config.base_path[0..self.config.base_path.len - 1]
+        else
+            self.config.base_path;
+
+        const remote_path = std.fs.path.join(self.allocator, &[_][]const u8{ base_path, backup_name }) catch return BackupError.BackupFailed;
         defer self.allocator.free(remote_path);
 
         const file_data = std.fs.cwd().readFileAlloc(self.allocator, db_path, 100 * 1024 * 1024) catch return BackupError.BackupFailed;
@@ -226,8 +231,17 @@ const WebDAVAdapterState = struct {
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
 
-        const push_url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.config.url, remote_path });
+        const base_url = if (self.config.url.len > 0 and self.config.url[self.config.url.len - 1] == '/')
+            self.config.url[0..self.config.url.len - 1]
+        else
+            self.config.url;
+
+        const push_url = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ base_url, remote_path });
         defer self.allocator.free(push_url);
+
+        if (self.on_log) |log| {
+            log(try std.fmt.allocPrint(self.allocator, "push_url={s}", .{push_url}));
+        }
 
         const uri = std.Uri.parse(push_url) catch return BackupError.ConnectionFailed;
 
@@ -238,9 +252,22 @@ const WebDAVAdapterState = struct {
         }) catch return BackupError.NetworkError;
         defer request.deinit();
 
+        if (self.on_log) |log| {
+            log(try std.fmt.allocPrint(self.allocator, "HTTP 请求: PUT {s}", .{push_url}));
+        }
+
         if (self.config.username.len > 0) {
+            if (self.on_log) |log| {
+                log(try std.fmt.allocPrint(self.allocator, "auth: username_len={d}, password_len={d}", .{
+                    self.config.username.len,
+                    self.config.password.len,
+                }));
+            }
             const auth = try encodeBasicAuth(self.allocator, self.config.username, self.config.password);
             defer self.allocator.free(auth);
+            if (self.on_log) |log| {
+                log(try std.fmt.allocPrint(self.allocator, "auth_header={s}", .{auth}));
+            }
             request.headers.authorization = .{ .override = auth };
         }
 
@@ -248,6 +275,10 @@ const WebDAVAdapterState = struct {
 
         var redirect_buffer: [8192]u8 = undefined;
         const response = request.receiveHead(&redirect_buffer) catch return BackupError.NetworkError;
+
+        if (self.on_log) |log| {
+            log(try std.fmt.allocPrint(self.allocator, "HTTP 响应: status={d}", .{@intFromEnum(response.head.status)}));
+        }
 
         if (response.head.status != .ok and response.head.status != .created and response.head.status != .no_content) {
             if (self.on_log) |log| {
@@ -265,13 +296,23 @@ const WebDAVAdapterState = struct {
     fn pullImpl(ptr: *anyopaque, backup_name: []const u8, dest_path: []const u8) BackupError!void {
         const self: *WebDAVAdapterState = @ptrCast(@alignCast(ptr));
 
-        const remote_path = std.fs.path.join(self.allocator, &[_][]const u8{ self.config.base_path, backup_name }) catch return BackupError.RestoreFailed;
+        const base_path = if (self.config.base_path.len > 0 and self.config.base_path[self.config.base_path.len - 1] == '/')
+            self.config.base_path[0..self.config.base_path.len - 1]
+        else
+            self.config.base_path;
+
+        const remote_path = std.fs.path.join(self.allocator, &[_][]const u8{ base_path, backup_name }) catch return BackupError.RestoreFailed;
         defer self.allocator.free(remote_path);
 
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
 
-        const get_url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.config.url, remote_path });
+        const base_url = if (self.config.url.len > 0 and self.config.url[self.config.url.len - 1] == '/')
+            self.config.url[0..self.config.url.len - 1]
+        else
+            self.config.url;
+
+        const get_url = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ base_url, remote_path });
         defer self.allocator.free(get_url);
 
         const uri = std.Uri.parse(get_url) catch return BackupError.ConnectionFailed;
@@ -320,10 +361,20 @@ const WebDAVAdapterState = struct {
     fn listImpl(ptr: *anyopaque) BackupError![]BackupInfo {
         const self: *WebDAVAdapterState = @ptrCast(@alignCast(ptr));
 
+        const base_path = if (self.config.base_path.len > 0 and self.config.base_path[self.config.base_path.len - 1] == '/')
+            self.config.base_path[0..self.config.base_path.len - 1]
+        else
+            self.config.base_path;
+
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
 
-        const list_url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.config.url, self.config.base_path });
+        const base_url = if (self.config.url.len > 0 and self.config.url[self.config.url.len - 1] == '/')
+            self.config.url[0..self.config.url.len - 1]
+        else
+            self.config.url;
+
+        const list_url = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ base_url, base_path });
         defer self.allocator.free(list_url);
 
         const uri = std.Uri.parse(list_url) catch return BackupError.ConnectionFailed;
@@ -400,10 +451,20 @@ const WebDAVAdapterState = struct {
     fn deleteImpl(ptr: *anyopaque, backup_name: []const u8) BackupError!void {
         const self: *WebDAVAdapterState = @ptrCast(@alignCast(ptr));
 
-        const remote_path = std.fs.path.join(self.allocator, &[_][]const u8{ self.config.base_path, backup_name }) catch return BackupError.BackupFailed;
+        const base_path = if (self.config.base_path.len > 0 and self.config.base_path[self.config.base_path.len - 1] == '/')
+            self.config.base_path[0..self.config.base_path.len - 1]
+        else
+            self.config.base_path;
+
+        const remote_path = std.fs.path.join(self.allocator, &[_][]const u8{ base_path, backup_name }) catch return BackupError.BackupFailed;
         defer self.allocator.free(remote_path);
 
-        const delete_url = std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.config.url, remote_path }) catch return BackupError.BackupFailed;
+        const base_url = if (self.config.url.len > 0 and self.config.url[self.config.url.len - 1] == '/')
+            self.config.url[0..self.config.url.len - 1]
+        else
+            self.config.url;
+
+        const delete_url = std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ base_url, remote_path }) catch return BackupError.BackupFailed;
         defer self.allocator.free(delete_url);
 
         const delete_uri = std.Uri.parse(delete_url) catch return BackupError.ConnectionFailed;

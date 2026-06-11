@@ -17,7 +17,11 @@ export const STORAGE_KEYS = {
   LAYOUT_DENSITY: "layout_density",
   TIME_DISPLAY_STYLE: "time_display_style",
   LIGHT_STYLE: "lt_light_style",
+  THEME_MODE: "lt_theme_mode",
 } as const;
+
+// API 默认 URL
+export const DEFAULT_API_URL = "http://localhost:8080";
 
 // 布局密度选项
 export type LayoutDensity = "compact" | "normal" | "spacious";

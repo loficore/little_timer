@@ -1,4 +1,5 @@
-import type { TimerState } from './apiClient';
+import type { TimerState } from '../types/api';
+import { logInfo, logError } from './logger';
 
 export type EventCallback = (state: TimerState) => void;
 export type ErrorCallback = (error: Event) => void;
@@ -43,7 +44,7 @@ export class SSEClient {
         this.eventSource = new EventSource(`${this.baseUrl}/api/events`);
 
         this.eventSource.onopen = () => {
-            console.log('SSE connection opened');
+            logInfo('SSE connection opened');
             this.reconnectAttempts = 0;
             // 连接成功时立即通知
             if (this.onConnect) {
@@ -54,34 +55,35 @@ export class SSEClient {
         this.eventSource.onmessage = (event: MessageEvent) => {
             const dataStr = String(event.data);
             if (dataStr.startsWith(':')) {
-                console.log('SSE heartbeat received');
+                logInfo('SSE heartbeat received');
                 return;
             }
-            console.log('SSE received:', dataStr);
+            logInfo(`SSE received: ${dataStr}`);
             try {
                 const data = JSON.parse(dataStr) as Partial<TimerState>;
                 if (this.onEvent && data && Object.keys(data).length > 0) {
                     this.onEvent(data as TimerState);
                 }
             } catch (e) {
-                console.error('Failed to parse SSE data:', e);
+                const err = e instanceof Error ? e : new Error(String(e));
+                logError('Failed to parse SSE data', err);
             }
         };
 
         this.eventSource.addEventListener('ping', () => {
-            console.log('SSE ping received');
+            logInfo('SSE ping received');
         });
 
         this.eventSource.onerror = (error: Event) => {
-            console.error('SSE connection error:', error);
-            
+            logError('SSE connection error');
+
             if (this.onError) {
                 this.onError(error);
             }
 
             this.handleReconnect();
         };
-    }
+    };
 
     private handleReconnect(): void {
         if (this.closed) {
@@ -89,7 +91,7 @@ export class SSEClient {
         }
 
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error('Max reconnection attempts reached');
+            logError('Max reconnection attempts reached');
             this.close();
             return;
         }
@@ -97,7 +99,7 @@ export class SSEClient {
         this.reconnectAttempts++;
         const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
 
-        console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})...`);
+        logInfo(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})...`);
 
         setTimeout(() => {
             if (this.closed) {

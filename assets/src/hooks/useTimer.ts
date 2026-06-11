@@ -191,7 +191,11 @@ export const useTimer = (): UseTimerReturn => {
       return;
     }
 
+    let cancelled = false;
+
     const tick = () => {
+      if (cancelled) return;
+
       const wallElapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
 
       if (timerConfig.mode === "stopwatch") {
@@ -228,12 +232,15 @@ export const useTimer = (): UseTimerReturn => {
         }
       }
 
-      rafRef.current = requestAnimationFrame(tick);
+      if (!cancelled) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
     };
 
     rafRef.current = requestAnimationFrame(tick);
 
     return () => {
+      cancelled = true;
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;

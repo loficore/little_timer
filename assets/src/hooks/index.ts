@@ -13,3 +13,6 @@ export type { UseSSEReturn } from "./useSSE";
 
 export { useSettings } from "./useSettings";
 export type { UseSettingsReturn, BasicSettings, ClockDefaults } from "./useSettings";
+
+export { useAppSettings } from "./useAppSettings";
+export type { UseAppSettingsReturn, AppSettings } from "./useAppSettings";

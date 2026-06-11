@@ -30,7 +30,7 @@ export const TabPanel = ({
             onClick={() => onTabChange(tab.id)}
             className={`my-tab ${activeTab === tab.id ? "my-tab-active" : ""}`}
           >
-            {tab.icon && <span className="w-4 h-4">{tab.icon}</span>}
+            {tab.icon && <span className="w-5 h-5 flex items-center">{tab.icon}</span>}
             <span className="text-[0.72rem] sm:text-sm leading-none">{tab.label}</span>
           </button>
         ))}

@@ -6,6 +6,19 @@ vi.mock("../../../utils/apiClientSingleton", () => ({
   getAPIClient: vi.fn(),
 }));
 
+vi.mock("../../../components/MasterPasswordModal", () => ({
+  MasterPasswordModal: ({ isOpen, mode, onSuccess, onClose }: any) => {
+    if (!isOpen) return null;
+    return (
+      <div data-testid="master-password-modal">
+        <div data-testid="modal-mode">{mode}</div>
+        <button data-testid="modal-close" onClick={onClose}>关闭</button>
+        <button data-testid="modal-success" onClick={onSuccess}>成功</button>
+      </div>
+    );
+  },
+}));
+
 import { getAPIClient } from "../../../utils/apiClientSingleton";
 
 const mockApiClient = {
@@ -313,6 +326,73 @@ describe("BackupTab", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Backup location verified successfully")).toBeTruthy();
+    });
+  });
+
+  it("opens master password modal when createBackup returns action with setup mode", async () => {
+    mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.createBackup.mockResolvedValue({
+      success: false,
+      error: "credentials_not_available",
+      action: { type: "show_modal", target: "master_password", params: { mode: "setup" } }
+    });
+
+    render(<BackupTab config={{}} onChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("备份")).toBeTruthy();
+    });
+
+    const createButton = screen.getByText("立即备份");
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("modal-mode")).toBeTruthy();
+      expect(screen.getByTestId("modal-mode").textContent).toBe("setup");
+    });
+  });
+
+  it("opens master password modal when createBackup returns action with unlock mode", async () => {
+    mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.createBackup.mockResolvedValue({
+      success: false,
+      error: "master_password_not_unlocked",
+      action: { type: "show_modal", target: "master_password", params: { mode: "unlock" } }
+    });
+
+    render(<BackupTab config={{}} onChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("备份")).toBeTruthy();
+    });
+
+    const createButton = screen.getByText("立即备份");
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("modal-mode")).toBeTruthy();
+      expect(screen.getByTestId("modal-mode").textContent).toBe("unlock");
+    });
+  });
+
+  it("shows regular error when no action in response", async () => {
+    mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.createBackup.mockResolvedValue({
+      success: false,
+      error: "Network error"
+    });
+
+    render(<BackupTab config={{}} onChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("备份")).toBeTruthy();
+    });
+
+    const createButton = screen.getByText("立即备份");
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(screen.getByText("Network error")).toBeTruthy();
     });
   });
 });

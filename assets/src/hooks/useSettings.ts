@@ -124,9 +124,9 @@ export const useSettings = (): UseSettingsReturn => {
       const serverSettings = await apiClientRef.current.getSettings();
       const localAudio = loadAudioPreferences();
       
-      const basic = serverSettings?.basic as Record<string, unknown> || {};
-      const countdown = serverSettings?.countdown as Record<string, unknown> || {};
-      const stopwatch = serverSettings?.stopwatch as Record<string, unknown> || {};
+      const basic = (serverSettings?.basic ?? {}) as unknown as Record<string, unknown>;
+      const countdown = (serverSettings?.countdown ?? {}) as unknown as Record<string, unknown>;
+      const stopwatch = (serverSettings?.stopwatch ?? {}) as unknown as Record<string, unknown>;
 
       const audioPrefs = normalizeAudioPreferences({
         sound_enabled: (basic.sound_enabled as boolean) ?? localAudio.sound_enabled,

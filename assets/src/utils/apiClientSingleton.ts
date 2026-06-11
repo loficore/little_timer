@@ -4,6 +4,8 @@
  */
 
 import { APIClient } from "./apiClient";
+import { DEFAULT_API_URL } from "../utils/constants";
+import type { TimerState, Settings } from "../types/api";
 
 let apiClientInstance: APIClient | null = null;
 
@@ -13,7 +15,7 @@ let apiClientInstance: APIClient | null = null;
  */
 export const getAPIClient = (): APIClient => {
   if (!apiClientInstance) {
-    const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : DEFAULT_API_URL;
     apiClientInstance = new APIClient(baseUrl);
   }
   return apiClientInstance;
@@ -28,4 +30,4 @@ export const resetAPIClient = (): void => {
 };
 
 export { APIClient };
-export type { TimerState, Settings } from "./apiClient";
+export type { TimerState, Settings };

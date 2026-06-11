@@ -2,7 +2,8 @@ import type { FunctionalComponent } from "preact";
 import { useState, useEffect } from "preact/hooks";
 import { t } from "../../utils/i18n";
 import { getAPIClient } from "../../utils/apiClientSingleton";
-import type { BackupConfig } from "../../utils/apiClient";
+import type { BackupConfig } from "../../types/api";
+import { MasterPasswordModal } from "../MasterPasswordModal";
 
 interface BackupTabProps {
   config: any;
@@ -23,6 +24,14 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
   const [isRestoring, setIsRestoring] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [masterPasswordModalOpen, setMasterPasswordModalOpen] = useState(false);
+  const [masterPasswordModalMode, setMasterPasswordModalMode] = useState<"setup" | "unlock">("setup");
+  const [masterPasswordStatus, setMasterPasswordStatus] = useState({
+    has_password: false,
+    unlocked: false,
+    locked_until: 0,
+    unlock_time: 0,
+  });
   const [backupConfig, setBackupConfig] = useState<BackupConfig>({
     enabled: config?.backup_enabled ?? false,
     target_type: config?.backup_target_type ?? 'local',
@@ -57,11 +66,31 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       auto_interval_hours: config?.backup_auto_interval_hours ?? 24,
       max_backups: config?.backup_max_backups ?? 7,
     });
+    void loadMasterPasswordStatus();
   }, [config]);
 
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 4000);
+  };
+
+  const loadMasterPasswordStatus = async () => {
+    try {
+      const status = await apiClient.getMasterPasswordStatus();
+      setMasterPasswordStatus(status);
+    } catch (err) {
+      console.error('Failed to load master password status:', err);
+    }
+  };
+
+  const handleApiError = (result: { success: boolean; error?: string; action?: { type: string; target: string; params?: { mode: string } } }) => {
+    if (result.action && result.action.type === "show_modal" && result.action.target === "master_password") {
+      const mode = result.action.params?.mode as "setup" | "unlock" || "setup";
+      setMasterPasswordModalMode(mode);
+      setMasterPasswordModalOpen(true);
+      return true;
+    }
+    return false;
   };
 
   const getBackupErrorText = (code: string | undefined): string | null => {
@@ -110,7 +139,9 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         showMessage('success', `Backup created: ${result.backup_path}`);
         await loadBackups();
       } else {
-        showMessage('error', result.error || 'Failed to create backup');
+        if (!handleApiError(result)) {
+          showMessage('error', result.error || 'Failed to create backup');
+        }
       }
     } catch (err) {
       console.error('Failed to create backup:', err);
@@ -131,7 +162,9 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       if (result.success) {
         showMessage('success', 'Backup restored successfully');
       } else {
-        showMessage('error', result.error || 'Failed to restore backup');
+        if (!handleApiError(result)) {
+          showMessage('error', result.error || 'Failed to restore backup');
+        }
       }
     } catch (err) {
       console.error('Failed to restore backup:', err);
@@ -211,6 +244,23 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         </div>
       )}
 
+      {((backupConfig.target_type === 'webdav' && backupConfig.webdav_url) ||
+        (backupConfig.target_type === 's3' && backupConfig.s3_endpoint)) &&
+        !masterPasswordStatus.has_password && (
+        <div className="alert alert-warning">
+          <span>{t("master_password.suggestion_title")}</span>
+          <button
+            className="btn btn-sm"
+            onClick={() => {
+              setMasterPasswordModalMode("setup");
+              setMasterPasswordModalOpen(true);
+            }}
+          >
+            {t("master_password.set_now")}
+          </button>
+        </div>
+      )}
+
       <div className="form-control">
         <label className="label cursor-pointer">
           <span className="label-text">启用自动备份</span>
@@ -237,6 +287,60 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
           <option value="s3">S3 兼容存储</option>
         </select>
       </div>
+
+      {(backupConfig.target_type === 'webdav' || backupConfig.target_type === 's3') && (
+        <div className="border border-base-300 rounded-lg p-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm">
+            <span>🔐 {t("master_password.status")}:</span>
+            <span className={masterPasswordStatus.has_password ? "text-success" : "text-error"}>
+              {masterPasswordStatus.has_password
+                ? t("master_password.status_set")
+                : t("master_password.status_not_set")}
+            </span>
+          </div>
+          {masterPasswordStatus.has_password && (
+            <div className="flex items-center gap-2 text-sm">
+              <span>{t("master_password.unlocked")}:</span>
+              <span className={masterPasswordStatus.unlocked ? "text-success" : "text-warning"}>
+                {masterPasswordStatus.unlocked
+                  ? t("master_password.unlocked")
+                  : t("master_password.locked")}
+              </span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                setMasterPasswordModalMode("setup");
+                setMasterPasswordModalOpen(true);
+              }}
+            >
+              {masterPasswordStatus.has_password
+                ? t("master_password.change_password")
+                : t("master_password.set_password")}
+            </button>
+            {masterPasswordStatus.has_password && (
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={async () => {
+                  try {
+                    const result = await apiClient.lockCredentials();
+                    if (result.success) {
+                      showMessage('success', t("master_password.locked"));
+                      await loadMasterPasswordStatus();
+                    }
+                  } catch (err) {
+                    showMessage('error', 'Failed to lock credentials');
+                  }
+                }}
+              >
+                {t("master_password.lock")}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {backupConfig.target_type === 'local' && (
         <div className="form-control">
@@ -430,6 +534,16 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
           </div>
         )}
       </div>
+
+      <MasterPasswordModal
+        isOpen={masterPasswordModalOpen}
+        mode={masterPasswordModalMode}
+        onSuccess={() => {
+          setMasterPasswordModalOpen(false);
+          showMessage("success", masterPasswordModalMode === "setup" ? t("master_password.success") : t("master_password.unlock_success"));
+        }}
+        onClose={() => setMasterPasswordModalOpen(false)}
+      />
     </div>
   );
 };

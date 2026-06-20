@@ -1,0 +1,38 @@
+{
+  "name": "Little Timer",
+  // 💡 1. 把 "image": "..." 注释或删掉，改用 dockerFile 指向本地
+  "dockerFile": "Dockerfile",
+  
+  "runArgs": [
+    "--init",
+    "-v", "${localEnv:SSH_AUTH_SOCK}:/tmp/ssh-agent.sock",
+    "-e", "SSH_AUTH_SOCK=/tmp/ssh-agent.sock"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ziglang.vscode-zig",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-vscode.vscode-typescript-next",
+        "jjk.jjk",
+        "alexcvzz.vscode-sqlite"
+      ],
+      "settings": {
+        "zig.path": "/usr/local/bin/zig",
+        "zig.zls.enabled": "on",
+        "editor.formatOnSave": false,
+        "[javascript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+        "[typescript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+        "[typescriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.profiles.linux": {
+          "zsh": { "path": "/bin/zsh" }
+        }
+      }
+    }
+  },
+  "remoteUser": "vscode",
+  // 💡 2. 保持 CI=true 压制 pnpm 的不响应 TTY 报错
+  "postCreateCommand": "cd ${containerWorkspaceFolder}/assets && CI=true pnpm install"
+}

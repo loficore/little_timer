@@ -323,17 +323,17 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
             {masterPasswordStatus.has_password && (
               <button
                 className="btn btn-sm btn-ghost"
-                onClick={async () => {
+                onClick={() => { void (async () => {
                   try {
                     const result = await apiClient.lockCredentials();
                     if (result.success) {
                       showMessage('success', t("master_password.locked"));
                       await loadMasterPasswordStatus();
                     }
-                  } catch (err) {
+                  } catch {
                     showMessage('error', 'Failed to lock credentials');
                   }
-                }}
+                })(); }}
               >
                 {t("master_password.lock")}
               </button>

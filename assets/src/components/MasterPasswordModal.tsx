@@ -165,7 +165,7 @@ export const MasterPasswordModal: FunctionalComponent<MasterPasswordModalProps> 
             {t("master_password.cancel")}
           </button>
           <button
-            onClick={handleSubmit}
+            onClick={() => { void handleSubmit(); }}
             disabled={loading}
             style={{
               padding: "10px 16px",

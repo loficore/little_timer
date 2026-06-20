@@ -56,7 +56,27 @@ fn linkWebviewDesktopDeps(b: *std.Build, exe: *std.Build.Step.Compile, target: s
             }
 
             exe.root_module.linkSystemLibrary("dl", .{ .use_pkg_config = .no });
-            exe.root_module.linkSystemLibrary("secret-1", .{ .use_pkg_config = .force });
+
+            const secret_candidates = [_][]const u8{ "libsecret-1", "secret-1" };
+            var secret_pkg: ?[]const u8 = null;
+            for (secret_candidates) |candidate| {
+                if (pkgConfigModuleExists(b.allocator, candidate)) {
+                    secret_pkg = candidate;
+                    break;
+                }
+            }
+
+            if (secret_pkg == null or !pkgConfigModuleExists(b.allocator, "glib-2.0")) {
+                std.debug.print(
+                    "❌ 缺少 libsecret/glib 开发包。请安装：\n" ++
+                        "  Ubuntu/Debian: sudo apt-get install libsecret-1-dev libglib2.0-dev\n" ++
+                        "  Fedora:        sudo dnf install libsecret-devel glib2-devel\n",
+                    .{},
+                );
+                @panic("missing Linux libsecret/glib dependencies");
+            }
+
+            exe.root_module.linkSystemLibrary(secret_pkg.?, .{ .use_pkg_config = .force });
             exe.root_module.linkSystemLibrary("glib-2.0", .{ .use_pkg_config = .force });
             exe.root_module.link_libc = true;
         },

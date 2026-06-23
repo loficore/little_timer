@@ -7,11 +7,21 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const logger = @import("../logger.zig");
-const base64 = @import("base64.zig");
 
 const libsecret = @cImport({
     @cInclude("libsecret/secret.h");
 });
+
+fn isBase64(data: []const u8) bool {
+    if (data.len == 0) return true;
+    for (data) |c| {
+        switch (c) {
+            'A'...'Z', 'a'...'z', '0'...'9', '+', '/', '=' => continue,
+            else => return false,
+        }
+    }
+    return true;
+}
 
 pub const SecretError = error{
     NotFound,
@@ -122,14 +132,16 @@ fn storeLinux(ptr: *anyopaque, service: []const u8, key: []const u8, value: []co
     label_null[label_bytes.len] = 0;
     defer impl.allocator.free(label_null);
 
-    const encoded = base64.encode(impl.allocator, value) catch return error.OutOfMemory;
-    defer impl.allocator.free(encoded);
-    const value_copy = impl.allocator.alloc(u8, encoded.len + 1) catch { return error.InvalidValue; };
-    @memcpy(value_copy.ptr, encoded);
-    value_copy[encoded.len] = 0;
-    defer impl.allocator.free(value_copy);
+    const encoded_len = std.base64.standard.Encoder.calcSize(value.len);
+    const encoded = try impl.allocator.alloc(u8, encoded_len);
+    errdefer impl.allocator.free(encoded);
+    const encoded_slice = std.base64.standard.Encoder.encode(encoded, value);
+    const encoded_copy = impl.allocator.alloc(u8, encoded_slice.len + 1) catch { return error.InvalidValue; };
+    @memcpy(encoded_copy.ptr, encoded_slice);
+    encoded_copy[encoded_slice.len] = 0;
+    defer impl.allocator.free(encoded_copy);
 
-    const res = libsecret.secret_password_storev_sync(schema, attrs, null, @ptrCast(label_null.ptr), @ptrCast(value_copy.ptr), null, @ptrCast(&err));
+    const res = libsecret.secret_password_storev_sync(schema, attrs, null, @ptrCast(label_null.ptr), @ptrCast(encoded_copy.ptr), null, @ptrCast(&err));
     if (res == 0) {
         if (err) |e| libsecret.g_error_free(e);
         return error.NoAccess;
@@ -173,9 +185,13 @@ fn retrieveLinux(ptr: *anyopaque, allocator: std.mem.Allocator, service: []const
     const len = std.mem.len(password);
     const raw = password[0..len];
 
-    if (base64.isBase64(raw)) {
-        const decoded = base64.decode(allocator, raw) catch return error.Base64Error;
-        return decoded;
+    if (isBase64(raw)) {
+        const decoder = std.base64.standard.Decoder;
+        const decoded_len = decoder.calcSizeForSlice(raw) catch return error.Base64Error;
+        const decoded_buf = try allocator.alloc(u8, decoded_len);
+        errdefer allocator.free(decoded_buf);
+        decoder.decode(decoded_buf, raw) catch return error.Base64Error;
+        return decoded_buf;
     } else {
         return allocator.dupe(u8, raw) catch return error.OutOfMemory;
     }
@@ -269,9 +285,11 @@ fn storeWindows(ptr: *anyopaque, service: []const u8, key: []const u8, value: []
     const utf16 = std.unicode.utf8ToUtf16LeAllocZ(impl.allocator, target) catch return SecretError.OutOfMemory;
     defer impl.allocator.free(utf16);
 
-    const encoded = base64.encode(impl.allocator, value) catch return SecretError.OutOfMemory;
-    defer impl.allocator.free(encoded);
-    const utf16_value = std.unicode.utf8ToUtf16LeAllocZ(impl.allocator, encoded) catch return SecretError.OutOfMemory;
+    const encoded_len = std.base64.standard.Encoder.calcSize(value.len);
+    const encoded = try impl.allocator.alloc(u8, encoded_len);
+    errdefer impl.allocator.free(encoded);
+    const encoded_slice = std.base64.standard.Encoder.encode(encoded, value);
+    const utf16_value = std.unicode.utf8ToUtf16LeAllocZ(impl.allocator, encoded_slice) catch return SecretError.OutOfMemory;
     defer impl.allocator.free(utf16_value);
 
     const cred = windows.CREDENTIALW{
@@ -300,9 +318,14 @@ fn retrieveWindows(ptr: *anyopaque, allocator: std.mem.Allocator, service: []con
     const blob_len = c.CredentialBlobSize / 2;
     const utf16_slice: [:0]u16 = @ptrCast(@alignCast(c.CredentialBlob.?[0 .. blob_len * 2]));
     const encoded = std.unicode.utf16LeToUtf8Alloc(allocator, utf16_slice) catch return SecretError.InvalidValue;
-    const decoded = base64.decode(allocator, encoded) catch return error.Base64Error;
-    allocator.free(encoded);
-    return decoded;
+    defer allocator.free(encoded);
+
+    const decoder = std.base64.standard.Decoder;
+    const decoded_len = try decoder.calcSizeForSlice(encoded);
+    const decoded_buf = try allocator.alloc(u8, decoded_len);
+    errdefer allocator.free(decoded_buf);
+    decoder.decode(decoded_buf, encoded);
+    return decoded_buf;
 }
 
 fn deleteWindows(ptr: *anyopaque, service: []const u8, key: []const u8) SecretError!void {

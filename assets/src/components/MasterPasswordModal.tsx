@@ -24,6 +24,7 @@ export const MasterPasswordModal: FunctionalComponent<MasterPasswordModalProps> 
   const api = getAPIClient();
 
   const handleSubmit = async () => {
+    if (loading) return;
     setError(null);
 
     if (password.length < 4) {

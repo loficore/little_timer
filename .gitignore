@@ -70,3 +70,9 @@ assets/test-results
 # Visual regression test — ignore runtime diff files, keep baseline snapshots
 assets/src/test/visual/specs/snapshots/
 !assets/src/test/visual/specs/snapshots/
+
+.pnpm-store/
+
+.playwright-mcp/
+
+.omo/

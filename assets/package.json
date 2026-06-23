@@ -22,15 +22,16 @@
     "chart.js": "^4.5.1",
     "daisyui": "^5.5.19",
     "preact": "^10.28.2",
-    "preact-router": "^4.1.2"
+    "preact-router": "^4.1.2",
+    "toml": "^4.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.55.0",
     "@preact/preset-vite": "^2.10.2",
     "@tailwindcss/postcss": "^4.1.18",
     "@tailwindcss/vite": "^4.1.18",
     "@testing-library/preact": "^3.2.4",
-    "@playwright/test": "^1.55.0",
     "@types/node": "^24.10.1",
     "@vitest/ui": "^2.1.8",
     "autoprefixer": "^10.4.23",

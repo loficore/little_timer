@@ -22,5 +22,5 @@ const applyLightStyleClass = () => {
 applyLightStyleClass();
 
 // 默认加载中文语言包，避免初次渲染时出现空白文本
-await setLanguage("ZH");
+setLanguage("ZH");
 render(<App />, root);

@@ -312,7 +312,10 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
             <button
               className="btn btn-sm"
               onClick={() => {
-                setMasterPasswordModalMode("setup");
+                const mode = masterPasswordStatus.has_password && !masterPasswordStatus.unlocked
+                  ? "unlock"
+                  : "setup";
+                setMasterPasswordModalMode(mode);
                 setMasterPasswordModalOpen(true);
               }}
             >
@@ -323,19 +326,30 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
             {masterPasswordStatus.has_password && (
               <button
                 className="btn btn-sm btn-ghost"
-                onClick={() => { void (async () => {
-                  try {
-                    const result = await apiClient.lockCredentials();
-                    if (result.success) {
-                      showMessage('success', t("master_password.locked"));
-                      await loadMasterPasswordStatus();
-                    }
-                  } catch {
-                    showMessage('error', 'Failed to lock credentials');
+                onClick={() => {
+                  if (masterPasswordStatus.unlocked) {
+                    // Already unlocked: lock credentials directly (no password needed)
+                    void (async () => {
+                      try {
+                        const result = await apiClient.lockCredentials();
+                        if (result.success) {
+                          showMessage('success', t("master_password.locked"));
+                          await loadMasterPasswordStatus();
+                        }
+                      } catch {
+                        showMessage('error', 'Failed to lock credentials');
+                      }
+                    })();
+                  } else {
+                    // Locked: open unlock modal to enter password
+                    setMasterPasswordModalMode("unlock");
+                    setMasterPasswordModalOpen(true);
                   }
-                })(); }}
+                }}
               >
-                {t("master_password.lock")}
+                {masterPasswordStatus.unlocked
+                  ? t("master_password.lock")
+                  : t("master_password.unlocked")}
               </button>
             )}
           </div>
@@ -540,6 +554,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         mode={masterPasswordModalMode}
         onSuccess={() => {
           setMasterPasswordModalOpen(false);
+          void loadMasterPasswordStatus();
           showMessage("success", masterPasswordModalMode === "setup" ? t("master_password.success") : t("master_password.unlock_success"));
         }}
         onClose={() => setMasterPasswordModalOpen(false)}

@@ -268,9 +268,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   useEffect(() => {
     const startAt = performance.now();
     const lang = String(config.basic.language ?? "ZH");
-    setLanguage(lang).catch((err: unknown) =>
-      console.error("加载语言失败", String(err)),
-    );
+    setLanguage(lang);
     logPerf("Settings.language.changed", {
       language: lang,
       scheduleMs: Math.round(performance.now() - startAt),

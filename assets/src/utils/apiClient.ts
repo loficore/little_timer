@@ -31,6 +31,20 @@ export class APIClient {
     private authToken: string | null = null;
 
     /**
+     * 内部辅助函数：统一处理 fetch 响应和 JSON 解析
+     * @param url 请求 URL
+     * @param options RequestInit 选项
+     * @returns Promise<T> 解析后的 JSON 数据
+     */
+    private async fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+        const res = await fetch(url, options);
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        }
+        return res.json() as Promise<T>;
+    }
+
+    /**
      * 构造函数，接受 API 基础 URL
      * @param {string} baseUrl API 基础 URL，例如 http://localhost:8000
      */
@@ -59,11 +73,7 @@ export class APIClient {
      * @returns {Promise<TimerState>} 返回一个 Promise，解析为 TimerState 对象
      */
     async getState(): Promise<TimerState> {
-        const response = await fetch(`${this.baseUrl}/api/state`);
-        if (!response.ok) {
-            throw new Error(`Error fetching state: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<TimerState>(`${this.baseUrl}/api/state`);
     }
 
     /**
@@ -80,15 +90,11 @@ export class APIClient {
             if (options.restDuration) body.rest_duration = options.restDuration;
             if (options.loopCount) body.loop_count = options.loopCount;
         }
-        const response = await fetch(`${this.baseUrl}/api/start`, {
+        return this.fetchJson<TimerStartResult>(`${this.baseUrl}/api/start`, {
             method: "POST",
             headers: Object.keys(body).length > 0 ? { "Content-Type": "application/json" } : {},
             body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
         });
-        if (!response.ok) {
-            throw new Error(`Error starting timer: ${response.statusText}`);
-        }
-        return await response.json();
     }
 
     /**
@@ -96,11 +102,7 @@ export class APIClient {
      * @returns {Promise<TimerFinishResult>} 累计时间
      */
     async finishTimer(): Promise<TimerFinishResult> {
-        const response = await fetch(`${this.baseUrl}/api/timer/finish`, { method: "POST" });
-        if (!response.ok) {
-            throw new Error(`Error finishing timer: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<TimerFinishResult>(`${this.baseUrl}/api/timer/finish`, { method: "POST" });
     }
 
     /**
@@ -108,11 +110,7 @@ export class APIClient {
      * @returns {Promise<TimerProgress>} 计时进度
      */
     async getTimerProgress(): Promise<TimerProgress> {
-        const response = await fetch(`${this.baseUrl}/api/timer/progress`);
-        if (!response.ok) {
-            throw new Error(`Error getting timer progress: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<TimerProgress>(`${this.baseUrl}/api/timer/progress`);
     }
 
     /**
@@ -128,11 +126,7 @@ export class APIClient {
      * @returns {Promise<RestResult>} 休息时长
      */
     async startRest(): Promise<RestResult> {
-        const response = await fetch(`${this.baseUrl}/api/timer/rest`, { method: "POST" });
-        if (!response.ok) {
-            throw new Error(`Error starting rest: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<RestResult>(`${this.baseUrl}/api/timer/rest`, { method: "POST" });
     }
 
     /**
@@ -140,20 +134,14 @@ export class APIClient {
      * @returns {Promise<void>} 返回一个 Promise，表示操作完成
      */
     async pauseTimer(): Promise<void> {
-        const response = await fetch(`${this.baseUrl}/api/pause`, { method: "POST" });
-        if (!response.ok) {
-            throw new Error(`Error pausing timer: ${response.statusText}`);
-        }
+        return this.fetchJson<void>(`${this.baseUrl}/api/pause`, { method: "POST" });
     }
 
     /**
      * 重置计时器
      */
     async resetTimer(): Promise<void> {
-        const response = await fetch(`${this.baseUrl}/api/reset`, { method: "POST" });
-        if (!response.ok) {
-            throw new Error(`Error resetting timer: ${response.statusText}`);
-        }
+        return this.fetchJson<void>(`${this.baseUrl}/api/reset`, { method: "POST" });
     }
 
     /**
@@ -161,13 +149,10 @@ export class APIClient {
      * @param {"countdown" | "stopwatch"} mode 目标模式
      */
     async changeMode(mode: "countdown" | "stopwatch"): Promise<void> {
-        const response = await fetch(`${this.baseUrl}/api/mode`, {
+        return this.fetchJson<void>(`${this.baseUrl}/api/mode`, {
             method: "POST",
             body: mode,
         });
-        if (!response.ok) {
-            throw new Error(`Error changing mode: ${response.statusText}`);
-        }
     }
 
     /**
@@ -175,11 +160,7 @@ export class APIClient {
      * @returns {Promise<Settings>} 返回一个 Promise，解析为 Settings 对象
      */
     async getSettings(): Promise<Settings> {
-        const response = await fetch(`${this.baseUrl}/api/settings`);
-        if (!response.ok) {
-            throw new Error(`Error fetching settings: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<Settings>(`${this.baseUrl}/api/settings`);
     }
 
     /**
@@ -188,14 +169,11 @@ export class APIClient {
      * @returns {Promise<void>} 返回一个 Promise，表示操作完成
      */
     async updateSettings(settings: object): Promise<void> {
-        const response = await fetch(`${this.baseUrl}/api/settings`, {
+        return this.fetchJson<void>(`${this.baseUrl}/api/settings`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(settings),
         });
-        if (!response.ok) {
-            throw new Error(`Error updating settings: ${response.statusText}`);
-        }
     }
 
     // === 习惯集 API ===
@@ -205,11 +183,7 @@ export class APIClient {
      * @returns {Promise<HabitSet[]>} 返回一个 Promise，解析为习惯集列表
      */
     async getHabitSets(): Promise<HabitSet[]> {
-        const response = await fetch(`${this.baseUrl}/api/habit-sets`);
-        if (!response.ok) {
-            throw new Error(`Error fetching habit sets: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<HabitSet[]>(`${this.baseUrl}/api/habit-sets`);
     }
 
     /**
@@ -220,15 +194,11 @@ export class APIClient {
      * @returns {Promise<HabitSet>} 返回一个 Promise，解析为创建的习惯集对象
      */
     async createHabitSet(name: string, description: string, color: string): Promise<HabitSet> {
-        const response = await fetch(`${this.baseUrl}/api/habit-sets`, {
+        return this.fetchJson<HabitSet>(`${this.baseUrl}/api/habit-sets`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name, description, color }),
         });
-        if (!response.ok) {
-            throw new Error(`Error creating habit set: ${response.statusText}`);
-        }
-        return await response.json();
     }
 
     /**
@@ -241,15 +211,11 @@ export class APIClient {
      * @returns {Promise<HabitSet>}
      */
     async updateHabitSet(id: number, name: string, description: string, color: string, wallpaper?: string): Promise<HabitSet> {
-        const response = await fetch(`${this.baseUrl}/api/habit-sets/${id}`, {
+        return this.fetchJson<HabitSet>(`${this.baseUrl}/api/habit-sets/${id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name, description, color, wallpaper: wallpaper || "" }),
         });
-        if (!response.ok) {
-            throw new Error(`Error updating habit set: ${response.statusText}`);
-        }
-        return await response.json();
     }
 
     /**
@@ -258,12 +224,9 @@ export class APIClient {
      * @returns {Promise<void>}
      */
     async deleteHabitSet(id: number): Promise<void> {
-        const response = await fetch(`${this.baseUrl}/api/habit-sets/${id}`, {
+        return this.fetchJson<void>(`${this.baseUrl}/api/habit-sets/${id}`, {
             method: "DELETE",
         });
-        if (!response.ok) {
-            throw new Error(`Error deleting habit set: ${response.statusText}`);
-        }
     }
 
     // === 习惯 API ===
@@ -273,11 +236,7 @@ export class APIClient {
      * @returns {Promise<Habit[]>} 返回一个 Promise，解析为习惯列表
      */
     async getHabits(): Promise<Habit[]> {
-        const response = await fetch(`${this.baseUrl}/api/habits`);
-        if (!response.ok) {
-            throw new Error(`Error fetching habits: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<Habit[]>(`${this.baseUrl}/api/habits`);
     }
 
     /**
@@ -289,7 +248,7 @@ export class APIClient {
      * @returns {Promise<Habit>}
      */
     async createHabit(setId: number, name: string, goalSeconds: number, color: string): Promise<Habit> {
-        const response = await fetch(`${this.baseUrl}/api/habits`, {
+        return this.fetchJson<Habit>(`${this.baseUrl}/api/habits`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -299,10 +258,6 @@ export class APIClient {
                 color,
             }),
         });
-        if (!response.ok) {
-            throw new Error(`Error creating habit: ${response.statusText}`);
-        }
-        return await response.json();
     }
 
     /**
@@ -311,12 +266,9 @@ export class APIClient {
      * @returns {Promise<void>} 返回一个 Promise
      */
     async deleteHabit(id: number): Promise<void> {
-        const response = await fetch(`${this.baseUrl}/api/habits/${id}`, {
+        return this.fetchJson<void>(`${this.baseUrl}/api/habits/${id}`, {
             method: "DELETE",
         });
-        if (!response.ok) {
-            throw new Error(`Error deleting habit: ${response.statusText}`);
-        }
     }
 
     /**
@@ -329,7 +281,7 @@ export class APIClient {
      * @returns {Promise<Habit>}
      */
     async updateHabit(id: number, name: string, goalSeconds: number, color: string, wallpaper?: string): Promise<Habit> {
-        const response = await fetch(`${this.baseUrl}/api/habits/${id}`, {
+        return this.fetchJson<Habit>(`${this.baseUrl}/api/habits/${id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -339,10 +291,6 @@ export class APIClient {
                 wallpaper: wallpaper || "",
             }),
         });
-        if (!response.ok) {
-            throw new Error(`Error updating habit: ${response.statusText}`);
-        }
-        return await response.json();
     }
 
     // === 记录 API ===
@@ -356,7 +304,7 @@ export class APIClient {
      * @returns {Promise<CreateSessionResult>} 返回一个 Promise，解析为创建的记录对象
      */
     async createSession(habitId: number, durationSeconds: number, count: number, date: string): Promise<CreateSessionResult> {
-        const response = await fetch(`${this.baseUrl}/api/sessions`, {
+        return this.fetchJson<CreateSessionResult>(`${this.baseUrl}/api/sessions`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -366,10 +314,6 @@ export class APIClient {
                 date,
             }),
         });
-        if (!response.ok) {
-            throw new Error(`Error creating session: ${response.statusText}`);
-        }
-        return await response.json();
     }
 
     /**
@@ -385,11 +329,7 @@ export class APIClient {
         if (startDate) params.set("start_date", startDate);
         if (endDate) params.set("end_date", endDate);
 
-        const response = await fetch(`${this.baseUrl}/api/sessions?${params.toString()}`);
-        if (!response.ok) {
-            throw new Error(`Error fetching sessions: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<Session[]>(`${this.baseUrl}/api/sessions?${params.toString()}`);
     }
 
     /**
@@ -401,11 +341,7 @@ export class APIClient {
     async getHabitStreak(habitId: number, goalSeconds?: number): Promise<HabitStreak> {
         const params = new URLSearchParams();
         if (goalSeconds) params.set("goal_seconds", goalSeconds.toString());
-        const response = await fetch(`${this.baseUrl}/api/habits/${habitId}/streak?${params.toString()}`);
-        if (!response.ok) {
-            throw new Error(`Error fetching streak: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<HabitStreak>(`${this.baseUrl}/api/habits/${habitId}/streak?${params.toString()}`);
     }
 
     /**
@@ -417,11 +353,7 @@ export class APIClient {
     async getHabitDetail(habitId: number, date?: string): Promise<HabitDetail> {
         const params = new URLSearchParams();
         if (date) params.set("date", date);
-        const response = await fetch(`${this.baseUrl}/api/habits/${habitId}/detail?${params.toString()}`);
-        if (!response.ok) {
-            throw new Error(`Error fetching habit detail: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<HabitDetail>(`${this.baseUrl}/api/habits/${habitId}/detail?${params.toString()}`);
     }
 
     // === 备份 API ===
@@ -441,11 +373,7 @@ export class APIClient {
      * @returns Promise resolving to array of backup info
      */
     async listBackups(): Promise<BackupListResult> {
-        const response = await fetch(`${this.baseUrl}/api/backup/list`);
-        if (!response.ok) {
-            throw new Error(`Error listing backups: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<BackupListResult>(`${this.baseUrl}/api/backup/list`);
     }
 
     /**
@@ -454,12 +382,11 @@ export class APIClient {
      * @returns Promise resolving to success status or error message
      */
     async restoreBackup(name: string): Promise<BackupRestoreResult> {
-        const response = await fetch(`${this.baseUrl}/api/backup/restore`, {
+        return this.fetchJson<BackupRestoreResult>(`${this.baseUrl}/api/backup/restore`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name }),
         });
-        return await response.json();
     }
 
     /**
@@ -468,10 +395,9 @@ export class APIClient {
      * @returns Promise resolving to success status or error message
      */
     async deleteBackup(name: string): Promise<BackupVerifyResult> {
-        const response = await fetch(`${this.baseUrl}/api/backup/${encodeURIComponent(name)}`, {
+        return this.fetchJson<BackupVerifyResult>(`${this.baseUrl}/api/backup/${encodeURIComponent(name)}`, {
             method: "DELETE",
         });
-        return await response.json();
     }
 
     /**
@@ -479,8 +405,7 @@ export class APIClient {
      * @returns Promise resolving to success status or error message
      */
     async verifyBackup(): Promise<BackupVerifyResult> {
-        const response = await fetch(`${this.baseUrl}/api/backup/verify`, { method: "POST" });
-        return await response.json();
+        return this.fetchJson<BackupVerifyResult>(`${this.baseUrl}/api/backup/verify`, { method: "POST" });
     }
 
     /**
@@ -493,8 +418,12 @@ export class APIClient {
         locked_until: number;
         unlock_time: number;
     }> {
-        const response = await fetch(`${this.baseUrl}/api/backup/master-password`);
-        return await response.json();
+        return this.fetchJson<{
+            has_password: boolean;
+            unlocked: boolean;
+            locked_until: number;
+            unlock_time: number;
+        }>(`${this.baseUrl}/api/backup/master-password`);
     }
 
     /**
@@ -503,12 +432,11 @@ export class APIClient {
      * @returns Promise with success status
      */
     async setMasterPassword(password: string): Promise<{ success: boolean; error?: string }> {
-        const response = await fetch(`${this.baseUrl}/api/backup/master-password`, {
+        return this.fetchJson<{ success: boolean; error?: string }>(`${this.baseUrl}/api/backup/master-password`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ password }),
         });
-        return await response.json();
     }
 
     /**
@@ -517,12 +445,11 @@ export class APIClient {
      * @returns Promise with success status
      */
     async unlockCredentials(password: string): Promise<{ success: boolean; locked_until: number; error?: string }> {
-        const response = await fetch(`${this.baseUrl}/api/backup/unlock`, {
+        return this.fetchJson<{ success: boolean; locked_until: number; error?: string }>(`${this.baseUrl}/api/backup/unlock`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ password }),
         });
-        return await response.json();
     }
 
     /**
@@ -530,10 +457,9 @@ export class APIClient {
      * @returns Promise with success status
      */
     async lockCredentials(): Promise<{ success: boolean }> {
-        const response = await fetch(`${this.baseUrl}/api/backup/lock`, {
+        return this.fetchJson<{ success: boolean }>(`${this.baseUrl}/api/backup/lock`, {
             method: "POST",
         });
-        return await response.json();
     }
 
     /**
@@ -541,11 +467,7 @@ export class APIClient {
      * @returns Promise resolving to BackupConfig object
      */
     async getBackupConfig(): Promise<BackupConfig> {
-        const response = await fetch(`${this.baseUrl}/api/backup/config`);
-        if (!response.ok) {
-            throw new Error(`Error fetching backup config: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<BackupConfig>(`${this.baseUrl}/api/backup/config`);
     }
 
     /**
@@ -554,12 +476,11 @@ export class APIClient {
      * @returns Promise resolving to success status or error message
      */
     async updateBackupConfig(config: BackupConfig): Promise<{ success: boolean; error?: string }> {
-        const response = await fetch(`${this.baseUrl}/api/backup/config`, {
+        return this.fetchJson<{ success: boolean; error?: string }>(`${this.baseUrl}/api/backup/config`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(config),
         });
-        return await response.json();
     }
 
     // === 壁纸 API ===
@@ -588,11 +509,7 @@ export class APIClient {
      * @returns {Promise<WallpaperListResult[]>}
      */
     async listWallpapers(): Promise<WallpaperListResult[]> {
-        const response = await fetch(`${this.baseUrl}/api/wallpapers`);
-        if (!response.ok) {
-            throw new Error(`Error listing wallpapers: ${response.statusText}`);
-        }
-        return await response.json();
+        return this.fetchJson<WallpaperListResult[]>(`${this.baseUrl}/api/wallpapers`);
     }
 
     /**
@@ -600,12 +517,8 @@ export class APIClient {
      * @param {string} filename 文件名
      */
     async deleteWallpaper(filename: string): Promise<WallpaperDeleteResult> {
-        const response = await fetch(`${this.baseUrl}/api/wallpapers/${encodeURIComponent(filename)}`, {
+        return this.fetchJson<WallpaperDeleteResult>(`${this.baseUrl}/api/wallpapers/${encodeURIComponent(filename)}`, {
             method: "DELETE",
         });
-        if (!response.ok) {
-            throw new Error(`Error deleting wallpaper: ${response.statusText}`);
-        }
-        return await response.json();
     }
 }

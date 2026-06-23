@@ -8,7 +8,6 @@ const http_server = @import("http/std_server.zig");
 const clock = @import("clock.zig");
 const settings = @import("../settings/settings_manager.zig");
 const interface = @import("interface.zig");
-const error_recovery = @import("utils/error_recovery.zig");
 const habit_crud = @import("../storage/habit_crud.zig");
 
 const EventThrottle = struct {
@@ -99,7 +98,6 @@ pub const MainApplication = struct {
     mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
     /// 错误恢复管理器 - 用于处理和追踪错误
-    error_recovery: error_recovery.ErrorRecoveryManager,
     /// 事件去抖限流器 - 防止快速连续点击
     event_throttle: EventThrottle = .{},
     /// 当前正在计时的习惯 ID
@@ -134,8 +132,6 @@ pub const MainApplication = struct {
         self.allocator = allocator;
         self.mutex = .{}; // 显式初始化 mutex
 
-        // 初始化错误恢复管理器
-        self.error_recovery = error_recovery.ErrorRecoveryManager.init(allocator);
 
         // 初始化和加载设置（纯 SQLite 版本，不再需要 settings.toml）
         self.settings_manager = try settings.SettingsManager.init(allocator, "");
@@ -149,7 +145,6 @@ pub const MainApplication = struct {
                 logger.global_logger.debug("备份失败（文件可能不存在）: {any}", .{backup_err});
             };
 
-            // 2. 重置为默认配置
             self.settings_manager.resetToDefaults() catch |reset_err| {
                 logger.global_logger.err("❌ 重置默认配置失败: {any}", .{reset_err});
                 return reset_err; // 致命错误，无法继续
@@ -158,7 +153,6 @@ pub const MainApplication = struct {
             // 3. 保存默认配置到文件
             self.settings_manager.save() catch |save_err| {
                 logger.global_logger.err("❌ 保存默认配置失败: {any}", .{save_err});
-                self.error_recovery.recordError("保存默认配置失败", "SETTINGS_SAVE");
             };
 
             logger.global_logger.info("✅ 已重置为默认配置并保存", .{});
@@ -548,7 +542,6 @@ pub const MainApplication = struct {
         self.clock_manager.deinit();
 
         // 3. 清理错误恢复管理器
-        self.error_recovery.deinit();
 
         // 4. 清空全局指针
         global_app = null;

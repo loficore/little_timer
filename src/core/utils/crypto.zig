@@ -109,21 +109,7 @@ pub fn decryptWithPassword(ciphertext: []const u8, password: []const u8, allocat
 }
 
 pub fn generateToken(allocator: std.mem.Allocator) ![]u8 {
-    const TOKEN_SIZE = 32;
-    const hex_chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const CHARSET_SIZE: u32 = 62;
-    const MASK: u8 = 0xFC; // 256 - (256 % 62) = 256 - 8 = 248, highest multiple of 62 that fits in u8
-
-    var token = try allocator.alloc(u8, TOKEN_SIZE);
-    var single_byte: [1]u8 = undefined;
-    for (0..TOKEN_SIZE) |i| {
-        // rejection sampling: retry until we get a byte that won't bias the distribution
-        while (true) {
-            crypto.random.bytes(&single_byte);
-            if (single_byte[0] < MASK) break; // byte is in [0, 247], no bias
-            // byte is in [248, 255], would cause bias, retry
-        }
-        token[i] = hex_chars[single_byte[0] % CHARSET_SIZE];
-    }
-    return token;
+    var token: [32]u8 = undefined;
+    std.crypto.random.bytes(&token);
+    return try allocator.dupe(u8, &token);
 }

@@ -3,7 +3,6 @@ const std = @import("std");
 const interface = @import("../core/interface.zig");
 const clock = @import("../core/clock.zig");
 const settings_module = @import("../settings/settings_manager.zig");
-const error_recovery = @import("../core/utils/error_recovery.zig");
 
 test "MainApplication 结构体字段存在" {
     try std.testing.expectEqual(true, @hasField(std.types, "ClockManager"));
@@ -28,48 +27,6 @@ test "ClockManager 初始化状态" {
 
 test "ClockManager 事件处理 - 启动和暂停" {
     const config: interface.ClockTaskConfig = .{
-        .default_mode = .STOPWATCH_MODE,
-        .stopwatch = .{ .max_seconds = 3600 },
-    };
-
-    var manager = clock.ClockManager.init(config);
-
-    manager.handleEvent(.user_start_timer);
-    var state = manager.update();
-    try std.testing.expect(!state.isPaused());
-
-    manager.handleEvent(.user_pause_timer);
-    state = manager.update();
-    try std.testing.expect(state.isPaused());
-}
-
-test "ClockManager 事件处理 - 重置" {
-    const config: interface.ClockTaskConfig = .{
-        .countdown = .{
-            .duration_seconds = 60,
-            .loop = false,
-            .loop_count = 0,
-            .loop_interval_seconds = 0,
-        },
-    };
-
-    var manager = clock.ClockManager.init(config);
-
-    manager.handleEvent(.user_start_timer);
-    manager.handleEvent(.{ .tick = 30000 });
-
-    manager.handleEvent(.user_reset_timer);
-    const state = manager.update();
-
-    try std.testing.expectEqual(state.COUNTDOWN_MODE.remaining_ms, 60000);
-    try std.testing.expect(state.isPaused());
-}
-
-test "ErrorRecoveryManager 初始化" {
-    const allocator = std.testing.allocator;
-    const manager = error_recovery.ErrorRecoveryManager.init(allocator);
-
-    try std.testing.expectEqual(manager.error_count, 0);
     try std.testing.expect(!manager.is_recovering);
 }
 

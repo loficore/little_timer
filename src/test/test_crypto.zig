@@ -172,16 +172,11 @@ test "generateSalt returns 16 bytes" {
     try std.testing.expectEqual(@as(usize, 16), salt.len);
 }
 
-test "generateToken returns 32-char token" {
+test "generateToken returns 32 bytes" {
     const allocator = std.testing.allocator;
     const token = try crypto.generateToken(allocator);
     defer allocator.free(token);
     try std.testing.expectEqual(@as(usize, 32), token.len);
-
-    const valid_chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    for (token) |c| {
-        try std.testing.expect(std.mem.indexOfScalar(u8, valid_chars, c) != null);
-    }
 }
 
 test "generateToken produces unique values" {

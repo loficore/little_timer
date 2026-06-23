@@ -352,29 +352,19 @@ pub fn serializePresetConfigOnly(
     mode: interface.ModeEnumT,
     config: interface.ClockTaskConfig,
 ) ![]u8 {
-    var json_list = std.ArrayList(u8){};
-    defer json_list.deinit(allocator);
-    const w = json_list.writer(allocator);
-
-    switch (mode) {
-        .COUNTDOWN_MODE => {
-            try w.print(
-                \\{{"mode":"countdown","duration_seconds":{},"loop":{},"loop_count":{},"loop_interval_seconds":{}}}
-            , .{
-                config.countdown.duration_seconds,
-                @intFromBool(config.countdown.loop),
-                config.countdown.loop_count,
-                config.countdown.loop_interval_seconds,
-            });
-        },
-        .STOPWATCH_MODE => {
-            try w.print(
-                \\{{"mode":"stopwatch","max_seconds":{}}}
-            , .{config.stopwatch.max_seconds});
-        },
-    }
-
-    return try json_list.toOwnedSlice(allocator);
+    return switch (mode) {
+        .COUNTDOWN_MODE => try std.json.stringifyAlloc(allocator, .{
+            .mode = "countdown",
+            .duration_seconds = config.countdown.duration_seconds,
+            .loop = config.countdown.loop,
+            .loop_count = config.countdown.loop_count,
+            .loop_interval_seconds = config.countdown.loop_interval_seconds,
+        }, .{ .indent = .off }),
+        .STOPWATCH_MODE => try std.json.stringifyAlloc(allocator, .{
+            .mode = "stopwatch",
+            .max_seconds = config.stopwatch.max_seconds,
+        }, .{ .indent = .off }),
+    };
 }
 
 /// 反序列化单个预设配置从 JSON（用于 SQLite 读取）

@@ -79,7 +79,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
 
   useEffect(() => {
     if (editData) {
-      setName(editData.name);
+      setName(editData.name ?? "");
       setColor(editData.color || COLORS[0]);
       setColorInput(editData.color || COLORS[0]);
       setColorInputError("");

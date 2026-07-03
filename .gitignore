@@ -76,3 +76,5 @@ assets/src/test/visual/specs/snapshots/
 .playwright-mcp/
 
 .omo/
+
+neo-src/server

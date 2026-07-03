@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
+import { TimerPage } from "../pages/TimerPage";
 
 const baseURL = "http://127.0.0.1:5173";
 
@@ -83,5 +84,131 @@ test.describe("TimerPage VRT 截图测试", () => {
     await expect(page).toHaveScreenshot("timer-sidebar-visuals.png", {
       maxDiffPixels: 100,
     });
+  });
+
+  test("主题切换后计时器外观（light 主题）", async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.setItem("lt_theme_mode", "light");
+    });
+    await page.reload();
+    await page.waitForTimeout(1500);
+    await expect(page.locator(".my-clock-glass")).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page).toHaveScreenshot("timer-theme-light.png", {
+      maxDiffPixels: 100,
+    });
+  });
+
+  test("倒计时和秒表模式切换视觉", async ({ page }) => {
+    await page.waitForTimeout(1500);
+    await expect(page.locator(".my-clock-glass")).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page).toHaveScreenshot("timer-stopwatch-mode.png", {
+      maxDiffPixels: 100,
+    });
+
+    await page.locator(".dropdown-select-btn").first().click();
+    await page.waitForTimeout(300);
+    await page.locator(".my-surface-modal button").nth(1).click();
+    await page.waitForTimeout(500);
+    await expect(page.locator(".my-clock-glass")).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page).toHaveScreenshot("timer-countdown-mode.png", {
+      maxDiffPixels: 100,
+    });
+  });
+
+  test("控制按钮等高（stopwatch 运行中）", async ({ page }) => {
+    const startBtn = page.locator('[data-testid="timer-start"]');
+    if (await startBtn.isVisible()) {
+      await startBtn.click();
+      await page.waitForTimeout(1500);
+    }
+    const container = page.locator(".my-clock-glass").first();
+    await expect(container).toHaveScreenshot("timer-stopwatch-running.png", {
+      maxDiffPixels: 100,
+    });
+  });
+});
+
+test.describe("Timer 用户旅程 E2E", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto(baseURL);
+    await page.waitForTimeout(1500);
+  });
+
+  test("stopwatch 完整旅程: start → pause → resume → reset", async ({ page }) => {
+    const timerPage = new TimerPage(page);
+
+    // 1. Navigate and select stopwatch mode
+    await timerPage.goto();
+    await timerPage.selectMode("stopwatch");
+
+    // 2. Click start - verify timer is running
+    await timerPage.clickStart();
+    expect(await timerPage.isTimerRunning()).toBe(true);
+
+    // 3. Wait 1s - verify display ticks
+    const displayBefore = await timerPage.getTimerDisplayText();
+    await page.waitForTimeout(1000);
+    const displayAfter = await timerPage.getTimerDisplayText();
+    expect(displayAfter).not.toBe(displayBefore);
+
+    // 4. Click pause - verify paused (neither running nor fully stopped)
+    await timerPage.clickPause();
+    expect(await timerPage.isTimerStopped()).toBe(false);
+    expect(await timerPage.isTimerRunning()).toBe(false);
+
+    // 5. Resume via clickStart - verify running again
+    await timerPage.clickStart();
+    expect(await timerPage.isTimerRunning()).toBe(true);
+
+    // 6. Click reset - verify back to initial state (start button visible)
+    await timerPage.clickReset();
+    expect(await timerPage.isTimerStopped()).toBe(true);
+    expect(await timerPage.isTimerRunning()).toBe(false);
+  });
+
+  test("countdown 流程: start → finish → 验证状态", async ({ page }) => {
+    const timerPage = new TimerPage(page);
+
+    await timerPage.goto();
+    await timerPage.selectMode("countdown");
+    await timerPage.setWorkDuration(5);
+
+    await timerPage.clickStart();
+    expect(await timerPage.isTimerRunning()).toBe(true);
+
+    await page.waitForTimeout(6000);
+
+    await timerPage.waitForTimerFinish(10000);
+
+    await timerPage.clickFinish();
+    expect(await timerPage.isTimerStopped()).toBe(true);
+    expect(await timerPage.isTimerRunning()).toBe(false);
+  });
+
+  test("countdown 完整旅程: start pause resume reset", async ({ page }) => {
+    const timerPage = new TimerPage(page);
+
+    await timerPage.goto();
+    await timerPage.selectMode("countdown");
+    await timerPage.setWorkDuration(5);
+
+    await timerPage.clickStart();
+    expect(await timerPage.isTimerRunning()).toBe(true);
+
+    await timerPage.clickPause();
+    expect(await timerPage.isTimerStopped()).toBe(false);
+    expect(await timerPage.isTimerRunning()).toBe(false);
+
+    await timerPage.clickStart();
+    expect(await timerPage.isTimerRunning()).toBe(true);
+
+    await timerPage.waitForTimerFinish(10000);
+
+    await timerPage.clickFinish();
+    expect(await timerPage.isTimerStopped()).toBe(true);
+    expect(await timerPage.isTimerRunning()).toBe(false);
   });
 });

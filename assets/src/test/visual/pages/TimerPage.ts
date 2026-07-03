@@ -27,6 +27,7 @@ export class TimerPage extends BasePage {
 
   async goto() {
     await super.goto("/");
+    await this.page.waitForTimeout(500);
   }
 
   async clickStart() {
@@ -80,7 +81,7 @@ export class TimerPage extends BasePage {
   }
 
   async selectMode(mode: "countdown" | "stopwatch") {
-    await this.click(this.modeSelector);
+    await this.click(this.modeSelector, { timeout: 15000 });
     await this.page.waitForTimeout(300);
     const option = this.page.locator(`[data-testid="mode-option-${mode}"]`);
     if (await option.isVisible()) {

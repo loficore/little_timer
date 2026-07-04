@@ -38,17 +38,19 @@ describe("APIClient", () => {
 
       const result = await client.getState();
 
-      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/api/state");
+      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/api/state", undefined);
       expect(result).toEqual(mockState);
     });
 
     it("请求失败时应该抛出错误", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
+        status: 404,
         statusText: "Not Found",
+        text: async () => "Not Found",
       });
 
-      await expect(client.getState()).rejects.toThrow("Error fetching state: Not Found");
+      await expect(client.getState()).rejects.toThrow("HTTP 404: Not Found");
     });
   });
 
@@ -136,6 +138,7 @@ describe("APIClient", () => {
     it("应该发送重置请求", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        json: async () => undefined,
       });
 
       await client.resetTimer();
@@ -160,7 +163,7 @@ describe("APIClient", () => {
 
       const result = await client.getSettings();
 
-      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/api/settings");
+      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/api/settings", undefined);
       expect(result).toEqual(mockSettings);
     });
   });
@@ -169,6 +172,7 @@ describe("APIClient", () => {
     it("应该发送设置更新请求", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        json: async () => undefined,
       });
 
       const newSettings = { basic: { timezone: 8 } };
@@ -198,7 +202,7 @@ describe("APIClient", () => {
 
       const result = await client.getHabits();
 
-      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/api/habits");
+      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/api/habits", undefined);
       expect(result).toEqual(mockHabits);
     });
 
@@ -262,7 +266,7 @@ describe("APIClient", () => {
 
       const result = await client.getHabitSets();
 
-      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/api/habit-sets");
+      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/api/habit-sets", undefined);
       expect(result).toEqual(mockSets);
     });
 
@@ -306,9 +310,10 @@ describe("APIClient", () => {
           ok: false,
           status: 400,
           statusText: "Bad Request",
+          text: async () => "Bad Request",
         });
 
-        await expect(client.getState()).rejects.toThrow("Error fetching state: Bad Request");
+        await expect(client.getState()).rejects.toThrow("HTTP 400: Bad Request");
       });
 
       it("401 错误时应该抛出认证错误", async () => {
@@ -316,9 +321,10 @@ describe("APIClient", () => {
           ok: false,
           status: 401,
           statusText: "Unauthorized",
+          text: async () => "Unauthorized",
         });
 
-        await expect(client.getState()).rejects.toThrow("Error fetching state: Unauthorized");
+        await expect(client.getState()).rejects.toThrow("HTTP 401: Unauthorized");
       });
 
       it("403 错误时应该抛出禁止错误", async () => {
@@ -326,9 +332,10 @@ describe("APIClient", () => {
           ok: false,
           status: 403,
           statusText: "Forbidden",
+          text: async () => "Forbidden",
         });
 
-        await expect(client.getSettings()).rejects.toThrow("Error fetching settings: Forbidden");
+        await expect(client.getSettings()).rejects.toThrow("HTTP 403: Forbidden");
       });
     });
 
@@ -338,9 +345,10 @@ describe("APIClient", () => {
           ok: false,
           status: 500,
           statusText: "Internal Server Error",
+          text: async () => "Internal Server Error",
         });
 
-        await expect(client.getSettings()).rejects.toThrow("Error fetching settings: Internal Server Error");
+        await expect(client.getSettings()).rejects.toThrow("HTTP 500: Internal Server Error");
       });
 
       it("502 错误时应该抛出网关错误", async () => {
@@ -348,9 +356,10 @@ describe("APIClient", () => {
           ok: false,
           status: 502,
           statusText: "Bad Gateway",
+          text: async () => "Bad Gateway",
         });
 
-        await expect(client.getHabitSets()).rejects.toThrow("Error fetching habit sets: Bad Gateway");
+        await expect(client.getHabitSets()).rejects.toThrow("HTTP 502: Bad Gateway");
       });
 
       it("503 错误时应该抛出服务不可用", async () => {
@@ -358,9 +367,10 @@ describe("APIClient", () => {
           ok: false,
           status: 503,
           statusText: "Service Unavailable",
+          text: async () => "Service Unavailable",
         });
 
-        await expect(client.getHabits()).rejects.toThrow("Error fetching habits: Service Unavailable");
+        await expect(client.getHabits()).rejects.toThrow("HTTP 503: Service Unavailable");
       });
     });
 

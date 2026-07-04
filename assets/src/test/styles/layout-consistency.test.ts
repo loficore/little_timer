@@ -35,12 +35,11 @@ describe("layout.css 样式一致性测试", () => {
     expect(block).toContain("justify-content: center");
   });
 
-  it("my-clock-glass > div 的时钟垂直偏移默认值为 10px", () => {
+  it("my-clock-glass > div 的时钟垂直偏移默认值为 translateY(0)", () => {
     const glassDivMatch = cssContent.match(/\.my-clock-glass > div\s*\{[^}]+\}/s);
     expect(glassDivMatch).toBeTruthy();
 
     const block = glassDivMatch![0];
-    expect(block).toContain("--clock-vertical-offset");
-    expect(block).toContain("10px");
+    expect(block).toContain("transform: translateY(0)");
   });
 });

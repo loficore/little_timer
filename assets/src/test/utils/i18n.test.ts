@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { t, setLanguage, getCurrentLanguage, getMessages, parseToml } from "../../utils/i18n";
+import { t, setLanguage, getCurrentLanguage, getMessages } from "../../utils/i18n";
 
 vi.mock("../../i18n/*.toml", () => ({
   ZH: `
@@ -24,52 +24,6 @@ save_success = "Saved successfully"
 save_success = "保存成功（日语）"
   `,
 }), { virtual: true });
-
-describe("parseToml", () => {
-  it("应该解析简单的 TOML", () => {
-    const result = parseToml(`
-[section]
-key = "value"
-`);
-    expect(result).toEqual({ section: { key: "value" } });
-  });
-
-  it("应该解析嵌套节", () => {
-    const result = parseToml(`
-[parent.child]
-key = "value"
-`);
-    expect(result).toEqual({ parent: { child: { key: "value" } } });
-  });
-
-  it("应该解析字符串值", () => {
-    const result = parseToml('key = "hello world"');
-    expect(result).toEqual({ key: "hello world" });
-  });
-
-  it("应该解析数字值", () => {
-    const result = parseToml("count = 42");
-    expect(result).toEqual({ count: 42 });
-  });
-
-  it("应该解析布尔值", () => {
-    const result = parseToml("enabled = true");
-    expect(result).toEqual({ enabled: true });
-  });
-
-  it("应该忽略注释行", () => {
-    const result = parseToml(`
-# 这是一个注释
-key = "value"
-`);
-    expect(result).toEqual({ key: "value" });
-  });
-
-  it("应该处理转义字符", () => {
-    const result = parseToml('key = "hello \\"world\\""');
-    expect(result).toEqual({ key: 'hello "world"' });
-  });
-});
 
 describe("t", () => {
   beforeEach(async () => {

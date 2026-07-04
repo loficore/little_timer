@@ -6,6 +6,9 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   build: {
     assetsInlineLimit: Number.MAX_SAFE_INTEGER,
+    rollupOptions: {
+      external: ['/wails/runtime.js'],
+    },
   },
   plugins: [
     tailwindcss(),
@@ -17,6 +20,7 @@ export default defineConfig({
       'react': 'preact/compat',
       'react-dom': 'preact/compat',
       'react/jsx-runtime': 'preact/jsx-runtime',
+      '@wailsio/runtime': '/wails/runtime.js',
     },
   },
   assetsInclude: ['**/*.toml'], // 允许 TOML 文件作为资产导入

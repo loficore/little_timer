@@ -78,3 +78,16 @@ assets/src/test/visual/specs/snapshots/
 .omo/
 
 neo-src/server
+neo-src/bin/
+
+# Wails generated bindings (auto-generated, do not track)
+assets/bindings/
+assets/src/bindings/
+neo-src/cmd/server/assets/bindings/
+neo-src/frontend/bindings/
+neo-src/cmd/server/assets/index.html
+
+# Android build artifacts
+android/app/build/
+android/.gradle/
+bin/*.apk

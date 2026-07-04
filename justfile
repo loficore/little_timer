@@ -96,4 +96,18 @@ go-clean:
 go-build-embed:
 	@cd {{go_src}} && go build -tags embed_ui -o bin/server ./cmd/server
 
+# ── Android ────────────────────────────────────────────────────────────
+
+# 编译 Android APK（一键：bindings 生成 + 前端 + Go .so + Gradle）
+apk:
+	@./scripts/build-android.sh
+
+# 仅打包 APK（假设 .so 已编译好）
+apk-package:
+	@./scripts/build-android.sh --package-only
+
+# 生成 Wails bindings（手动）
+bindings:
+	@./scripts/generate-bindings.sh
+
 default: go-dev

@@ -392,7 +392,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
                 <div className="flex flex-1 flex-col items-center justify-center">
                 <div className="my-clock-glass mb-3 sm:mb-4">
-                                    <div className={`text-[clamp(3.2rem,13vw,8rem)] leading-none font-mono font-semibold time-transition flex items-center justify-center ${timeDisplayStyle === "seven_segment" ? "time-style-seven-segment" : "time-style-classic"} ${timeStateClass} ${isRunning && timeDisplayStyle === "seven_segment" ? "time-running-segment" : ""}`}>
+                                    <div className={`text-[clamp(2.8rem,14vw,8rem)] leading-none font-mono font-semibold time-transition flex items-center justify-center ${timeDisplayStyle === "seven_segment" ? "time-style-seven-segment" : "time-style-classic"} ${timeStateClass} ${isRunning && timeDisplayStyle === "seven_segment" ? "time-running-segment" : ""}`}>
                       {timeDisplayStyle === "seven_segment" ? (
                           <SevenSegmentDisplay value={timeDisplay} />
                       ) : (
@@ -440,7 +440,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                 <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 mt-2">
                     {isRunning && !isPaused ? (
                         <button
-                            className="btn btn-primary btn-lg min-w-[130px]"
+                            className="btn btn-primary btn-lg min-w-[100px] sm:min-w-[130px]"
                             onClick={() => void handlePause()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -450,7 +450,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                         </button>
                     ) : isPaused ? (
                         <button
-                            className="btn btn-primary btn-lg min-w-[130px]"
+                            className="btn btn-primary btn-lg min-w-[100px] sm:min-w-[130px]"
                             onClick={() => void handleResume()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -460,7 +460,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                         </button>
                     ) : (
                         <button
-                            className="btn btn-primary btn-lg min-w-[130px]"
+                            className="btn btn-primary btn-lg min-w-[100px] sm:min-w-[130px]"
                             onClick={() => void handleStart()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -472,7 +472,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
                     {timerConfig.mode === "countdown" && isRunning && (
                         <button
-                            className="btn btn-ghost btn-lg min-w-[110px]"
+                            className="btn btn-ghost btn-lg min-w-[90px] sm:min-w-[110px]"
                             onClick={() => void handleSkipToNext()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -484,7 +484,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
                     {isRunning && (
                         <button
-                            className="btn btn-success btn-lg min-w-[110px]"
+                            className="btn btn-success btn-lg min-w-[90px] sm:min-w-[110px]"
                             onClick={() => void handleFinish()}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -495,7 +495,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     )}
 
                     <button
-                        className="btn btn-secondary btn-lg min-w-[110px]"
+                        className="btn btn-secondary btn-lg min-w-[90px] sm:min-w-[110px]"
                         onClick={() => void handleReset()}
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">

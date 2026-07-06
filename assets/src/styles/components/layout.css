@@ -99,7 +99,7 @@
     -webkit-backdrop-filter: blur(18px) saturate(124%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.12), 0 10px 22px rgba(0, 0, 0, 0.18);
     min-height: 80px;
-    width: 92vw;
+    width: max(85vw, 300px);
     max-width: 560px;
     padding: 0.5rem 1.5rem;
     margin-left: auto;
@@ -178,7 +178,7 @@
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     min-height: 80px;
-    width: 92vw;
+    width: max(85vw, 300px);
     max-width: 560px;
     padding: 0.5rem 1.5rem;
     margin-left: auto;

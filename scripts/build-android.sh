@@ -64,6 +64,13 @@ if [ "$PACKAGE_ONLY" = "false" ]; then
     fi
 fi
 
+# Step 3b: 复制 runtime.js 到 Android assets (Wails 运行时需要)
+RUNTIME_JS_SRC="$HOME/.asdf/installs/golang/1.26.3/packages/pkg/mod/github.com/wailsapp/wails/v3@v3.0.0-alpha2.115/internal/assetserver/bundledassets/runtime.js"
+mkdir -p android/app/src/main/assets/wails
+if [ -f "$RUNTIME_JS_SRC" ]; then
+    cp "$RUNTIME_JS_SRC" android/app/src/main/assets/wails/runtime.js
+fi
+
 # Step 4: Go → Android .so
 NDK_ROOT="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/26.3.11579264}"
 if [ ! -d "$NDK_ROOT" ]; then

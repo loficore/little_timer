@@ -151,10 +151,34 @@ public class MainActivity extends AppCompatActivity {
                             java.util.Map<String, String> headers = new java.util.HashMap<>();
                             headers.put("Access-Control-Allow-Origin", "*");
                             headers.put("Cache-Control", "no-cache");
-                            headers.put("Content-Type", "application/json");
+
+                            // Derive correct MIME type from file extension
+                            String mimeType = "application/octet-stream";
+                            if (fullPath.endsWith(".js")) {
+                                mimeType = "application/javascript";
+                            } else if (fullPath.endsWith(".css")) {
+                                mimeType = "text/css";
+                            } else if (fullPath.endsWith(".html")) {
+                                mimeType = "text/html";
+                            } else if (fullPath.endsWith(".json")) {
+                                mimeType = "application/json";
+                            } else if (fullPath.endsWith(".png")) {
+                                mimeType = "image/png";
+                            } else if (fullPath.endsWith(".jpg") || fullPath.endsWith(".jpeg")) {
+                                mimeType = "image/jpeg";
+                            } else if (fullPath.endsWith(".svg")) {
+                                mimeType = "image/svg+xml";
+                            } else if (fullPath.endsWith(".woff2")) {
+                                mimeType = "font/woff2";
+                            } else if (fullPath.endsWith(".woff")) {
+                                mimeType = "font/woff";
+                            } else if (fullPath.endsWith(".ttf")) {
+                                mimeType = "font/ttf";
+                            }
+                            headers.put("Content-Type", mimeType);
 
                             return new WebResourceResponse(
-                                "application/json",
+                                mimeType,
                                 "UTF-8",
                                 200,
                                 "OK",

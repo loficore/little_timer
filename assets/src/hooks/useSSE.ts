@@ -1,12 +1,16 @@
 /**
  * SSE 连接管理 Hook
  * 统一管理 SSE 连接、自动重连和事件处理
+ *
+ * On Android (Wails): SSE is not available — Wails uses event bindings instead.
  */
 
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { SSEClient } from "../utils/sseClient";
 import { getAPIClient, type TimerState } from "../utils/apiClientSingleton";
 import { logInfo, logError } from "../utils/logger";
+
+const isAndroid = typeof window !== "undefined" && !!(window as any).wails;
 
 export interface UseSSEReturn {
   isConnected: boolean;
@@ -33,6 +37,8 @@ export const useSSE = (
   }, []);
 
   const connect = useCallback(() => {
+    if (isAndroid) return;
+
     if (sseClientRef.current?.isConnected()) {
       return;
     }

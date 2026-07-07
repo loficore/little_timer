@@ -44,6 +44,8 @@ import * as BackupService from "../bindings/little-timer/internal/app/backupserv
 const isAndroid = typeof window !== "undefined" && !!(window as any).wails;
 
 export class WailsAPIClient {
+  // Exposed for useSSE which accesses apiClient.baseUrl — SSE is not used on Android
+  baseUrl = "";
   async getState(): Promise<TimerState> {
     return TimerService.GetState();
   }

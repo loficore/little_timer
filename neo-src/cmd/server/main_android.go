@@ -30,9 +30,16 @@ package main
 
 import (
 	"embed"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	httpapp "little-timer/internal/http/app"
+	"little-timer/internal/domain"
+	"little-timer/internal/settings"
+	"little-timer/internal/storage"
+	"little-timer/internal/storage/backup"
 )
 
 //go:embed all:assets
@@ -48,20 +55,49 @@ var wailsApp *application.App
 // the Android JNI bridge after `nativeInit` stores the bridge
 // global ref — see `Java_com_wails_app_WailsBridge_nativeInit`.
 //
-// We pass a zero-value `*httpapp.App{}` for the tooling-only build
-// (the package must link even without a bootstrapped DB / clock /
-// settings / backup).  A real Android runtime wires those in
-// before this point — that lands once the Android user-data dir
-// decision is finalised.  The service constructors themselves only
-// store the *App pointer; they don't dereference its fields, so
-// the zero App compiles cleanly.
-//
 // ponytail: the service registration list mirrors `bindings/.../
 // wailsbindings.ts` exactly — every method the Wails client calls
 // must have a corresponding exported method on one of these types.
 // Add new methods to `wails_services.go`, not here.
 func bootWails() {
-	a := &httpapp.App{}
+	fmt.Fprintf(os.Stderr, "[bootWails] starting\n")
+	storagePath := application.Android.StoragePath()
+	fmt.Fprintf(os.Stderr, "[bootWails] StoragePath=%q\n", storagePath)
+
+	dbPath := filepath.Join(storagePath, "little_timer.db")
+	backupDir := filepath.Join(storagePath, "backups")
+	fmt.Fprintf(os.Stderr, "[bootWails] dbPath=%q backupDir=%q\n", dbPath, backupDir)
+
+	sqlite := storage.NewSqliteManager().Init(dbPath)
+	fmt.Fprintf(os.Stderr, "[bootWails] sqlite manager created\n")
+	if err := sqlite.Open(); err != nil {
+		fmt.Fprintf(os.Stderr, "[bootWails] sqlite.Open FAILED: %v\n", err)
+		panic(fmt.Sprintf("open sqlite: %v", err))
+	}
+	fmt.Fprintf(os.Stderr, "[bootWails] sqlite opened\n")
+	if err := sqlite.Migrate(); err != nil {
+		panic(fmt.Sprintf("migrate: %v", err))
+	}
+	fmt.Fprintf(os.Stderr, "[bootWails] sqlite migrated\n")
+
+	sm, err := settings.NewFromSqliteManager(sqlite, dbPath)
+	if err != nil {
+		panic(fmt.Sprintf("settings: %v", err))
+	}
+	fmt.Fprintf(os.Stderr, "[bootWails] settings created\n")
+
+	clk := domain.NewClockManager(sm.BuildClockConfig())
+	fmt.Fprintf(os.Stderr, "[bootWails] clock created\n")
+
+	bm, berr := backup.NewLocal(sqlite, dbPath, backupDir)
+	if berr != nil {
+		fmt.Fprintf(os.Stderr, "[bootWails] backup disabled: %v\n", berr)
+		bm = nil
+	}
+
+	a := httpapp.NewApp(clk, sm, sqlite, bm, dbPath)
+	fmt.Fprintf(os.Stderr, "[bootWails] app created a=%p sqlite=%p sm=%p clk=%p bm=%p\n",
+		a, sqlite, sm, clk, bm)
 
 	wailsApp = application.New(application.Options{
 		Services: []application.Service{
@@ -71,10 +107,22 @@ func bootWails() {
 			application.NewService(httpapp.NewBackupService(a)),
 		},
 		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assets),
+			Handler: application.BundledAssetFileServer(assets),
 		},
 	})
+	fmt.Fprintf(os.Stderr, "[bootWails] wailsApp created\n")
+
+	go func() {
+		fmt.Fprintf(os.Stderr, "[bootWails] wailsApp.Run starting\n")
+		if err := wailsApp.Run(); err != nil {
+			fmt.Println("Wails runtime error:", err)
+		}
+		fmt.Fprintf(os.Stderr, "[bootWails] wailsApp.Run exited\n")
+	}()
+	fmt.Fprintf(os.Stderr, "[bootWails] done, goroutine started\n")
 }
+
+// init wires
 
 // init wires `bootWails` into the Wails Android lifecycle before
 // any other code runs.  The host calls our registered func in a

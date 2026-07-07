@@ -34,18 +34,22 @@ import type {
   WallpaperDeleteResult,
 } from "../types/api";
 
-import { WailsBindings } from "../bindings/little-timer/internal/app/index";
+import * as TimerService from "../bindings/little-timer/internal/app/timerservice";
+import * as SettingsService from "../bindings/little-timer/internal/app/settingsservice";
+import * as HabitService from "../bindings/little-timer/internal/app/habitservice";
+import * as BackupService from "../bindings/little-timer/internal/app/backupservice";
 
+/* eslint-disable @typescript-eslint/require-await */
 // Detect Android: Wails v3 sets window.wails on Android
 const isAndroid = typeof window !== "undefined" && !!(window as any).wails;
 
 export class WailsAPIClient {
   async getState(): Promise<TimerState> {
-    return WailsBindings.GetState();
+    return TimerService.GetState();
   }
 
   async startTimer(habitId?: number, options?: TimerStartOptions): Promise<TimerStartResult> {
-    return WailsBindings.StartTimer(
+    return TimerService.StartTimer(
       habitId ?? null,
       options?.mode ?? "",
       options?.workDuration ?? 0,
@@ -55,11 +59,11 @@ export class WailsAPIClient {
   }
 
   async finishTimer(): Promise<TimerFinishResult> {
-    return WailsBindings.FinishTimer();
+    return TimerService.FinishTimer();
   }
 
   async getTimerProgress(): Promise<TimerProgress> {
-    return WailsBindings.GetProgress();
+    return TimerService.GetProgress();
   }
 
   async resumeTimer(habitId?: number): Promise<ResumeResult> {
@@ -67,15 +71,15 @@ export class WailsAPIClient {
   }
 
   async startRest(): Promise<RestResult> {
-    return WailsBindings.StartRest();
+    return TimerService.StartRest();
   }
 
   async pauseTimer(): Promise<void> {
-    return WailsBindings.PauseTimer();
+    return TimerService.PauseTimer();
   }
 
   async resetTimer(): Promise<void> {
-    return WailsBindings.ResetTimer();
+    return TimerService.ResetTimer();
   }
 
   async changeMode(mode: "countdown" | "stopwatch"): Promise<void> {
@@ -85,103 +89,103 @@ export class WailsAPIClient {
   }
 
   async getSettings(): Promise<any> {
-    return WailsBindings.GetSettings();
+    return SettingsService.GetSettings();
   }
 
   async updateSettings(settings: object): Promise<void> {
-    return WailsBindings.UpdateSettings(JSON.stringify(settings));
+    return SettingsService.UpdateSettings(JSON.stringify(settings));
   }
 
   async getHabitSets(): Promise<HabitSet[]> {
-    return WailsBindings.ListHabitSets();
+    return HabitService.ListHabitSets();
   }
 
   async createHabitSet(name: string, description: string, color: string): Promise<HabitSet> {
-    return WailsBindings.CreateHabitSet(name, description, color);
+    return HabitService.CreateHabitSet(name, description, color);
   }
 
   async updateHabitSet(id: number, name: string, description: string, color: string, wallpaper?: string): Promise<HabitSet> {
-    return WailsBindings.UpdateHabitSet(id, name, description, color, wallpaper ?? "");
+    return HabitService.UpdateHabitSet(id, name, description, color, wallpaper ?? "");
   }
 
   async deleteHabitSet(id: number): Promise<void> {
-    return WailsBindings.DeleteHabitSet(id);
+    return HabitService.DeleteHabitSet(id);
   }
 
   async getHabits(): Promise<Habit[]> {
-    return WailsBindings.ListHabits(null);
+    return HabitService.ListHabits(null);
   }
 
   async createHabit(setId: number, name: string, goalSeconds: number, color: string): Promise<Habit> {
-    return WailsBindings.CreateHabit(setId, name, goalSeconds, color);
+    return HabitService.CreateHabit(setId, name, goalSeconds, color);
   }
 
   async deleteHabit(id: number): Promise<void> {
-    return WailsBindings.DeleteHabit(id);
+    return HabitService.DeleteHabit(id);
   }
 
   async updateHabit(id: number, name: string, goalSeconds: number, color: string, wallpaper?: string): Promise<Habit> {
-    return WailsBindings.UpdateHabit(id, name, goalSeconds, color, wallpaper ?? "");
+    return HabitService.UpdateHabit(id, name, goalSeconds, color, wallpaper ?? "");
   }
 
   async createSession(habitId: number, durationSeconds: number, count: number, date: string): Promise<CreateSessionResult> {
-    return WailsBindings.CreateSession(habitId, durationSeconds, count, date);
+    return HabitService.CreateSession(habitId, durationSeconds, count, date);
   }
 
   async getSessions(date?: string, startDate?: string, endDate?: string): Promise<Session[]> {
-    return WailsBindings.ListSessions(date ?? "", startDate ?? "", endDate ?? "");
+    return HabitService.ListSessions(date ?? "", startDate ?? "", endDate ?? "");
   }
 
   async getHabitStreak(habitId: number, goalSeconds?: number): Promise<HabitStreak> {
-    return WailsBindings.GetHabitStreak(habitId, goalSeconds ?? 0);
+    return HabitService.GetHabitStreak(habitId, goalSeconds ?? 0);
   }
 
   async getHabitDetail(habitId: number, date?: string): Promise<HabitDetail> {
-    return WailsBindings.GetHabitDetail(habitId, date ?? "");
+    return HabitService.GetHabitDetail(habitId, date ?? "");
   }
 
   async createBackup(): Promise<BackupCreateResult> {
-    return WailsBindings.CreateBackup();
+    return BackupService.CreateBackup();
   }
 
   async listBackups(): Promise<BackupListResult> {
-    return WailsBindings.ListBackups();
+    return BackupService.ListBackups();
   }
 
   async restoreBackup(name: string): Promise<BackupRestoreResult> {
-    return WailsBindings.RestoreBackup(name);
+    return BackupService.RestoreBackup(name);
   }
 
   async deleteBackup(name: string): Promise<BackupVerifyResult> {
-    return WailsBindings.DeleteBackup(name);
+    return BackupService.DeleteBackup(name);
   }
 
   async verifyBackup(): Promise<BackupVerifyResult> {
-    return WailsBindings.VerifyBackup();
+    return BackupService.VerifyBackup();
   }
 
   async getMasterPasswordStatus(): Promise<{ has_password: boolean; unlocked: boolean; locked_until: number; unlock_time: number }> {
-    return WailsBindings.GetMasterPasswordStatus();
+    return BackupService.GetMasterPasswordStatus();
   }
 
   async setMasterPassword(password: string): Promise<{ success: boolean; error?: string }> {
-    return WailsBindings.SetMasterPassword(password);
+    return BackupService.SetMasterPassword(password);
   }
 
   async unlockCredentials(password: string): Promise<{ success: boolean; locked_until: number; error?: string }> {
-    return WailsBindings.UnlockCredentials(password);
+    return BackupService.UnlockCredentials(password);
   }
 
   async lockCredentials(): Promise<{ success: boolean }> {
-    return WailsBindings.LockCredentials();
+    return BackupService.LockCredentials();
   }
 
   async getBackupConfig(): Promise<BackupConfig> {
-    return WailsBindings.GetBackupConfig();
+    return BackupService.GetBackupConfig();
   }
 
   async updateBackupConfig(config: BackupConfig): Promise<{ success: boolean; error?: string }> {
-    return WailsBindings.UpdateBackupConfig(JSON.stringify(config));
+    return BackupService.UpdateBackupConfig(JSON.stringify(config));
   }
 
   async uploadWallpaper(file: File): Promise<WallpaperUploadResult> {

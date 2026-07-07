@@ -75,8 +75,8 @@ fi
 HOST_TAG="$(uname -s | grep -q Darwin && echo darwin-x86_64 || echo linux-x86_64)"
 TOOLCHAIN="$NDK_ROOT/toolchains/llvm/prebuilt/$HOST_TAG"
 
-mkdir -p build/android/app/src/main/jniLibs/arm64-v8a
-mkdir -p build/android/app/src/main/jniLibs/x86_64
+mkdir -p android/app/src/main/jniLibs/arm64-v8a
+mkdir -p android/app/src/main/jniLibs/x86_64
 
 echo "--- Go shared lib: arm64-v8a ---"
 (cd neo-src && \
@@ -84,7 +84,7 @@ CC="$TOOLCHAIN/bin/aarch64-linux-android21-clang" \
 CXX="$TOOLCHAIN/bin/aarch64-linux-android21-clang++" \
 CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
     go build -buildmode=c-shared -tags android,debug -buildvcs=false \
-    -o ../build/android/app/src/main/jniLibs/arm64-v8a/libwails.so ./cmd/server)
+    -o ../android/app/src/main/jniLibs/arm64-v8a/libwails.so ./cmd/server)
 
 echo "--- Go shared lib: x86_64 ---"
 (cd neo-src && \
@@ -92,14 +92,14 @@ CC="$TOOLCHAIN/bin/x86_64-linux-android21-clang" \
 CXX="$TOOLCHAIN/bin/x86_64-linux-android21-clang++" \
 CGO_ENABLED=1 GOOS=android GOARCH=amd64 \
     go build -buildmode=c-shared -tags android,debug -buildvcs=false \
-    -o ../build/android/app/src/main/jniLibs/x86_64/libwails.so ./cmd/server)
+    -o ../android/app/src/main/jniLibs/x86_64/libwails.so ./cmd/server)
 
 # Step 5: Gradle assemble
 echo "--- Gradle assembleDebug ---"
-cd build/android
+cd android
 ./gradlew assembleDebug
-cd ../..
+cd ..
 mkdir -p bin
-cp build/android/app/build/outputs/apk/debug/app-debug.apk bin/LittleTimer.apk
+cp android/app/build/outputs/apk/debug/app-debug.apk bin/LittleTimer.apk
 
 echo "=== APK: bin/LittleTimer.apk ==="

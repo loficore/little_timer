@@ -1,0 +1,4 @@
+src/bindings/
+bindings/
+node_modules/
+dist/

@@ -14,6 +14,8 @@ export default tseslint.config(
       'test/**',
       'test/*.ts',
       'scripts/**',
+      'bindings/**',
+      'src/bindings/**',
     ],
   },
 

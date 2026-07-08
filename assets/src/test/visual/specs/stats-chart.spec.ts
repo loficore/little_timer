@@ -5,6 +5,8 @@ const baseURL = "http://127.0.0.1:5173";
 test.describe("StatsPage - 图表显示测试", () => {
   test("计时完成后统计页应该正常显示图表", async ({ page }) => {
     // 1. Seed data via API (http://127.0.0.1:8080)
+    await page.goto(baseURL);
+
     const created = await page.evaluate(async () => {
       const today = new Date().toISOString().split("T")[0];
 
@@ -33,14 +35,14 @@ test.describe("StatsPage - 图表显示测试", () => {
     });
 
     // 2. Navigate to stats page
-    await page.goto(`${baseURL}/#/stats`);
-    await page.waitForTimeout(2000);
+    await page.locator('[data-testid="nav-stats"]').filter({ visible: true }).first().click();
+    await page.waitForLoadState("networkidle");
 
     // 3. Click week range
-    const weekBtn = page.locator("text=本周");
+    const weekBtn = page.getByRole("button", { name: "本周" });
     if (await weekBtn.isVisible()) {
       await weekBtn.click();
-      await page.waitForTimeout(1000);
+      await page.waitForLoadState("networkidle");
     }
 
     // 4. Verify total focus time card is visible

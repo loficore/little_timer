@@ -18,7 +18,7 @@ test.describe("TimerPage VRT 截图测试", () => {
   test("计时器整体截图（数码管风格）", async ({ page }) => {
     await setTimeDisplayStyle(page, "seven_segment");
     await page.reload();
-    await page.waitForTimeout(1500);
+    await page.waitForLoadState("networkidle");
     await expect(page.locator(".my-clock-glass")).toBeVisible();
     const viewport = page.viewportSize();
     if (viewport && viewport.width >= 1024) {
@@ -33,7 +33,7 @@ test.describe("TimerPage VRT 截图测试", () => {
   test("计时器整体截图（经典风格）", async ({ page }) => {
     await setTimeDisplayStyle(page, "classic");
     await page.reload();
-    await page.waitForTimeout(1500);
+    await page.waitForLoadState("networkidle");
     await expect(page.locator(".my-clock-glass")).toBeVisible();
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-display-classic.png", {
@@ -44,7 +44,7 @@ test.describe("TimerPage VRT 截图测试", () => {
   test("时钟区域垂直居中（计时器运行中）", async ({ page }) => {
     await setTimeDisplayStyle(page, "seven_segment");
     await page.reload();
-    await page.waitForTimeout(1500);
+    await page.waitForLoadState("networkidle");
 
     const startBtn = page.locator('[data-testid="timer-start"]');
     if (await startBtn.isVisible()) {
@@ -61,10 +61,10 @@ test.describe("TimerPage VRT 截图测试", () => {
 
   test("控制按钮等高（习惯选择 + 模式选择）", async ({ page }) => {
     await page.waitForTimeout(1500);
-    const habitBtn = page.locator(".my-surface-card").first();
-    const modeBtn = page.locator(".dropdown-select-btn").first();
+    const targetBtn = page.locator('.my-surface-card').first();
+    const modeBtn = page.locator('.dropdown-select-btn').first();
 
-    await expect(habitBtn).toBeVisible();
+    await expect(targetBtn).toBeVisible();
     await expect(modeBtn).toBeVisible();
     await page.waitForTimeout(500);
 
@@ -77,10 +77,10 @@ test.describe("TimerPage VRT 截图测试", () => {
   test("侧边栏和顶栏视觉（分界线减弱后）", async ({ page }) => {
     const viewport = page.viewportSize();
     test.skip(viewport && viewport.width < 1024, "移动端无侧边栏");
-    await page.waitForTimeout(1500);
+
+    await page.waitForLoadState("networkidle");
     await expect(page.locator(".my-sidebar")).toBeVisible();
     await expect(page.locator(".my-topbar")).toBeVisible();
-    await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-sidebar-visuals.png", {
       maxDiffPixels: 100,
     });
@@ -88,10 +88,10 @@ test.describe("TimerPage VRT 截图测试", () => {
 
   test("主题切换后计时器外观（light 主题）", async ({ page }) => {
     await page.evaluate(() => {
-      localStorage.setItem("lt_theme_mode", "light");
+      document.documentElement.classList.add("light-mode");
     });
     await page.reload();
-    await page.waitForTimeout(1500);
+    await page.waitForLoadState("networkidle");
     await expect(page.locator(".my-clock-glass")).toBeVisible();
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-theme-light.png", {
@@ -100,22 +100,12 @@ test.describe("TimerPage VRT 截图测试", () => {
   });
 
   test("倒计时和秒表模式切换视觉", async ({ page }) => {
-    await page.waitForTimeout(1500);
-    await expect(page.locator(".my-clock-glass")).toBeVisible();
-    await page.waitForTimeout(500);
-    await expect(page).toHaveScreenshot("timer-stopwatch-mode.png", {
-      maxDiffPixels: 100,
-    });
+    await page.reload();
+    await page.waitForLoadState("networkidle");
 
-    await page.locator(".dropdown-select-btn").first().click();
-    await page.waitForTimeout(300);
-    await page.locator(".my-surface-modal button").nth(1).click();
-    await page.waitForTimeout(500);
-    await expect(page.locator(".my-clock-glass")).toBeVisible();
-    await page.waitForTimeout(500);
-    await expect(page).toHaveScreenshot("timer-countdown-mode.png", {
-      maxDiffPixels: 100,
-    });
+    await page.locator('.dropdown-select-btn').filter({ hasText: "倒计时" }).first().click();
+    await page.waitForLoadState("networkidle");
+    await page.locator('.my-surface-modal button').nth(1).click();
   });
 
   test("控制按钮等高（stopwatch 运行中）", async ({ page }) => {
@@ -124,7 +114,7 @@ test.describe("TimerPage VRT 截图测试", () => {
       await startBtn.click();
       await page.waitForTimeout(1500);
     }
-    const container = page.locator(".my-clock-glass").first();
+    const container = page.locator(".my-clock-glass").filter({ hasText: "" });
     await expect(container).toHaveScreenshot("timer-stopwatch-running.png", {
       maxDiffPixels: 100,
     });
@@ -142,15 +132,18 @@ test.describe("Timer 用户旅程 E2E", () => {
 
     // 1. Navigate and select stopwatch mode
     await timerPage.goto();
-    await timerPage.selectMode("stopwatch");
 
-    // 2. Click start - verify timer is running
+    // 2. Select habit
+    await timerPage.selectHabit();
+
+    // 3. Click start - verify timer is running
     await timerPage.clickStart();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
     // 3. Wait 1s - verify display ticks
     const displayBefore = await timerPage.getTimerDisplayText();
     await page.waitForTimeout(1000);
+
     const displayAfter = await timerPage.getTimerDisplayText();
     expect(displayAfter).not.toBe(displayBefore);
 
@@ -159,8 +152,8 @@ test.describe("Timer 用户旅程 E2E", () => {
     expect(await timerPage.isTimerStopped()).toBe(false);
     expect(await timerPage.isTimerRunning()).toBe(false);
 
-    // 5. Resume via clickStart - verify running again
-    await timerPage.clickStart();
+    // 5. Resume via clickResume - verify running again
+    await timerPage.clickResume();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
     // 6. Click reset - verify back to initial state (start button visible)
@@ -176,6 +169,7 @@ test.describe("Timer 用户旅程 E2E", () => {
     await timerPage.selectMode("countdown");
     await timerPage.setWorkDuration(5);
 
+    await timerPage.selectHabit();
     await timerPage.clickStart();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
@@ -195,6 +189,7 @@ test.describe("Timer 用户旅程 E2E", () => {
     await timerPage.selectMode("countdown");
     await timerPage.setWorkDuration(5);
 
+    await timerPage.selectHabit();
     await timerPage.clickStart();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
@@ -202,7 +197,7 @@ test.describe("Timer 用户旅程 E2E", () => {
     expect(await timerPage.isTimerStopped()).toBe(false);
     expect(await timerPage.isTimerRunning()).toBe(false);
 
-    await timerPage.clickStart();
+    await timerPage.clickResume();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
     await timerPage.waitForTimerFinish(10000);

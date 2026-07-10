@@ -11,7 +11,10 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
+  reporter: [
+    ["list"],
+    ["html", { open: "never", outputDir: "playwright-report" }],
+  ],
   use: {
     baseURL: "http://127.0.0.1:5173",
     trace: "on-first-retry",
@@ -34,11 +37,10 @@ export default defineConfig({
       timeout: 120000,
     },
     {
-      command: "cd .. && zig build -Doptimize=Debug run",
-      url: "http://127.0.0.1:8080",
+      command: "cd ../neo-src && go run ./cmd/server/ serve --http-only --db-path ../test_tmp/e2e.db",
+      url: "http://127.0.0.1:8080/api/state",
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
-      stderr: "pipe",
     },
   ],
   projects: [

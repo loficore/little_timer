@@ -2,6 +2,21 @@ import { defineConfig } from 'vite'
 import preact from '@preact/preset-vite' // 使用 preact 插件
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import tailwindcss from '@tailwindcss/vite'
+import { resolve } from 'path'
+
+// Vite plugin: intercept /wails/runtime.js imports and redirect to a stub.
+// This lets the auto-generated binding files work in Vite dev mode without modification.
+// On Android / Wails builds the real runtime is injected by the platform.
+function wailsRuntimeStub(): Plugin {
+  return {
+    name: 'wails-runtime-stub',
+    resolveId(id: string) {
+      if (id === '/wails/runtime.js') {
+        return resolve(__dirname, 'src/wails-runtime-stub.ts');
+      }
+    },
+  };
+}
 
 export default defineConfig({
   build: {
@@ -14,6 +29,7 @@ export default defineConfig({
     tailwindcss(),
     preact(), // 代替 react()
     viteSingleFile(),
+    wailsRuntimeStub(),
   ],
   resolve: {
     alias: {

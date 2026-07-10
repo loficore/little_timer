@@ -42,6 +42,7 @@ export const TimerConfig: FunctionalComponent<TimerConfigProps> = memo(({
             min={1}
             max={999}
             onChange={(val: number) => onChange({ workDuration: val * 60 })}
+            dataTestId="work-duration"
           />
         </div>
         <div className="flex-1">

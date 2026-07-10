@@ -118,6 +118,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                     <h2 className="text-xl font-bold">{t("habit.sets")}</h2>
                     <button
                         className="btn btn-primary btn-sm"
+                        data-testid="create-habit-set"
                         onClick={() => setModalState({ isOpen: true, mode: "set" })}
                     >
                         + {t("habit.add")}
@@ -129,7 +130,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                         const setHabits = getHabitsBySet(set.id);
                         const isExpanded = expandedSetId === set.id;
                         return (
-                            <div key={set.id} className="my-surface-card rounded-xl overflow-hidden">
+                            <div key={set.id} className="my-surface-card rounded-xl overflow-hidden" data-testid="habit-set-item">
                                 <div
                                     className="p-4 flex items-center justify-between cursor-pointer"
                                     onClick={() => setExpandedSetId(isExpanded ? null : set.id)}
@@ -183,6 +184,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                             setHabits.map((habit) => (
                                                 <div
                                                     key={habit.id}
+                                                    data-testid="habit-item"
                                                     className="my-field-surface p-3 rounded-lg flex items-center justify-between cursor-pointer transition-colors overflow-hidden"
                                                     style={getCardBackgroundStyle(habit)}
                                                 >
@@ -226,6 +228,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                         )}
                                         <button
                                             className="btn btn-ghost btn-sm w-full mt-2"
+                                            data-testid="create-habit"
                                             onClick={() => setModalState({
                                                 isOpen: true,
                                                 mode: "habit",

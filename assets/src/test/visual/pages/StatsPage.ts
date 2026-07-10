@@ -28,7 +28,7 @@ export class StatsPage extends BasePage {
   }
 
   async clickWeekRange() {
-    await this.click(this.weekButton);
+    await this.page.getByText("本周").click();
     await this.page.waitForTimeout(500);
   }
 }

@@ -58,19 +58,37 @@ export class TimerPage extends BasePage {
   }
 
   async selectHabit() {
+    // Click the habit picker button to open the modal
     const habitPickerBtn = this.page.locator('[data-testid="timer-habit-picker"]');
+    await habitPickerBtn.click();
+
+    // Wait for modal to be fully visible
+    await this.page.waitForSelector('.my-surface-modal', { state: 'visible', timeout: 5000 });
+
+    // Click the LAST habit button (most recently created, at the bottom of the list)
+    // This is important for user-journey tests which create a new habit and need to select it
+    const lastHabit = this.page.locator(`[data-testid^="habit-option-"]`).last();
+    await lastHabit.click();
+
+    // Wait for modal to close (assertion-based, fails fast if still open)
+    const modal = this.page.locator('.my-surface-modal');
     try {
-      await habitPickerBtn.click({ timeout: 3000 });
-      await this.page.waitForTimeout(500);
-      // Target habit buttons in the scrollable content area, not modal header buttons
-      const firstHabit = this.page.locator('.my-surface-modal .overflow-y-auto button.my-field-surface').first();
-      if (await firstHabit.isVisible({ timeout: 3000 })) {
-        await firstHabit.click();
+      await expect(modal).toBeHidden({ timeout: 5000 });
+    } catch {
+      // Force-close: press Escape key
+      await this.page.keyboard.press('Escape');
+      await this.page.waitForTimeout(300);
+      // Fallback: click the backdrop if visible
+      const backdrop = this.page.locator('.my-overlay-backdrop');
+      if (await backdrop.isVisible()) {
+        await backdrop.click({ position: { x: 10, y: 10 } });
         await this.page.waitForTimeout(300);
       }
-    } catch {
-      // Habit picker not visible
+      await expect(modal).toBeHidden({ timeout: 3000 });
     }
+
+    // Small wait for state to settle
+    await this.page.waitForTimeout(300);
   }
 
   async getTimerDisplayText(): Promise<string> {

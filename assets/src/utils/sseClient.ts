@@ -41,7 +41,12 @@ export class SSEClient {
     }
 
     private createConnection(): void {
-        this.eventSource = new EventSource(`${this.baseUrl}/api/events`);
+        // SSE uses a direct connection to the Go backend at :8080, bypassing
+        // the Vite proxy (which does not handle EventSource upgrade requests).
+        // In all environments (dev, test, production) the Go server SSE endpoint
+        // is at :8080/api/events. The frontend HTTP API calls correctly use the
+        // proxy (window.location.origin), but SSE must connect directly.
+        this.eventSource = new EventSource(`http://localhost:8080/api/events`);
 
         this.eventSource.onopen = () => {
             logInfo('SSE connection opened');

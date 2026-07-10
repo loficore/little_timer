@@ -22,6 +22,7 @@ export const PickerNumberInput: FunctionalComponent<PickerNumberInputProps> = me
   unit,
   hint,
   disabled = false,
+  dataTestId,
 }) => {
   const handleIncrease = () => {
     if (value < max) {

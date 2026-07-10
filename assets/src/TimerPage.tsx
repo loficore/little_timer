@@ -253,6 +253,10 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             return;
         }
 
+        if (isFinished) {
+            await reset();
+        }
+
         await start(selectedHabitId ?? undefined);
         audioEngine.playTick();
     };
@@ -396,12 +400,17 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                 <div data-testid="timer-display" className="my-clock-glass mb-3 sm:mb-4">
                                     <div className={`text-[clamp(2.8rem,14vw,8rem)] leading-none font-mono font-semibold time-transition flex items-center justify-center ${timeDisplayStyle === "seven_segment" ? "time-style-seven-segment" : "time-style-classic"} ${timeStateClass} ${isRunning && timeDisplayStyle === "seven_segment" ? "time-running-segment" : ""}`}>
                        {timeDisplayStyle === "seven_segment" ? (
-                           <SevenSegmentDisplay value={timeDisplay} />
-                       ) : (
-                           <span className="time-value-swap">
-                               {timeDisplay}
-                           </span>
-                       )}
+                            <SevenSegmentDisplay value={timeDisplay} />
+                        ) : (
+                            <span className="time-value-swap">
+                                {timeDisplay.split(":").map((part, i, arr) => (
+                                    <span key={i}>
+                                        {part}
+                                        {i < arr.length - 1 && <span className="time-classic-colon">:</span>}
+                                    </span>
+                                ))}
+                            </span>
+                        )}
                    </div>
                 </div>
 
@@ -516,7 +525,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             </div>
 
             {showHabitPicker && (
-                <div className="my-overlay-backdrop fixed inset-0 z-50 flex items-center justify-center">
+                <div className="my-overlay-backdrop fixed inset-0 z-[60] flex items-center justify-center">
                     <div className="relative my-surface-modal rounded-xl w-full max-w-md mx-4 max-h-[70vh] overflow-hidden flex flex-col">
                         <div className="p-4 border-b border-[var(--my-outline)] flex justify-between items-center">
                             <h3 className="text-lg font-bold">{t("timer.select_habit")}</h3>
@@ -546,6 +555,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                                             {habits.filter(h => h.set_id === set.id).map(habit => (
                                                 <button
                                                     key={habit.id}
+                                                    data-testid={`habit-option-${habit.id}`}
                                                     className="my-field-surface w-full p-3 flex items-center gap-3 rounded-lg transition-colors"
                                                     onClick={() => void handleHabitSelect(habit.id)}
                                                 >

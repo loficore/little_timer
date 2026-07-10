@@ -118,6 +118,11 @@
   color: color-mix(in oklab, var(--accent-color) 72%, var(--my-on-surface) 28%);
 }
 
+.time-classic-colon {
+  display: inline-block;
+  transform: translateY(-0.12em);
+}
+
 .time-state-active.time-style-classic {
   color: color-mix(in oklab, var(--accent-color) 72%, var(--my-on-surface) 28%);
 }
@@ -181,8 +186,10 @@
 
 .seven-segment-char {
   position: relative;
-  display: inline-block;
-  width: 0.68em;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 0.72em;
   height: 1.1em;
   flex: 0 0 auto;
   overflow: hidden;

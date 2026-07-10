@@ -6,21 +6,22 @@ test('check bottom-nav exists', async ({ page }) => {
   
   const bottomNav = await page.evaluate(() => {
     const nav = document.querySelector('[data-testid="bottom-nav"]');
-    if (!nav) return 'NOT FOUND';
+    if (!nav) return { found: false };
     const rect = nav.getBoundingClientRect();
-    return `found: ${rect.width}x${rect.height} at y=${rect.y}`;
+    const navHabitsBtn = nav?.querySelector('[data-testid="nav-habits"]');
+    return {
+      found: true,
+      width: rect.width,
+      height: rect.height,
+      y: rect.y,
+      navHabits: navHabitsBtn ? {
+        found: true,
+        width: navHabitsBtn.getBoundingClientRect().width,
+        height: navHabitsBtn.getBoundingClientRect().height
+      } : { found: false }
+    };
   });
-  console.log('bottom-nav:', bottomNav);
+  console.log('bottom-nav and nav-habits:', bottomNav);
   
-  const navHabits = await page.evaluate(() => {
-    const btn = nav?.querySelector('[data-testid="nav-habits"]');
-    if (!btn) return 'NOT FOUND';
-    const rect = btn.getBoundingClientRect();
-    return `found: ${rect.width}x${rect.height}`;
-  });
-  console.log('nav-habits inside bottom-nav:', navHabits);
-  
-  // Try direct selector
-  const direct = await page.locator('[data-testid="bottom-nav"] [data-testid="nav-habits"]').count();
-  console.log('direct selector count:', direct);
+
 });

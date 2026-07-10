@@ -103,9 +103,20 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.reload();
     await page.waitForLoadState("networkidle");
 
-    await page.locator('.dropdown-select-btn').filter({ hasText: "倒计时" }).first().click();
+    await page.locator('.dropdown-select-btn').click();
     await page.waitForLoadState("networkidle");
     await page.locator('.my-surface-modal button').nth(1).click();
+    // Wait for display state transition
+    await page.waitForTimeout(500);
+    await expect(page).toHaveScreenshot("timer-stopwatch-mode.png", { maxDiffPixels: 100 });
+
+    // Re-open dropdown (text changed to "秒表")
+    await page.locator('.dropdown-select-btn').first().click();
+    await page.waitForLoadState("networkidle");
+    await page.locator('.my-surface-modal button').nth(0).click();
+    // Wait for display state transition
+    await page.waitForTimeout(500);
+    await expect(page).toHaveScreenshot("timer-countdown-mode.png", { maxDiffPixels: 100 });
   });
 
   test("控制按钮等高（stopwatch 运行中）", async ({ page }) => {

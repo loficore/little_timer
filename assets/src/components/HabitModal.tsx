@@ -178,7 +178,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
   };
 
   return (
-    <div className="my-overlay-backdrop fixed inset-0 z-50 flex items-center justify-center">
+    <div className="my-overlay-backdrop fixed inset-0 z-[60] flex items-center justify-center">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative my-surface-modal rounded-2xl p-6 sm:p-7 w-full max-w-lg mx-4">
         <h3 className="text-lg sm:text-xl font-bold mb-5 sm:mb-6">{getTitle()}</h3>
@@ -192,6 +192,7 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
               <input
                 type="text"
                 className="my-input mt-0"
+                data-testid="habit-name-input"
                 placeholder={mode === "set" ? t("modal.name_placeholder_set") : t("modal.name_placeholder_habit")}
                 value={name}
                 onInput={(e) => setName((e.target as HTMLInputElement).value)}
@@ -204,12 +205,13 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
                 <div className="text-sm font-medium text-[var(--my-on-surface)] leading-none">
                   {t("modal.description")}
                 </div>
-                <textarea
-                  className="my-input min-h-[120px] resize-none mt-0"
-                  placeholder={t("modal.description_placeholder")}
-                  value={description}
-                  onInput={(e) => setDescription((e.target as HTMLTextAreaElement).value)}
-                />
+                 <textarea
+                   className="my-input min-h-[120px] resize-none mt-0"
+                   data-testid="set-description-input"
+                   placeholder={t("modal.description_placeholder")}
+                   value={description}
+                   onInput={(e) => setDescription((e.target as HTMLTextAreaElement).value)}
+                 />
               </div>
             )}
 
@@ -219,24 +221,26 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
                   {t("modal.goal_duration")}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="my-surface-panel rounded-xl px-3 py-2.5">
-                    <PickerNumberInput
-                      value={goalHours}
-                      min={0}
-                      max={9999}
-                      onChange={setGoalHours}
-                      label={t("modal.hours")}
-                    />
-                  </div>
-                  <div className="my-surface-panel rounded-xl px-3 py-2.5">
-                    <PickerNumberInput
-                      value={goalMinutes}
-                      min={0}
-                      max={59}
-                      onChange={setGoalMinutes}
-                      label={t("modal.minutes")}
-                    />
-                  </div>
+                   <div className="my-surface-panel rounded-xl px-3 py-2.5">
+                     <PickerNumberInput
+                       value={goalHours}
+                       min={0}
+                       max={9999}
+                       onChange={setGoalHours}
+                       label={t("modal.hours")}
+                       dataTestId="habit-goal-hours"
+                     />
+                   </div>
+                   <div className="my-surface-panel rounded-xl px-3 py-2.5">
+                     <PickerNumberInput
+                       value={goalMinutes}
+                       min={0}
+                       max={59}
+                       onChange={setGoalMinutes}
+                       label={t("modal.minutes")}
+                       dataTestId="habit-goal-minutes"
+                     />
+                   </div>
                 </div>
                 <label className="label">
                   <span className="label-text-alt text-error">
@@ -268,17 +272,18 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
               ))}
               </div>
               <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  className="my-input flex-1"
-                  value={colorInput}
-                  placeholder="#6366f1 或 rgb(99,102,241)"
-                  onInput={(e) => {
-                    setColorInput((e.target as HTMLInputElement).value);
-                    if (colorInputError) setColorInputError("");
-                  }}
-                  onBlur={handleColorInputBlur}
-                />
+                 <input
+                   type="text"
+                   className="my-input flex-1"
+                   data-testid="set-color-input"
+                   value={colorInput}
+                   placeholder="#6366f1 或 rgb(99,102,241)"
+                   onInput={(e) => {
+                     setColorInput((e.target as HTMLInputElement).value);
+                     if (colorInputError) setColorInputError("");
+                   }}
+                   onBlur={handleColorInputBlur}
+                 />
                 <input
                   type="color"
                   className="w-10 h-10 rounded-lg cursor-pointer border border-[color:color-mix(in_oklab,var(--my-outline)_56%,transparent)] bg-transparent"
@@ -298,16 +303,18 @@ export const HabitModal: FunctionalComponent<HabitModalProps> = ({
           </section>
 
           <div className="flex gap-3 pt-1">
-            <button
-              type="button"
-              className="btn btn-ghost flex-1"
-              onClick={onClose}
-            >
-              {t("button.cancel")}
-            </button>
-            <button
+             <button
+               type="button"
+               className="btn btn-ghost flex-1"
+               data-testid="cancel-button"
+               onClick={onClose}
+             >
+               {t("button.cancel")}
+             </button>
+             <button
               type="submit"
               className="btn btn-primary flex-1"
+              data-testid="confirm-button"
               disabled={isSubmitting || !name.trim() || (mode === "habit" && (goalHours * 60 + goalMinutes) === 0)}
             >
               {getSubmitText()}

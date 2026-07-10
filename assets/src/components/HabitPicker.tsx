@@ -28,7 +28,7 @@ export const HabitPicker: FunctionalComponent<HabitPickerProps> = memo(({
   }
 
   return (
-    <div className="my-overlay-backdrop fixed inset-0 z-50 flex items-center justify-center">
+    <div className="my-overlay-backdrop fixed inset-0 z-[60] flex items-center justify-center">
       <div className="relative my-surface-modal rounded-xl w-full max-w-md mx-4 max-h-[70vh] overflow-hidden flex flex-col">
         <div className="p-4 border-b border-[var(--my-outline)] flex justify-between items-center">
           <h3 className="text-lg font-bold">选择习惯</h3>
@@ -53,6 +53,7 @@ export const HabitPicker: FunctionalComponent<HabitPickerProps> = memo(({
                   {habits.filter(h => h.set_id === set.id).map(habit => (
                     <button
                       key={habit.id}
+                      data-testid={`habit-option-${habit.id}`}
                       className="my-filter-btn w-full flex items-center gap-3 justify-start text-left"
                       onClick={() => onSelect(habit.id)}
                     >

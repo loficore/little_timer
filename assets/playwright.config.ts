@@ -10,7 +10,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: undefined,
   reporter: [
     ["list"],
     ["html", { open: "never", outputDir: "playwright-report" }],
@@ -21,6 +21,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
     colorScheme: "light",
     deviceScaleFactor: 1,
+    setupFiles: ['./src/test/visual/setup.ts'],
   },
   expect: {
     toHaveScreenshot: {
@@ -37,7 +38,7 @@ export default defineConfig({
       timeout: 120000,
     },
     {
-      command: "cd ../neo-src && go run ./cmd/server/ serve --http-only --db-path ../test_tmp/e2e.db",
+      command: "cd ../neo-src && go run ./cmd/server/ serve --http-only --db-path ../assets/test_tmp/e2e.db",
       url: "http://127.0.0.1:8080/api/state",
       reuseExistingServer: !process.env.CI,
       timeout: 120000,

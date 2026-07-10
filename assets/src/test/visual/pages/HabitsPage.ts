@@ -19,10 +19,10 @@ export class HabitsPage extends BasePage {
     super(page);
     this.createSetButton = '[data-testid="create-habit-set"]';
     this.createHabitButton = '[data-testid="create-habit"]';
-    this.habitSetList = '[data-testid="habit-set-list"]';
-    this.habitList = '[data-testid="habit-list"]';
+    this.habitSetList = '[data-testid="habit-set-item"]';
+    this.habitList = '[data-testid="habit-item"]';
     this.habitCheckInButton = '[data-testid="habit-checkin"]';
-    this.setNameInput = '[data-testid="set-name-input"]';
+    this.setNameInput = '[data-testid="habit-name-input"]';
     this.setDescriptionInput = '[data-testid="set-description-input"]';
     this.setColorInput = '[data-testid="set-color-input"]';
     this.habitNameInput = '[data-testid="habit-name-input"]';
@@ -35,6 +35,12 @@ export class HabitsPage extends BasePage {
     await this.page.goto(this.baseUrl);
     await this.page.locator('[data-testid="nav-habits"]').filter({ visible: true }).first().click();
     await this.page.waitForLoadState("networkidle");
+    // ponytail: wait for habit content to load
+    try {
+      await this.page.waitForSelector('[data-testid="habit-set-item"]', { state: 'visible', timeout: 8000 });
+    } catch {
+      // fallback: content may already be loaded or empty
+    }
   }
 
   async clickCreateSet() {
@@ -64,7 +70,13 @@ export class HabitsPage extends BasePage {
       await this.fill(this.habitNameInput, name);
     }
     if (await this.isVisible(this.habitGoalInput)) {
-      await this.fill(this.habitGoalInput, goalSeconds.toString());
+      const goalHours = Math.floor(goalSeconds / 3600);
+      const goalMinutes = Math.floor((goalSeconds % 3600) / 60);
+      // If there's a habit-goal-hours and habit-goal-minutes input, fill those
+      const hoursInput = this.page.locator('[data-testid="habit-goal-hours"]');
+      const minutesInput = this.page.locator('[data-testid="habit-goal-minutes"]');
+      if (await hoursInput.isVisible()) { await hoursInput.fill(goalHours.toString()); }
+      if (await minutesInput.isVisible()) { await minutesInput.fill(goalMinutes.toString()); }
     }
   }
 
@@ -88,16 +100,16 @@ export class HabitsPage extends BasePage {
 
   async getHabitSetCount(): Promise<number> {
     const list = this.page.locator(this.habitSetList);
-    if (await list.isVisible()) {
-      return await this.page.locator(`${this.habitSetList} > *`).count();
+    if (await list.first().isVisible()) {
+      return await list.count();
     }
     return 0;
   }
 
   async getHabitCount(): Promise<number> {
     const list = this.page.locator(this.habitList);
-    if (await list.isVisible()) {
-      return await this.page.locator(`${this.habitList} > *`).count();
+    if (await list.first().isVisible()) {
+      return await list.count();
     }
     return 0;
   }

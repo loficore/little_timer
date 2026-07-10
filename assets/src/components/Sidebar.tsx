@@ -65,6 +65,7 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
                 {navItems.map((item) => (
                     <button
                         key={item.id}
+                        data-testid={`nav-${item.id}`}
                         className={`my-sidebar-nav-btn ${currentPage === item.id ? "is-active" : ""}`}
                         onClick={() => onNavigate(item.id)}
                     >

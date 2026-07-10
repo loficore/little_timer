@@ -12,6 +12,8 @@ interface DropdownSelectProps {
   onChange: (value: string | number) => void;
   disabled?: boolean;
   minWidth?: string;
+  dataTestId?: string;
+  optionDataTestId?: string;
 }
 
 export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
@@ -20,6 +22,8 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
   onChange,
   disabled = false,
   minWidth = "170px",
+  dataTestId,
+  optionDataTestId,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,6 +62,7 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
     >
       {/* 选择器按钮 */}
       <button
+        data-testid={dataTestId}
         className={`my-field-surface dropdown-select-btn flex items-center justify-between w-full h-11 px-4 py-3 rounded-xl transition-all duration-200 ${
           disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
         }`}

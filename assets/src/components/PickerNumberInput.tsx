@@ -10,6 +10,7 @@ interface PickerNumberInputProps {
   unit?: string;
   hint?: string;
   disabled?: boolean;
+  dataTestId?: string;
 }
 
 export const PickerNumberInput: FunctionalComponent<PickerNumberInputProps> = memo(({
@@ -56,6 +57,7 @@ export const PickerNumberInput: FunctionalComponent<PickerNumberInputProps> = me
       <div className="flex items-center gap-1">
         <div className="my-field-surface relative flex items-center rounded-xl h-11 overflow-hidden">
           <input
+            data-testid={dataTestId}
             type="text"
             inputMode="numeric"
             value={value}

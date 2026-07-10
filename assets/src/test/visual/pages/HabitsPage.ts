@@ -32,7 +32,9 @@ export class HabitsPage extends BasePage {
   }
 
   async goto() {
-    await super.goto("/#/habits");
+    await this.page.goto(this.baseUrl);
+    await this.page.locator('[data-testid="nav-habits"]').filter({ visible: true }).first().click();
+    await this.page.waitForLoadState("networkidle");
   }
 
   async clickCreateSet() {

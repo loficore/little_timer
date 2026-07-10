@@ -22,7 +22,9 @@ export class StatsPage extends BasePage {
   }
 
   async goto() {
-    await super.goto("/#/stats");
+    await this.page.goto(this.baseUrl);
+    await this.page.locator('[data-testid="nav-stats"]').filter({ visible: true }).first().click();
+    await this.page.waitForLoadState("networkidle");
   }
 
   async clickWeekRange() {

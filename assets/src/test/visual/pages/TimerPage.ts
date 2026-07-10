@@ -4,6 +4,7 @@ import { BasePage } from "./BasePage";
 export class TimerPage extends BasePage {
   readonly startButton: string;
   readonly pauseButton: string;
+  readonly resumeButton: string;
   readonly resetButton: string;
   readonly finishButton: string;
   readonly timerDisplay: string;
@@ -16,6 +17,7 @@ export class TimerPage extends BasePage {
     super(page);
     this.startButton = '[data-testid="timer-start"]';
     this.pauseButton = '[data-testid="timer-pause"]';
+    this.resumeButton = '[data-testid="timer-resume"]';
     this.resetButton = '[data-testid="timer-reset"]';
     this.finishButton = '[data-testid="timer-finish"]';
     this.timerDisplay = '[data-testid="timer-display"]';
@@ -40,6 +42,11 @@ export class TimerPage extends BasePage {
     await this.page.waitForTimeout(500);
   }
 
+  async clickResume() {
+    await this.click(this.resumeButton);
+    await this.page.waitForTimeout(500);
+  }
+
   async clickReset() {
     await this.click(this.resetButton);
     await this.page.waitForTimeout(500);
@@ -48,6 +55,22 @@ export class TimerPage extends BasePage {
   async clickFinish() {
     await this.click(this.finishButton);
     await this.page.waitForTimeout(500);
+  }
+
+  async selectHabit() {
+    const habitPickerBtn = this.page.locator('[data-testid="timer-habit-picker"]');
+    try {
+      await habitPickerBtn.click({ timeout: 3000 });
+      await this.page.waitForTimeout(500);
+      // Target habit buttons in the scrollable content area, not modal header buttons
+      const firstHabit = this.page.locator('.my-surface-modal .overflow-y-auto button.my-field-surface').first();
+      if (await firstHabit.isVisible({ timeout: 3000 })) {
+        await firstHabit.click();
+        await this.page.waitForTimeout(300);
+      }
+    } catch {
+      // Habit picker not visible
+    }
   }
 
   async getTimerDisplayText(): Promise<string> {

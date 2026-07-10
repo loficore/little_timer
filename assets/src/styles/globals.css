@@ -176,6 +176,7 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+  transform: translateY(0.08em);
 }
 
 .seven-segment-char {
@@ -314,11 +315,11 @@
 }
 
 .seven-segment-dot-top {
-  top: 31%;
+  top: 30%;
 }
 
 .seven-segment-dot-bottom {
-  top: 63%;
+  top: 68%;
 }
 
 .time-running-glow {

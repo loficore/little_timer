@@ -351,8 +351,9 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     gap: 'var(--layout-control-gap)',
                 }}>
                     <button
-                        className="my-surface-card flex items-center gap-2 sm:gap-3 min-w-[170px] h-11 justify-between px-4 py-3 rounded-xl cursor-pointer"
-                        onClick={() => setShowHabitPicker(true)}
+                      data-testid="timer-habit-picker"
+                      className="my-surface-card flex items-center gap-2 sm:gap-3 min-w-[170px] h-11 justify-between px-4 py-3 rounded-xl cursor-pointer"
+                      onClick={() => setShowHabitPicker(true)}
                     >
                         {selectedHabit ? (
                             <>
@@ -373,10 +374,11 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     </button>
 
                     <DropdownSelect
+                        dataTestId="mode-selector"
                         value={timerConfig.mode}
                         options={[
-                            { value: "stopwatch", label: t("timer.stopwatch") },
-                            { value: "countdown", label: t("timer.countdown") }
+                            { value: "stopwatch", label: t("timer.stopwatch"), dataTestId: "mode-option-stopwatch" },
+                            { value: "countdown", label: t("timer.countdown"), dataTestId: "mode-option-countdown" }
                         ]}
                         onChange={(value) => setTimerConfig({...timerConfig, mode: value as TimerMode})}
                         disabled={isRunning}
@@ -391,16 +393,16 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                 />
 
                 <div className="flex flex-1 flex-col items-center justify-center">
-                <div className="my-clock-glass mb-3 sm:mb-4">
+                <div data-testid="timer-display" className="my-clock-glass mb-3 sm:mb-4">
                                     <div className={`text-[clamp(2.8rem,14vw,8rem)] leading-none font-mono font-semibold time-transition flex items-center justify-center ${timeDisplayStyle === "seven_segment" ? "time-style-seven-segment" : "time-style-classic"} ${timeStateClass} ${isRunning && timeDisplayStyle === "seven_segment" ? "time-running-segment" : ""}`}>
-                      {timeDisplayStyle === "seven_segment" ? (
-                          <SevenSegmentDisplay value={timeDisplay} />
-                      ) : (
-                          <span className="time-value-swap">
-                              {timeDisplay}
-                          </span>
-                      )}
-                  </div>
+                       {timeDisplayStyle === "seven_segment" ? (
+                           <SevenSegmentDisplay value={timeDisplay} />
+                       ) : (
+                           <span className="time-value-swap">
+                               {timeDisplay}
+                           </span>
+                       )}
+                   </div>
                 </div>
 
                 {timerConfig.mode === "countdown" && isRunning && (
@@ -440,6 +442,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                 <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 mt-2">
                     {isRunning && !isPaused ? (
                         <button
+                            data-testid="timer-pause"
                             className="btn btn-primary btn-lg min-w-[100px] sm:min-w-[130px]"
                             onClick={() => void handlePause()}
                         >
@@ -450,6 +453,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                         </button>
                     ) : isPaused ? (
                         <button
+                            data-testid="timer-resume"
                             className="btn btn-primary btn-lg min-w-[100px] sm:min-w-[130px]"
                             onClick={() => void handleResume()}
                         >
@@ -460,6 +464,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                         </button>
                     ) : (
                         <button
+                            data-testid="timer-start"
                             className="btn btn-primary btn-lg min-w-[100px] sm:min-w-[130px]"
                             onClick={() => void handleStart()}
                         >
@@ -472,6 +477,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
                     {timerConfig.mode === "countdown" && isRunning && (
                         <button
+                            data-testid="timer-skip"
                             className="btn btn-ghost btn-lg min-w-[90px] sm:min-w-[110px]"
                             onClick={() => void handleSkipToNext()}
                         >
@@ -484,6 +490,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
                     {isRunning && (
                         <button
+                            data-testid="timer-finish"
                             className="btn btn-success btn-lg min-w-[90px] sm:min-w-[110px]"
                             onClick={() => void handleFinish()}
                         >
@@ -495,6 +502,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     )}
 
                     <button
+                        data-testid="timer-reset"
                         className="btn btn-secondary btn-lg min-w-[90px] sm:min-w-[110px]"
                         onClick={() => void handleReset()}
                     >

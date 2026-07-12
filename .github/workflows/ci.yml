@@ -5,74 +5,212 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+    paths:
+      - "assets/src/**"
+      - "assets/playwright.config.ts"
+      - "assets/package.json"
+      - "assets/pnpm-lock.yaml"
+      - "neo-src/**"
+      - "scripts/**"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/vrt.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # release job 需要写入 GitHub Release
 
 jobs:
-  # 前端检查：lint、build、test
+  # 前端检查：lint、build、类型检查、test
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: latest
-
-      - name: Install dependencies
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+          cache-dependency-path: assets/pnpm-lock.yaml
+      - run: pnpm install
         working-directory: assets
-        run: pnpm install
-
-      - name: Lint
+      - run: pnpm run lint
         working-directory: assets
-        run: pnpm run lint
-
-      - name: Build
+      - run: pnpm run build
         working-directory: assets
-        run: pnpm run build
-
-      - name: Test
+      - run: pnpm run build:check
         working-directory: assets
-        run: pnpm run test
+      - run: pnpm run test
+        working-directory: assets
 
+  # 后端检查：tidy、build、test、vet
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache-dependency-path: neo-src/go.sum
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev pkg-config
+      - run: go mod tidy
+        working-directory: neo-src
+      - run: go build -o bin/server ./cmd/server
+        working-directory: neo-src
+      - run: go test ./...
+        working-directory: neo-src
+      - run: go vet ./...
+        working-directory: neo-src
 
-      - name: Install system dependencies (SQLite)
+  # 端到端测试：构建前后端后运行真实用户旅程
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+          cache-dependency-path: assets/pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: neo-src/go.sum
+      - run: pnpm install
+        working-directory: assets
+      - run: pnpm run build
+        working-directory: assets
+      - run: go build -o bin/server ./cmd/server
+        working-directory: neo-src
+      - run: pnpm run test:e2e
+        working-directory: assets
+
+  # 视觉回归测试：仅在代码验证事件中运行
+  vrt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: vrt-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+          cache-dependency-path: assets/pnpm-lock.yaml
+      - run: pnpm install
+        working-directory: assets
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: assets
+      - run: pnpm run test:vrt
+        working-directory: assets
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: assets/playwright-report
+          if-no-files-found: ignore
+
+  # 发布：同一工作流内等待所有检查完成
+  release:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [frontend, backend, e2e, vrt]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # git-cliff（带缓存）
+      - name: Setup git-cliff
+        env:
+          GIT_CLIFF_VERSION: v2.12.0
         run: |
+          mkdir -p ~/.local/bin
+          echo "${{ runner.os }}" | grep -q Linux && \
+            ARCH="x86_64-unknown-linux-gnu" || \
+            ARCH="x86_64-apple-darwin"
+          CACHE_KEY="git-cliff-${{ runner.os }}-${{ env.GIT_CLIFF_VERSION }}"
+          if [ -f "$HOME/.cache/$CACHE_KEY/git-cliff" ]; then
+            cp "$HOME/.cache/$CACHE_KEY/git-cliff" ~/.local/bin/git-cliff
+            chmod +x ~/.local/bin/git-cliff
+          else
+            URL="https://github.com/orhun/git-cliff/releases/download/${{ env.GIT_CLIFF_VERSION }}/git-cliff-${GIT_CLIFF_VERSION#v}-$ARCH.tar.gz"
+            wget -qO - "$URL" | tar -xz -C ~/.local/bin
+            mkdir -p "$HOME/.cache/$CACHE_KEY"
+            cp ~/.local/bin/git-cliff "$HOME/.cache/$CACHE_KEY/"
+          fi
+          git-cliff --version
+
+      - name: Generate release changelog
+        run: >-
+          git-cliff --config cliff.toml --latest --strip header
+          > release_notes.md
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+          cache-dependency-path: assets/pnpm-lock.yaml
+
+      - run: |
           sudo apt-get update
           sudo apt-get install -y libsqlite3-dev pkg-config
 
-      - name: Tidy
-        working-directory: neo-src
-        run: go mod tidy
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh || true
 
-      - name: Build
-        working-directory: neo-src
-        run: go build -o bin/server ./cmd/server
+      - name: Run packaging script
+        env:
+          VERSION: ${{ github.event.release.tag_name || github.ref }}
+        run: |
+          VERSION="${VERSION#refs/tags/}"
+          VERSION="${VERSION#v}"
+          ./scripts/package_go.sh --version "$VERSION"
 
-      - name: Test
-        working-directory: neo-src
-        run: go test ./...
+      - uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.event.release.tag_name || github.ref }}
+          name: ${{ github.event.release.name || github.ref }}
+          bodyFile: release_notes.md
+          artifacts: dist/*.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
+          replacesArtifacts: true
+          allowUpdates: true

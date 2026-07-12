@@ -8,6 +8,7 @@ DIST_DIR="$ROOT_DIR/dist"
 STAGE_DIR="$DIST_DIR/stage"
 APP_NAME="little_timer"
 VERSION="$(date +%Y%m%d)"
+EMBED_UI="true"
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -23,17 +24,27 @@ require_cmd "tar"
 show_help() {
   echo "用法: $0 [选项]"
   echo "选项:"
-  echo "  --version <ver>   指定版本号（默认日期）"
-  echo "  --help, -h        显示此帮助"
+  echo "  --version <ver>       指定版本号（默认日期）"
+  echo "  --embed-html           将 UI 内嵌到 Go 二进制文件中（默认开启）"
+  echo "  --help, -h             显示此帮助"
   echo ""
   echo "示例:"
   echo "  $0 --version 1.0.0"
+  echo "  $0 --version 1.0.0 --no-embed-html"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version)
       VERSION="$2"
+      shift
+      ;;
+    --embed-html)
+      EMBED_UI="true"
+      shift
+      ;;
+    --no-embed-html)
+      EMBED_UI="false"
       shift
       ;;
     --help|-h)
@@ -61,9 +72,29 @@ mkdir -p "$ASSETS_DIR/dist/i18n"
 cp -f "$ASSETS_DIR/i18n/"*.toml "$ASSETS_DIR/dist/i18n/"
 
 # 3) 构建 Go 后端（内嵌前端）
-echo "=== 构建 Go 后端（内嵌前端）==="
+echo "=== 构建 Go 后端（${EMBED_UI:-true} 嵌入前端）==="
 cd "$NEO_SRC_DIR"
-go build -tags embed_ui -ldflags="-s -w" -o bin/server ./cmd/server
+
+# 构建标志
+GO_LDFLAGS="-s -w"
+GO_TAGS=""
+
+# 版本注入（仅在设置了 VERSION 时）
+if [ -n "$VERSION" ]; then
+  GO_LDFLAGS="$GO_LDFLAGS -X little-timer/internal/app.Version=$VERSION"
+  echo "  - 版本: $VERSION"
+fi
+
+# UI 嵌入标志
+if [ "$EMBED_UI" = "true" ]; then
+  GO_TAGS="embed_ui"
+  echo "  - 嵌入 UI: true"
+else
+  echo "  - 嵌入 UI: false (仅提供 HTTP 服务)"
+fi
+
+# 执行构建
+go build -tags "$GO_TAGS" $GO_LDFLAGS -o bin/server ./cmd/server
 
 BIN_PATH="$NEO_SRC_DIR/bin/server"
 if [[ ! -f "$BIN_PATH" ]]; then

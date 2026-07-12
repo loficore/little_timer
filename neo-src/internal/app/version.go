@@ -15,7 +15,7 @@ import (
 
 // Version is the human-readable release tag.  Bumped on every release;
 // matches the `version` field in cliff.toml.
-const Version = "0.1.0"
+var Version = "1.1.0"
 
 // BuildTime is captured when the package is initialised.  Resolves to
 // the time the binary was loaded — close enough to the build time for

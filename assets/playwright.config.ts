@@ -45,26 +45,43 @@ export default defineConfig({
     },
   ],
   projects: [
+    // E2E projects — parallel, filtered to E2E tests only
     {
       name: "mobile-390",
-      use: {
-        browserName: "chromium",
-        viewport: { width: 390, height: 844 },
-      },
+      use: { browserName: "chromium", viewport: { width: 390, height: 844 } },
+      grep: /E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程/,
+      workers: undefined,
     },
     {
       name: "mobile-412",
-      use: {
-        browserName: "chromium",
-        viewport: { width: 412, height: 915 },
-      },
+      use: { browserName: "chromium", viewport: { width: 412, height: 915 } },
+      grep: /E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程/,
+      workers: undefined,
     },
     {
       name: "desktop-1280",
-      use: {
-        browserName: "chromium",
-        viewport: { width: 1280, height: 800 },
-      },
+      use: { browserName: "chromium", viewport: { width: 1280, height: 800 } },
+      grep: /E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程/,
+      workers: undefined,
+    },
+    // VRT projects — serial, exclude E2E tests
+    {
+      name: "vrt-mobile-390",
+      use: { browserName: "chromium", viewport: { width: 390, height: 844 } },
+      grepInvert: /E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程|用户旅程 E2E/,
+      workers: 1,
+    },
+    {
+      name: "vrt-mobile-412",
+      use: { browserName: "chromium", viewport: { width: 412, height: 915 } },
+      grepInvert: /E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程|用户旅程 E2E/,
+      workers: 1,
+    },
+    {
+      name: "vrt-desktop-1280",
+      use: { browserName: "chromium", viewport: { width: 1280, height: 800 } },
+      grepInvert: /E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程|用户旅程 E2E/,
+      workers: 1,
     },
   ],
 });

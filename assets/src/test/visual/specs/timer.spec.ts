@@ -147,7 +147,14 @@ test.describe("Timer 用户旅程 E2E", () => {
     // 2. Select habit
     await timerPage.selectHabit();
 
-    // 3. Click start - verify timer is running
+    // Guard: reset any stale timer state from SSE sync or previous runs
+    if (!(await timerPage.isTimerStopped())) {
+      await timerPage.clickPause();
+      await timerPage.clickReset();
+      await page.waitForTimeout(300);
+    }
+
+    // Click start - verify timer is running
     await timerPage.clickStart();
     expect(await timerPage.isTimerRunning()).toBe(true);
 

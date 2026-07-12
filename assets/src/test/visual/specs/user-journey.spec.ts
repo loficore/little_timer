@@ -37,9 +37,14 @@ test.describe("完整用户旅程 (Habit → Timer → Stats)", () => {
       // Force-close: press Escape to dismiss modal
       await page.keyboard.press('Escape');
       await page.waitForTimeout(300);
-      // Fallback: click cancel button if visible
-      if (await page.locator('[data-testid="cancel-button"]').isVisible()) {
-        await page.locator('[data-testid="cancel-button"]').click();
+      // Fallback: click cancel button if visible (use JS click to bypass overflow:hidden)
+      const cancelBtn = page.locator('[data-testid="cancel-button"]');
+      if (await cancelBtn.isVisible()) {
+        await cancelBtn.scrollIntoViewIfNeeded();
+        await page.evaluate((sel) => {
+          const btn = document.querySelector(sel);
+          if (btn) (btn as HTMLElement).click();
+        }, '[data-testid="cancel-button"]');
         await page.waitForTimeout(300);
       }
       await expect(backdrop).toBeHidden({ timeout: 3000 });
@@ -63,10 +68,18 @@ test.describe("完整用户旅程 (Habit → Timer → Stats)", () => {
     try {
       await expect(backdrop).toBeHidden({ timeout: 5000 });
     } catch {
-      // Force-close: press Escape to dismiss modal
       await page.keyboard.press('Escape');
       await page.waitForTimeout(500);
-      await expect(backdrop).not.toBeHidden({ timeout: 3000 });
+      const cancelBtn = page.locator('[data-testid="cancel-button"]');
+      if (await cancelBtn.isVisible()) {
+        await cancelBtn.scrollIntoViewIfNeeded();
+        await page.evaluate((sel) => {
+          const btn = document.querySelector(sel);
+          if (btn) (btn as HTMLElement).click();
+        }, '[data-testid="cancel-button"]');
+        await page.waitForTimeout(300);
+      }
+      await expect(backdrop).toBeHidden({ timeout: 3000 });
     }
 
     // 4. Go to Timer page (default route) and start countdown

@@ -11,8 +11,10 @@
     "build:check": "tsc -b --noEmit",
     "preview": "vite preview",
     "test": "vitest",
-    "test:vrt": "playwright test",
+    "test:vrt:full": "playwright test",
     "test:vrt:update": "playwright test --update-snapshots",
+    "test:e2e": "playwright test --grep \"E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程\"",
+    "test:vrt": "playwright test --project=vrt-mobile-390 --project=vrt-mobile-412 --project=vrt-desktop-1280 --workers=1",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage"
   },

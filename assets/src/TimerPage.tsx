@@ -380,10 +380,10 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     <DropdownSelect
                         dataTestId="mode-selector"
                         value={timerConfig.mode}
-                        options={[
-                            { value: "stopwatch", label: t("timer.stopwatch"), dataTestId: "mode-option-stopwatch" },
-                            { value: "countdown", label: t("timer.countdown"), dataTestId: "mode-option-countdown" }
-                        ]}
+                         options={[
+                             { value: "stopwatch", label: t("timer.stopwatch") },
+                             { value: "countdown", label: t("timer.countdown") }
+                         ]}
                         onChange={(value) => setTimerConfig({...timerConfig, mode: value as TimerMode})}
                         disabled={isRunning}
                     />

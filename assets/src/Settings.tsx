@@ -332,7 +332,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
             durationMs: Math.round(performance.now() - startAt),
           });
         })
-        .catch((error) => {
+         .catch((error: unknown) => {
           const errorMessage = error instanceof Error ? error.message : "未知错误";
           setSaveMessage(t("validation.save_error", { error: errorMessage }));
           logPerf("Settings.save.error", {
@@ -527,7 +527,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
             <BackupTab
               config={config}
               onChange={(newConfig) => {
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
                 setConfig(newConfig);
               }}
             />

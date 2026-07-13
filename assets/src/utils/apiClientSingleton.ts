@@ -15,7 +15,6 @@ import type { TimerState, Settings } from "../types/api";
 // Detect Android: Wails v3 sets window.wails on Android
 const isAndroid = typeof window !== "undefined" && !!(window as any).wails;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type APIClientInterface = any;
 
 let apiClientInstance: APIClientInterface = null;

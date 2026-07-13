@@ -156,7 +156,7 @@ const HomePage = memo((props: HomePageProps) => {
         const client = getAPIClient();
         void client.createSession(habitId, elapsed, 1, today).then(() => {
           logSuccess("✓ Session 已自动记录");
-        }).catch((e) => {
+        }).catch((e: unknown) => {
           logError(`记录 session 失败: ${e}`);
         });
       }

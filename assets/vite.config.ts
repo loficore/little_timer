@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import preact from '@preact/preset-vite' // 使用 preact 插件
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import tailwindcss from '@tailwindcss/vite'

@@ -10,7 +10,6 @@ export type ConnectCallback = () => void;
  */
 export class SSEClient {
     private eventSource: EventSource | null = null;
-    private baseUrl: string;
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 5;
     private reconnectDelay = 1000;
@@ -23,8 +22,7 @@ export class SSEClient {
      * 构造函数，接受 SSE 服务器的基础 URL
      * @param {string} baseUrl SSE 服务器的基础 URL，例如 http://localhost:8000
      */
-    constructor(baseUrl: string) {
-        this.baseUrl = baseUrl;
+    constructor(_baseUrl: string) {
     }
 
     /**

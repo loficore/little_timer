@@ -23,7 +23,7 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
   disabled = false,
   minWidth = "170px",
   dataTestId,
-  optionDataTestId,
+  optionDataTestId: _optionDataTestId,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);

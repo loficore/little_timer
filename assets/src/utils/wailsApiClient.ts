@@ -34,10 +34,10 @@ import type {
   WallpaperDeleteResult,
 } from "../types/api";
 
-import * as TimerService from "../bindings/little-timer/internal/app/timerservice";
-import * as SettingsService from "../bindings/little-timer/internal/app/settingsservice";
-import * as HabitService from "../bindings/little-timer/internal/app/habitservice";
-import * as BackupService from "../bindings/little-timer/internal/app/backupservice";
+import * as TimerService from "../bindings/little-timer/internal/app/timerservice.js";
+import * as SettingsService from "../bindings/little-timer/internal/app/settingsservice.js";
+import * as HabitService from "../bindings/little-timer/internal/app/habitservice.js";
+import * as BackupService from "../bindings/little-timer/internal/app/backupservice.js";
 
 /* eslint-disable @typescript-eslint/require-await */
 // Detect Android: Wails v3 sets window.wails on Android

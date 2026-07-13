@@ -40,6 +40,16 @@ jobs:
           cache-dependency-path: assets/pnpm-lock.yaml
       - run: pnpm install
         working-directory: assets
+      - name: Install GTK4 and WebKitGTK dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            pkg-config \
+            libgirepository1.0-dev
+      - name: Generate Wails bindings
+        run: bash scripts/generate-bindings.sh
       - run: pnpm run lint
         working-directory: assets
       - run: pnpm run build

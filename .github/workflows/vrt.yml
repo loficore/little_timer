@@ -38,6 +38,9 @@ jobs:
         working-directory: assets
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Install Chinese fonts for VRT
+        run: sudo apt-get install -y fonts-noto-cjk
+
       - name: Run visual regression tests
         working-directory: assets
         run: pnpm run test:vrt

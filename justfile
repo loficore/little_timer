@@ -7,13 +7,12 @@ SSH_TARGET := env_var_or_default("MY_ACT_SSH_TARGET", "")
 REMOTE_PATH := env_var_or_default("MY_ACT_REMOTE_PATH", "")
 
 # ── 2. 核心公共命令 ──────────────────────────────────────────────────
-
 ci-run: go-build-check build-check
 
 act:
         @if [ -n "{{SSH_TARGET}}" ]; then \
             echo "=== [远程调试] 通过 SSH 在 {{SSH_TARGET}} 运行 act ==="; \
-            just r-act; \
+            just r-act-start; \
         else \
             echo "=== [本地调试] 在当前机器运行 act ==="; \
             act --secret-file .act.env -P ubuntu-latest=catthehacker/ubuntu:act-latest; \

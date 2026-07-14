@@ -48,11 +48,13 @@ let _bindings: {
 
 async function _loadBindings() {
   if (_bindings) return _bindings;
+  // Use string-based dynamic import to prevent Rollup from resolving at build time.
+  // These files are Wails-generated (Android only) and don't exist in the desktop build.
   const [ts, ss, hs, bs] = await Promise.all([
-    import("../bindings/little-timer/internal/app/timerservice.js"),
-    import("../bindings/little-timer/internal/app/settingsservice.js"),
-    import("../bindings/little-timer/internal/app/habitservice.js"),
-    import("../bindings/little-timer/internal/app/backupservice.js"),
+    import(/* @vite-ignore */ "../bindings/little-timer/internal/app/timerservice.ts"),
+    import(/* @vite-ignore */ "../bindings/little-timer/internal/app/settingsservice.ts"),
+    import(/* @vite-ignore */ "../bindings/little-timer/internal/app/habitservice.ts"),
+    import(/* @vite-ignore */ "../bindings/little-timer/internal/app/backupservice.ts"),
   ]);
   _bindings = {
     TimerService: ts,

@@ -87,7 +87,7 @@ jobs:
       - run: go vet ./...
         working-directory: neo-src
 
-  # 端到端测试：构建前后端后运行真实用户旅程
+   # 端到端测试：构建前后端后运行真实用户旅程
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -109,6 +109,19 @@ jobs:
           cache-dependency-path: neo-src/go.sum
       - run: pnpm install
         working-directory: assets
+      - name: Install GTK4 and WebKitGTK dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            pkg-config \
+            libgirepository1.0-dev
+      - name: Generate Wails bindings
+        run: bash scripts/generate-bindings.sh
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+        working-directory: assets
       - run: pnpm run build
         working-directory: assets
       - run: go build -o bin/server ./cmd/server
@@ -116,7 +129,7 @@ jobs:
       - run: pnpm run test:e2e
         working-directory: assets
 
-  # 视觉回归测试：仅在代码验证事件中运行
+   # 视觉回归测试：仅在代码验证事件中运行
   vrt:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -141,6 +154,18 @@ jobs:
           cache-dependency-path: assets/pnpm-lock.yaml
       - run: pnpm install
         working-directory: assets
+      - name: Install GTK4 and WebKitGTK dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            pkg-config \
+            libgirepository1.0-dev
+      - name: Generate Wails bindings
+        run: bash scripts/generate-bindings.sh
+      - name: Install Chinese fonts for VRT
+        run: sudo apt-get install -y fonts-noto-cjk
       - run: pnpm exec playwright install --with-deps chromium
         working-directory: assets
       - run: pnpm run test:vrt

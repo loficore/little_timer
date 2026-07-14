@@ -27,6 +27,9 @@ const mockApiClient = {
   restoreBackup: vi.fn(),
   deleteBackup: vi.fn(),
   verifyBackup: vi.fn(),
+  getMasterPasswordStatus: vi.fn(),
+  getBackupConfig: vi.fn(),
+  updateBackupConfig: vi.fn(),
 };
 
 describe("BackupTab", () => {
@@ -87,6 +90,7 @@ describe("BackupTab", () => {
 
   it("calls onChange when target type changes to webdav", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.getMasterPasswordStatus.mockResolvedValue({ has_password: false, unlocked: false });
     const onChange = vi.fn();
 
     render(<BackupTab config={{}} onChange={onChange} />);
@@ -105,6 +109,7 @@ describe("BackupTab", () => {
 
   it("shows webdav fields when target_type is webdav", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.getMasterPasswordStatus.mockResolvedValue({ has_password: false, unlocked: false });
 
     render(<BackupTab config={{}} onChange={vi.fn()} />);
 
@@ -124,6 +129,7 @@ describe("BackupTab", () => {
 
   it("shows s3 fields when target_type is s3", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.getMasterPasswordStatus.mockResolvedValue({ has_password: false, unlocked: false });
 
     render(<BackupTab config={{}} onChange={vi.fn()} />);
 

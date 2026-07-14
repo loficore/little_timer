@@ -40,7 +40,7 @@ export default defineConfig({
     {
       command: "cd ../neo-src && go run ./cmd/server/ serve --http-only --db-path ../assets/test_tmp/e2e.db",
       url: "http://127.0.0.1:8080/api/state",
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: true,
       timeout: 120000,
     },
   ],

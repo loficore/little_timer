@@ -51,6 +51,10 @@ jobs:
         working-directory: neo-src
         run: go build -o bin/server ./cmd/server
 
+      - name: Install Playwright browsers
+        working-directory: assets
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Run E2E tests
         working-directory: assets
-        run: pnpm run test:vrt
+        run: pnpm run test:e2e

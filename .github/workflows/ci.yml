@@ -48,6 +48,10 @@ jobs:
             libwebkitgtk-6.0-dev \
             pkg-config \
             libgirepository1.0-dev
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: neo-src/go.sum
       - name: Generate Wails bindings
         run: bash scripts/generate-bindings.sh
       - run: pnpm run lint

@@ -34,26 +34,52 @@ import type {
   WallpaperDeleteResult,
 } from "../types/api";
 
-import * as TimerService from "../bindings/little-timer/internal/app/timerservice.js";
-import * as SettingsService from "../bindings/little-timer/internal/app/settingsservice.js";
-import * as HabitService from "../bindings/little-timer/internal/app/habitservice.js";
-import * as BackupService from "../bindings/little-timer/internal/app/backupservice.js";
-
 /* eslint-disable @typescript-eslint/require-await */
 // Detect Android: Wails v3 sets window.wails on Android
 const isAndroid = typeof window !== "undefined" && !!(window as any).wails;
 
+// ponytail: lazy-load Wails bindings only on Android at runtime
+let _bindings: {
+  TimerService: any;
+  SettingsService: any;
+  HabitService: any;
+  BackupService: any;
+} | null = null;
+
+async function _loadBindings() {
+  if (_bindings) return _bindings;
+  const [ts, ss, hs, bs] = await Promise.all([
+    import("../bindings/little-timer/internal/app/timerservice.js"),
+    import("../bindings/little-timer/internal/app/settingsservice.js"),
+    import("../bindings/little-timer/internal/app/habitservice.js"),
+    import("../bindings/little-timer/internal/app/backupservice.js"),
+  ]);
+  _bindings = {
+    TimerService: ts,
+    SettingsService: ss,
+    HabitService: hs,
+    BackupService: bs,
+  };
+  return _bindings;
+}
 /**
  * Wails API 客户端 — 封装所有与后端通信的 Wails Go 绑定方法
  */
 export class WailsAPIClient {
   // Exposed for useSSE which accesses apiClient.baseUrl — SSE is not used on Android
   baseUrl = "";
+
+  private async _b(name: 'TimerService' | 'SettingsService' | 'HabitService' | 'BackupService') {
+    const b = await _loadBindings();
+    return b[name];
+  }
+
   /**
    * 获取当前计时器状态
    */
   async getState(): Promise<TimerState> {
-    return TimerService.GetState();
+    const TS = await this._b('TimerService');
+    return TS.GetState();
   }
 
   /**
@@ -62,7 +88,8 @@ export class WailsAPIClient {
    * @param options - 可选计时配置（模式、时长等）
    */
   async startTimer(habitId?: number, options?: TimerStartOptions): Promise<TimerStartResult> {
-    return TimerService.StartTimer(
+    const TS = await this._b('TimerService');
+    return TS.StartTimer(
       habitId ?? null,
       options?.mode ?? "",
       options?.workDuration ?? 0,
@@ -75,14 +102,16 @@ export class WailsAPIClient {
    * 结束计时器
    */
   async finishTimer(): Promise<TimerFinishResult> {
-    return TimerService.FinishTimer();
+    const TS = await this._b('TimerService');
+    return TS.FinishTimer();
   }
 
   /**
    * 获取计时器进度详情
    */
   async getTimerProgress(): Promise<TimerProgress> {
-    return TimerService.GetProgress();
+    const TS = await this._b('TimerService');
+    return TS.GetProgress();
   }
 
   /**
@@ -96,21 +125,24 @@ export class WailsAPIClient {
    * 开始休息时段
    */
   async startRest(): Promise<RestResult> {
-    return TimerService.StartRest();
+    const TS = await this._b('TimerService');
+    return TS.StartRest();
   }
 
   /**
    * 暂停计时器
    */
   async pauseTimer(): Promise<void> {
-    return TimerService.PauseTimer();
+    const TS = await this._b('TimerService');
+    return TS.PauseTimer();
   }
 
   /**
    * 重置计时器
    */
   async resetTimer(): Promise<void> {
-    return TimerService.ResetTimer();
+    const TS = await this._b('TimerService');
+    return TS.ResetTimer();
   }
 
   /**
@@ -126,7 +158,8 @@ export class WailsAPIClient {
    * 获取应用设置
    */
   async getSettings(): Promise<any> {
-    return SettingsService.GetSettings();
+    const SS = await this._b('SettingsService');
+    return SS.GetSettings();
   }
 
   /**
@@ -134,14 +167,16 @@ export class WailsAPIClient {
    * @param settings - 设置对象
    */
   async updateSettings(settings: object): Promise<void> {
-    return SettingsService.UpdateSettings(JSON.stringify(settings));
+    const SS = await this._b('SettingsService');
+    return SS.UpdateSettings(JSON.stringify(settings));
   }
 
   /**
    * 获取所有习惯集
    */
   async getHabitSets(): Promise<HabitSet[]> {
-    return HabitService.ListHabitSets();
+    const HS = await this._b('HabitService');
+    return HS.ListHabitSets();
   }
 
   /**
@@ -151,7 +186,8 @@ export class WailsAPIClient {
    * @param color - 颜色
    */
   async createHabitSet(name: string, description: string, color: string): Promise<HabitSet> {
-    return HabitService.CreateHabitSet(name, description, color);
+    const HS = await this._b('HabitService');
+    return HS.CreateHabitSet(name, description, color);
   }
 
   /**
@@ -163,7 +199,8 @@ export class WailsAPIClient {
    * @param wallpaper - 可选壁纸
    */
   async updateHabitSet(id: number, name: string, description: string, color: string, wallpaper?: string): Promise<HabitSet> {
-    return HabitService.UpdateHabitSet(id, name, description, color, wallpaper ?? "");
+    const HS = await this._b('HabitService');
+    return HS.UpdateHabitSet(id, name, description, color, wallpaper ?? "");
   }
 
   /**
@@ -171,14 +208,16 @@ export class WailsAPIClient {
    * @param id - 习惯集 ID
    */
   async deleteHabitSet(id: number): Promise<void> {
-    return HabitService.DeleteHabitSet(id);
+    const HS = await this._b('HabitService');
+    return HS.DeleteHabitSet(id);
   }
 
   /**
    * 获取所有习惯
    */
   async getHabits(): Promise<Habit[]> {
-    return HabitService.ListHabits(null);
+    const HS = await this._b('HabitService');
+    return HS.ListHabits(null);
   }
 
   /**
@@ -189,7 +228,8 @@ export class WailsAPIClient {
    * @param color - 颜色
    */
   async createHabit(setId: number, name: string, goalSeconds: number, color: string): Promise<Habit> {
-    return HabitService.CreateHabit(setId, name, goalSeconds, color);
+    const HS = await this._b('HabitService');
+    return HS.CreateHabit(setId, name, goalSeconds, color);
   }
 
   /**
@@ -197,7 +237,8 @@ export class WailsAPIClient {
    * @param id - 习惯 ID
    */
   async deleteHabit(id: number): Promise<void> {
-    return HabitService.DeleteHabit(id);
+    const HS = await this._b('HabitService');
+    return HS.DeleteHabit(id);
   }
 
   /**
@@ -209,7 +250,8 @@ export class WailsAPIClient {
    * @param wallpaper - 可选壁纸
    */
   async updateHabit(id: number, name: string, goalSeconds: number, color: string, wallpaper?: string): Promise<Habit> {
-    return HabitService.UpdateHabit(id, name, goalSeconds, color, wallpaper ?? "");
+    const HS = await this._b('HabitService');
+    return HS.UpdateHabit(id, name, goalSeconds, color, wallpaper ?? "");
   }
 
   /**
@@ -220,7 +262,8 @@ export class WailsAPIClient {
    * @param date - 日期字符串
    */
   async createSession(habitId: number, durationSeconds: number, count: number, date: string): Promise<CreateSessionResult> {
-    return HabitService.CreateSession(habitId, durationSeconds, count, date);
+    const HS = await this._b('HabitService');
+    return HS.CreateSession(habitId, durationSeconds, count, date);
   }
 
   /**
@@ -230,7 +273,8 @@ export class WailsAPIClient {
    * @param endDate - 可选结束日期
    */
   async getSessions(date?: string, startDate?: string, endDate?: string): Promise<Session[]> {
-    return HabitService.ListSessions(date ?? "", startDate ?? "", endDate ?? "");
+    const HS = await this._b('HabitService');
+    return HS.ListSessions(date ?? "", startDate ?? "", endDate ?? "");
   }
 
   /**
@@ -239,7 +283,8 @@ export class WailsAPIClient {
    * @param goalSeconds - 可选目标秒数
    */
   async getHabitStreak(habitId: number, goalSeconds?: number): Promise<HabitStreak> {
-    return HabitService.GetHabitStreak(habitId, goalSeconds ?? 0);
+    const HS = await this._b('HabitService');
+    return HS.GetHabitStreak(habitId, goalSeconds ?? 0);
   }
 
   /**
@@ -248,21 +293,24 @@ export class WailsAPIClient {
    * @param date - 可选日期
    */
   async getHabitDetail(habitId: number, date?: string): Promise<HabitDetail> {
-    return HabitService.GetHabitDetail(habitId, date ?? "");
+    const HS = await this._b('HabitService');
+    return HS.GetHabitDetail(habitId, date ?? "");
   }
 
   /**
    * 创建备份
    */
   async createBackup(): Promise<BackupCreateResult> {
-    return BackupService.CreateBackup();
+    const BS = await this._b('BackupService');
+    return BS.CreateBackup();
   }
 
   /**
    * 列出所有备份
    */
   async listBackups(): Promise<BackupListResult> {
-    return BackupService.ListBackups();
+    const BS = await this._b('BackupService');
+    return BS.ListBackups();
   }
 
   /**
@@ -270,7 +318,8 @@ export class WailsAPIClient {
    * @param name - 备份文件名
    */
   async restoreBackup(name: string): Promise<BackupRestoreResult> {
-    return BackupService.RestoreBackup(name);
+    const BS = await this._b('BackupService');
+    return BS.RestoreBackup(name);
   }
 
   /**
@@ -278,21 +327,24 @@ export class WailsAPIClient {
    * @param name - 备份文件名
    */
   async deleteBackup(name: string): Promise<BackupVerifyResult> {
-    return BackupService.DeleteBackup(name);
+    const BS = await this._b('BackupService');
+    return BS.DeleteBackup(name);
   }
 
   /**
    * 验证备份有效性
    */
   async verifyBackup(): Promise<BackupVerifyResult> {
-    return BackupService.VerifyBackup();
+    const BS = await this._b('BackupService');
+    return BS.VerifyBackup();
   }
 
   /**
    * 获取主密码状态（是否设置、是否解锁、锁定剩余时间）
    */
   async getMasterPasswordStatus(): Promise<{ has_password: boolean; unlocked: boolean; locked_until: number; unlock_time: number }> {
-    return BackupService.GetMasterPasswordStatus();
+    const BS = await this._b('BackupService');
+    return BS.GetMasterPasswordStatus();
   }
 
   /**
@@ -300,7 +352,8 @@ export class WailsAPIClient {
    * @param password - 密码
    */
   async setMasterPassword(password: string): Promise<{ success: boolean; error?: string }> {
-    return BackupService.SetMasterPassword(password);
+    const BS = await this._b('BackupService');
+    return BS.SetMasterPassword(password);
   }
 
   /**
@@ -308,21 +361,24 @@ export class WailsAPIClient {
    * @param password - 主密码
    */
   async unlockCredentials(password: string): Promise<{ success: boolean; locked_until: number; error?: string }> {
-    return BackupService.UnlockCredentials(password);
+    const BS = await this._b('BackupService');
+    return BS.UnlockCredentials(password);
   }
 
   /**
    * 锁定凭证
    */
   async lockCredentials(): Promise<{ success: boolean }> {
-    return BackupService.LockCredentials();
+    const BS = await this._b('BackupService');
+    return BS.LockCredentials();
   }
 
   /**
    * 获取备份配置
    */
   async getBackupConfig(): Promise<BackupConfig> {
-    return BackupService.GetBackupConfig();
+    const BS = await this._b('BackupService');
+    return BS.GetBackupConfig();
   }
 
   /**
@@ -330,7 +386,8 @@ export class WailsAPIClient {
    * @param config - 备份配置对象
    */
   async updateBackupConfig(config: BackupConfig): Promise<{ success: boolean; error?: string }> {
-    return BackupService.UpdateBackupConfig(JSON.stringify(config));
+    const BS = await this._b('BackupService');
+    return BS.UpdateBackupConfig(JSON.stringify(config));
   }
 
   /**

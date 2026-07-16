@@ -9,9 +9,6 @@ export class TimerPage extends BasePage {
   readonly finishButton: string;
   readonly timerDisplay: string;
   readonly modeSelector: string;
-  readonly workDurationInput: string;
-  readonly restDurationInput: string;
-  readonly loopCountInput: string;
 
   constructor(page: Page) {
     super(page);
@@ -22,9 +19,6 @@ export class TimerPage extends BasePage {
     this.finishButton = '[data-testid="timer-finish"]';
     this.timerDisplay = '[data-testid="timer-display"]';
     this.modeSelector = '[data-testid="mode-selector"]';
-    this.workDurationInput = '[data-testid="work-duration"]';
-    this.restDurationInput = '[data-testid="rest-duration"]';
-    this.loopCountInput = '[data-testid="loop-count"]';
   }
 
   async goto() {
@@ -103,10 +97,21 @@ export class TimerPage extends BasePage {
     return await this.isVisible(this.startButton);
   }
 
-  async setWorkDuration(seconds: number) {
-    if (await this.isVisible(this.workDurationInput)) {
-      await this.fill(this.workDurationInput, seconds.toString());
-    }
+  /**
+   * Set work duration for countdown mode via API (more reliable than UI fill in Preact).
+   * @param minutes Work duration in MINUTES (e.g., 5 = 5 minutes = 300 seconds)
+   */
+  async setWorkDuration(minutes: number) {
+    await this.page.evaluate(async (mins) => {
+      const seconds = mins * 60;
+      await fetch("http://127.0.0.1:8080/api/timer/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          countdown: { duration_seconds: seconds, loop: false, loop_count: 0, loop_interval_seconds: 0 },
+        }),
+      });
+    }, minutes);
   }
 
   async setRestDuration(seconds: number) {
@@ -119,6 +124,34 @@ export class TimerPage extends BasePage {
     if (await this.isVisible(this.loopCountInput)) {
       await this.fill(this.loopCountInput, count.toString());
     }
+  }
+
+  /**
+   * Poll backend state until timer is finished (SSE-independent).
+   * Use this instead of waitForTimerFinish when SSE may be unreliable (e.g., CI headless).
+   */
+  async waitForTimerFinishPolling(timeoutMs: number = 30000, intervalMs: number = 500): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    let iterations = 0;
+    console.log(`[Polling] Waiting up to ${timeoutMs}ms for timer to finish...`);
+    while (Date.now() < deadline) {
+      iterations++;
+      const state = await this.page.evaluate(async () => {
+        const r = await fetch("http://127.0.0.1:8080/api/state");
+        return r.json();
+      });
+      const isFinished = state.is_finished || state.time <= 0;
+      if (isFinished) {
+        console.log(`[Polling] Timer finished in ${iterations * intervalMs}ms (is_finished=${state.is_finished}, time=${state.time})`);
+        return true;
+      }
+      if (iterations % 10 === 0) {
+        console.log(`[Polling] Timer not finished yet. Current time: ${state.time}s, is_finished: ${state.is_finished}`);
+      }
+      await this.page.waitForTimeout(intervalMs);
+    }
+    console.log(`[Polling] Timeout reached after ${timeoutMs}ms`);
+    return false;
   }
 
   async selectMode(mode: "countdown" | "stopwatch") {

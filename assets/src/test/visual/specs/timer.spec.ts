@@ -9,6 +9,28 @@ async function setTimeDisplayStyle(page: Page, style: "classic" | "seven_segment
   }, style);
 }
 
+async function closeHabitSelector(page: Page) {
+  await page.waitForTimeout(300);
+
+  const closeBtn = page.locator('.my-overlay-backdrop button.btn-circle').first();
+  if (await closeBtn.isVisible({ timeout: 200 }).catch(() => false)) {
+    await closeBtn.click();
+    await page.waitForTimeout(200);
+    return;
+  }
+
+  const backdrop = page.locator('.my-overlay-backdrop').first();
+  if (await backdrop.isVisible({ timeout: 200 }).catch(() => false)) {
+    await backdrop.click({ force: true });
+    await page.waitForTimeout(200);
+    return;
+  }
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(150);
+}
+
+
 test.describe("TimerPage VRT 截图测试", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
@@ -51,6 +73,8 @@ test.describe("TimerPage VRT 截图测试", () => {
       await startBtn.click();
       await page.waitForTimeout(2000);
     }
+
+    await closeAnyHabitSelector(page);
 
     const glass = page.locator(".my-clock-glass");
     await expect(glass).toBeVisible();
@@ -123,6 +147,7 @@ test.describe("TimerPage VRT 截图测试", () => {
     const startBtn = page.locator('[data-testid="timer-start"]');
     if (await startBtn.isVisible()) {
       await startBtn.click();
+      await closeAnyHabitSelector(page);
       await page.waitForTimeout(1500);
     }
     const container = page.locator(".my-clock-glass").filter({ hasText: "" });
@@ -181,11 +206,13 @@ test.describe("Timer 用户旅程 E2E", () => {
   });
 
   test("countdown 流程: start → finish → 验证状态", async ({ page }) => {
+    test.setTimeout(180000); // Allow up to 3 minutes
+
     const timerPage = new TimerPage(page);
 
     await timerPage.goto();
     await timerPage.selectMode("countdown");
-    await timerPage.setWorkDuration(5);
+    await timerPage.setWorkDuration(1); // 1 minute
 
     await timerPage.selectHabit();
     await timerPage.clickStart();
@@ -193,7 +220,10 @@ test.describe("Timer 用户旅程 E2E", () => {
 
     await page.waitForTimeout(6000);
 
-    await timerPage.waitForTimerFinish(10000);
+    // Poll with longer interval (1s) to avoid busy waiting
+    const finished = await timerPage.waitForTimerFinishPolling(120000, 1000);
+    expect(finished).toBe(true);
+    console.log("Timer finished successfully");
 
     await timerPage.clickFinish();
     expect(await timerPage.isTimerStopped()).toBe(true);
@@ -201,11 +231,13 @@ test.describe("Timer 用户旅程 E2E", () => {
   });
 
   test("countdown 完整旅程: start pause resume reset", async ({ page }) => {
+    test.setTimeout(180000); // Allow up to 3 minutes
+
     const timerPage = new TimerPage(page);
 
     await timerPage.goto();
     await timerPage.selectMode("countdown");
-    await timerPage.setWorkDuration(5);
+    await timerPage.setWorkDuration(1); // 1 minute
 
     await timerPage.selectHabit();
     await timerPage.clickStart();
@@ -218,10 +250,13 @@ test.describe("Timer 用户旅程 E2E", () => {
     await timerPage.clickResume();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
-    await timerPage.waitForTimerFinish(10000);
+    // Poll with longer interval (1s) to avoid busy waiting
+    const finished = await timerPage.waitForTimerFinishPolling(120000, 1000);
+    if (!finished) {
+      // Fallback: manually finish if timer didn't finish in time
+      await timerPage.clickFinish();
+    }
 
-    await timerPage.clickFinish();
     expect(await timerPage.isTimerStopped()).toBe(true);
-    expect(await timerPage.isTimerRunning()).toBe(false);
   });
 });

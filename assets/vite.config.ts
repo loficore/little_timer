@@ -39,7 +39,7 @@ export default defineConfig({
       '@wailsio/runtime': '/wails/runtime.js',
     },
   },
-  assetsInclude: ['**/*.toml'], // 允许 TOML 文件作为资产导入
+  assetsInclude: ['**/*.toml', '**/*.woff2'], // 允许 TOML 文件作为资产导入
   server: {
     proxy: {
       '/api': {

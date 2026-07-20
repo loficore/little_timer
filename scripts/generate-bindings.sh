@@ -7,6 +7,12 @@ set -e
 BINDINGS_VERSION="v3.0.0-alpha2.114"
 WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$WORKDIR")"
+ANDROID_MODE=false
+for arg in "$@"; do
+    case $arg in
+        --android) ANDROID_MODE=true ;;
+    esac
+done
 
 # Install Go if not present (needed for docker exec containers)
 if ! hash go 2>/dev/null; then
@@ -36,10 +42,22 @@ fi
 echo "=== Generating Wails bindings ==="
 cd "$PROJECT_ROOT/neo-src"
 
-go run github.com/wailsapp/wails/v3/cmd/wails3@${BINDINGS_VERSION} generate bindings \
-    -ts -clean \
-    -d /tmp/wails-bindings \
-    ./cmd/server
+if [ "$ANDROID_MODE" = "true" ]; then
+    # Android mode: generate bindings with -tags=android
+    go run github.com/wailsapp/wails/v3/cmd/wails3@${BINDINGS_VERSION} generate bindings \
+        -ts -clean \
+        -f '-tags=android' \
+        -d /tmp/wails-bindings \
+        ./cmd/server
+    BINDINGS_DIR="/tmp/wails-bindings"
+else
+    # Desktop mode: standard bindings
+    go run github.com/wailsapp/wails/v3/cmd/wails3@${BINDINGS_VERSION} generate bindings \
+        -ts -clean \
+        -d /tmp/wails-bindings \
+        ./cmd/server
+    BINDINGS_DIR="/tmp/wails-bindings"
+fi
 
 # Store Go environment for docker exec containers
 export GODEBUG=netdns=go
@@ -50,10 +68,16 @@ mkdir -p "$PROJECT_ROOT/assets/src/bindings/little-timer/internal/app"
 mkdir -p "$PROJECT_ROOT/neo-src/cmd/server/assets/bindings/little-timer/internal/app"
 
 # Copy fresh bindings
-cp "$BINDINGS_SRC"/*.ts "$PROJECT_ROOT/assets/src/bindings/little-timer/internal/app/" 2>/dev/null || true
-cp "$BINDINGS_SRC"/*.ts "$PROJECT_ROOT/neo-src/cmd/server/assets/bindings/little-timer/internal/app/" 2>/dev/null || true
+if [ "$ANDROID_MODE" = "true" ]; then
+    cp "$BINDINGS_DIR/little-timer/internal/http/app"/*.ts "$PROJECT_ROOT/assets/src/bindings/little-timer/internal/app/" 2>/dev/null || true
+    cp "$BINDINGS_DIR/little-timer/internal/http/app"/*.ts "$PROJECT_ROOT/neo-src/cmd/server/assets/bindings/little-timer/internal/app/" 2>/dev/null || true
+else
+    cp "$BINDINGS_DIR/little-timer/internal/http/app"/*.ts "$PROJECT_ROOT/assets/src/bindings/little-timer/internal/app/" 2>/dev/null || true
+    cp "$BINDINGS_DIR/little-timer/internal/http/app"/*.ts "$PROJECT_ROOT/neo-src/cmd/server/assets/bindings/little-timer/internal/app/" 2>/dev/null || true
+fi
 
 # Validate bindings were generated
+BINDINGS_SRC="$BINDINGS_DIR/little-timer/internal/http/app"
 if [ ! -d "$BINDINGS_SRC" ] || [ "$(ls -1 "$BINDINGS_SRC"/*.ts 2>/dev/null | wc -l)" -lt 5 ]; then
     echo "ERROR: No bindings generated (found $(ls -1 "$BINDINGS_SRC"/*.ts 2>/dev/null | wc -l) .ts files, expected ≥5)"
     echo "wails3 output:"
@@ -70,3 +94,4 @@ echo "=== Done ==="
 echo "Bindings generated and fixed at:"
 echo "  - assets/src/bindings/little-timer/internal/app/"
 echo "  - neo-src/cmd/server/assets/bindings/little-timer/internal/app/"
+echo "Mode: ${ANDROID_MODE:+Android (with -tags=android)}${ANDROID_MODE:+, }desktop (without -tags=android)"

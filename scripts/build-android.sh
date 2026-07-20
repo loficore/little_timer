@@ -19,35 +19,12 @@ done
 
 echo "=== Building Android APK ==="
 
-# Step 1: Generate Wails bindings (必需，否则 Android 无法调用 Go 方法)
+# Step 1: Generate Wails bindings
 if [ "$PACKAGE_ONLY" = "false" ]; then
     echo "--- Generate bindings ---"
-    # wails3 generate bindings 需要 -tags=android 才能识别 main_android.go 中的 service
-    TEMP_BINDINGS=$(mktemp -d)
-    cd neo-src && \
-    go run github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.114 generate bindings \
-        -ts -clean \
-        -f '-tags=android' \
-        -d "$TEMP_BINDINGS" \
-        ./cmd/server \
-        2>&1 | grep -v "^WARNING\|^# " || true
-    cd ..
+    bash "$SCRIPT_DIR/generate-bindings.sh" --android
 
-    # 把生成的 bindings 复制到 assets/src/bindings/ (Vite 会处理并内联到 index.html)
-    BINDINGS_SRC="$TEMP_BINDINGS/little-timer/internal/app"
-    if [ -d "$BINDINGS_SRC" ]; then
-        mkdir -p assets/src/bindings/little-timer/internal/app
-        cp -r "$BINDINGS_SRC"/* assets/src/bindings/little-timer/internal/app/
-
-        # 修复导入路径: @wailsio/runtime → /wails/runtime.js
-        find assets/src/bindings -name "*.ts" -exec sed -i 's|@wailsio/runtime|/wails/runtime.js|g' {} \;
-        echo "    bindings generated: $(find assets/src/bindings -name '*.ts' | wc -l) files"
-    else
-        echo "    WARNING: no bindings generated (check wails3 output above)"
-    fi
-    rm -rf "$TEMP_BINDINGS"
-
-    # Step 2: 前端构建 (Vite 会把 bindings 内联到 dist/index.html)
+    # Step 2: Frontend build (Vite will inline bindings into dist/index.html)
     echo "--- Frontend ---"
     cd assets
     pnpm install
@@ -64,14 +41,11 @@ if [ "$PACKAGE_ONLY" = "false" ]; then
     fi
 fi
 
-# Step 3b: 复制 runtime.js 到 Android assets (Wails 运行时需要)
-RUNTIME_JS_SRC="$HOME/.asdf/installs/golang/1.26.3/packages/pkg/mod/github.com/wailsapp/wails/v3@v3.0.0-alpha2.115/internal/assetserver/bundledassets/runtime.js"
+# Step 2: Copy runtime.js to Android assets (Wails runtime needed)
 mkdir -p android/app/src/main/assets/wails
-if [ -f "$RUNTIME_JS_SRC" ]; then
-    cp "$RUNTIME_JS_SRC" android/app/src/main/assets/wails/runtime.js
-fi
+cp ~/.asdf/installs/golang/*/packages/pkg/mod/github.com/wailsapp/wails/v3@*/internal/assetserver/bundledassets/runtime.js android/app/src/main/assets/wails/runtime.js 2>/dev/null || echo "Warning: runtime.js not found at expected path"
 
-# Step 4: Go → Android .so
+# Step 3: Go → Android .so
 NDK_ROOT="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/26.3.11579264}"
 if [ ! -d "$NDK_ROOT" ]; then
     echo "Error: Android NDK not found at $NDK_ROOT"

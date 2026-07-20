@@ -121,12 +121,14 @@ func (c *CrudManager) SaveSettings(config domain.SettingsConfig) error {
 // Zig source returns `SettingsConfig{}` (zero-valued); we return
 // NewDefaultSettingsConfig() instead — same effect for any consumer that
 // only reads fields, and safer for callers that forget to apply defaults.
+const settingsSelectSQL = `SELECT timezone, language, default_mode, theme_mode, COALESCE(wallpaper, ''), duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval FROM settings WHERE id = 1;`
+
+const settingsSelectWithIDSQL = `SELECT id, timezone, language, default_mode, theme_mode, COALESCE(wallpaper, ''), duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval FROM settings WHERE id = 1;`
+
 func (c *CrudManager) LoadSettings() (domain.SettingsConfig, error) {
 	if c.db == nil {
 		return domain.SettingsConfig{}, ErrCrudNoDatabase
 	}
-
-	const query = `SELECT timezone, language, default_mode, theme_mode, COALESCE(wallpaper, ''), duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval FROM settings WHERE id = 1;`
 
 	var (
 		timezone              int64
@@ -143,7 +145,7 @@ func (c *CrudManager) LoadSettings() (domain.SettingsConfig, error) {
 		logEnableTimestamp    bool
 		logTickInterval       int64
 	)
-	err := c.db.QueryRow(query).Scan(
+	err := c.db.QueryRow(settingsSelectSQL).Scan(
 		&timezone, &language, &defaultModeStr, &themeMode, &wallpaper,
 		&durationSeconds, &countdownLoop, &countdownLoopCount,
 		&countdownLoopInterval, &stopwatchMaxSeconds, &logLevel,
@@ -189,10 +191,8 @@ func (c *CrudManager) LoadSettingsRow() (SettingsRow, error) {
 		return SettingsRow{}, ErrCrudNoDatabase
 	}
 
-	const query = `SELECT id, timezone, language, default_mode, theme_mode, COALESCE(wallpaper, ''), duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval FROM settings WHERE id = 1;`
-
 	var row SettingsRow
-	err := c.db.QueryRow(query).Scan(
+	err := c.db.QueryRow(settingsSelectWithIDSQL).Scan(
 		&row.ID, &row.Timezone, &row.Language, &row.DefaultMode,
 		&row.ThemeMode, &row.Wallpaper, &row.DurationSeconds,
 		&row.CountdownLoop, &row.CountdownLoopCount,

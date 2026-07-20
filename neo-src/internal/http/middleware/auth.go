@@ -25,6 +25,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"little-timer/internal/http/app"
+	"crypto/subtle"
 )
 
 // Public path prefixes / exact matches that bypass auth regardless of
@@ -87,7 +88,7 @@ func Auth(a *app.App) gin.HandlerFunc {
 		if provided == "" {
 			provided = c.Query("auth_token")
 		}
-		if provided != "" && provided == auth.AuthToken {
+		if provided != "" && subtle.ConstantTimeCompare([]byte(provided), []byte(auth.AuthToken)) == 1 {
 			c.Next()
 			return
 		}

@@ -17,6 +17,16 @@ export interface TimerConfig {
   loopCount: number;
 }
 
+export interface TimerState {
+  isRunning: boolean;
+  isPaused: boolean;
+  isFinished: boolean;
+  isResting: boolean;
+  currentRound: number;
+  elapsedSeconds: number;
+  remainingSeconds: number;
+}
+
 export interface UseTimerReturn {
   // 状态
   timerConfig: TimerConfig;
@@ -53,15 +63,17 @@ export const useTimer = (): UseTimerReturn => {
     loopCount: 0,
   });
 
-  const [isRunning, setIsRunning] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [isFinished, setIsFinished] = useState(false);
-  const [isResting, setIsResting] = useState(false);
-  const [currentRound, setCurrentRound] = useState(0);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [remainingSeconds, setRemainingSeconds] = useState(0);
+  const [timerState, setTimerState] = useState<TimerState>({
+    isRunning: false,
+    isPaused: false,
+    isFinished: false,
+    isResting: false,
+    currentRound: 0,
+    elapsedSeconds: 0,
+    remainingSeconds: 0,
+  });
 
-  const displayTime = timerConfig.mode === "stopwatch" ? elapsedSeconds : remainingSeconds;
+  const displayTime = timerConfig.mode === "stopwatch" ? timerState.elapsedSeconds : timerState.remainingSeconds;
   const displayTimeStr = formatDuration(displayTime);
 
   const setTimerConfig = useCallback((config: Partial<TimerConfig>) => {
@@ -69,23 +81,23 @@ export const useTimer = (): UseTimerReturn => {
   }, []);
 
   const start = useCallback(async (habitId?: number) => {
-    if (isFinished) {
+    if (timerState.isFinished) {
       await reset();
       return;
     }
 
     sessionRecordedRef.current = false;
     startTimeRef.current = Date.now();
-    setIsRunning(true);
-    setIsPaused(false);
 
-    if (timerConfig.mode === "countdown") {
-      setRemainingSeconds(timerConfig.workDuration);
-      setCurrentRound(1);
-      setIsResting(false);
-    } else {
-      setElapsedSeconds(0);
-    }
+    setTimerState((prev) => ({
+      ...prev,
+      isRunning: true,
+      isPaused: false,
+      isResting: false,
+      ...(timerConfig.mode === "countdown"
+        ? { remainingSeconds: timerConfig.workDuration, currentRound: 1, elapsedSeconds: 0 }
+        : { elapsedSeconds: 0 }),
+    }));
 
     try {
       await apiClientRef.current.startTimer(habitId, {
@@ -97,10 +109,10 @@ export const useTimer = (): UseTimerReturn => {
     } catch (e) {
       logError(`启动计时失败: ${e}`);
     }
-  }, [timerConfig, isFinished]);
+  }, [timerConfig, timerState.isFinished]);
 
   const pause = useCallback(async () => {
-    setIsPaused(true);
+    setTimerState((prev) => ({ ...prev, isPaused: true }));
     try {
       await apiClientRef.current.pauseTimer();
     } catch (e) {
@@ -114,7 +126,7 @@ export const useTimer = (): UseTimerReturn => {
       rafRef.current = null;
     }
     startTimeRef.current = Date.now() - totalElapsedRef.current * 1000;
-    setIsPaused(false);
+    setTimerState((prev) => ({ ...prev, isPaused: false }));
     try {
       await apiClientRef.current.resumeTimer(habitId);
     } catch (e) {
@@ -123,13 +135,15 @@ export const useTimer = (): UseTimerReturn => {
   }, []);
 
   const reset = useCallback(async () => {
-    setIsRunning(false);
-    setIsPaused(false);
-    setIsFinished(false);
-    setIsResting(false);
-    setElapsedSeconds(0);
-    setRemainingSeconds(timerConfig.workDuration);
-    setCurrentRound(0);
+    setTimerState({
+      isRunning: false,
+      isPaused: false,
+      isFinished: false,
+      isResting: false,
+      currentRound: 0,
+      elapsedSeconds: 0,
+      remainingSeconds: timerConfig.workDuration,
+    });
     sessionRecordedRef.current = false;
     startTimeRef.current = 0;
     totalElapsedRef.current = 0;
@@ -146,12 +160,15 @@ export const useTimer = (): UseTimerReturn => {
       const result = await apiClientRef.current.finishTimer();
       logSuccess(`✓ 已计入今日统计: ${formatDuration(result.elapsed_seconds)}`);
 
-      setIsRunning(false);
-      setIsPaused(false);
-      setIsFinished(false);
-      setElapsedSeconds(0);
-      setRemainingSeconds(timerConfig.workDuration);
-      setCurrentRound(0);
+      setTimerState({
+        isRunning: false,
+        isPaused: false,
+        isFinished: false,
+        currentRound: 0,
+        elapsedSeconds: 0,
+        remainingSeconds: timerConfig.workDuration,
+        isResting: false,
+      });
       sessionRecordedRef.current = false;
 
       return result;
@@ -162,28 +179,36 @@ export const useTimer = (): UseTimerReturn => {
   }, [timerConfig.workDuration]);
 
   const skipToNext = useCallback(() => {
-    if (timerConfig.mode === "countdown" && isRunning) {
-      if (isResting) {
-        setIsResting(false);
-        setRemainingSeconds(timerConfig.workDuration);
-        setCurrentRound((prev) => prev + 1);
+    if (timerConfig.mode === "countdown" && timerState.isRunning) {
+      if (timerState.isResting) {
+        setTimerState((prev) => ({
+          ...prev,
+          isResting: false,
+          remainingSeconds: timerConfig.workDuration,
+          currentRound: prev.currentRound + 1,
+        }));
       } else {
-        if (timerConfig.loopCount > 0 && currentRound >= timerConfig.loopCount) {
-          setIsFinished(true);
-          setIsRunning(false);
+        if (timerConfig.loopCount > 0 && timerState.currentRound >= timerConfig.loopCount) {
+          setTimerState((prev) => ({ ...prev, isFinished: true, isRunning: false }));
         } else if (timerConfig.restDuration > 0) {
-          setIsResting(true);
-          setRemainingSeconds(timerConfig.restDuration);
+          setTimerState((prev) => ({
+            ...prev,
+            isResting: true,
+            remainingSeconds: timerConfig.restDuration,
+          }));
         } else {
-          setCurrentRound((prev) => prev + 1);
-          setRemainingSeconds(timerConfig.workDuration);
+          setTimerState((prev) => ({
+            ...prev,
+            currentRound: prev.currentRound + 1,
+            remainingSeconds: timerConfig.workDuration,
+          }));
         }
       }
     }
-  }, [timerConfig, isRunning, isResting, currentRound]);
+  }, [timerConfig, timerState.isRunning, timerState.isResting, timerState.currentRound]);
 
   useEffect(() => {
-    if (!isRunning || isPaused || isFinished) {
+    if (!timerState.isRunning || timerState.isPaused || timerState.isFinished) {
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -200,34 +225,42 @@ export const useTimer = (): UseTimerReturn => {
 
       if (timerConfig.mode === "stopwatch") {
         totalElapsedRef.current = wallElapsed;
-        setElapsedSeconds(wallElapsed);
+        setTimerState((prev) => ({ ...prev, elapsedSeconds: wallElapsed }));
       } else {
-        if (isResting) {
+        if (timerState.isResting) {
           const restElapsed = wallElapsed - timerConfig.workDuration;
           const newVal = timerConfig.restDuration - restElapsed;
           if (newVal <= 0) {
-            setIsResting(false);
-            setRemainingSeconds(timerConfig.workDuration);
-            setCurrentRound((prev) => prev + 1);
+            setTimerState((prev) => ({
+              ...prev,
+              isResting: false,
+              remainingSeconds: timerConfig.workDuration,
+              currentRound: prev.currentRound + 1,
+            }));
           } else {
-            setRemainingSeconds(newVal);
+            setTimerState((prev) => ({ ...prev, remainingSeconds: newVal }));
           }
         } else {
           const newVal = timerConfig.workDuration - wallElapsed;
           if (newVal <= 0) {
-            if (timerConfig.loopCount > 0 && currentRound >= timerConfig.loopCount) {
-              setIsFinished(true);
-              setIsRunning(false);
+            if (timerConfig.loopCount > 0 && timerState.currentRound >= timerConfig.loopCount) {
+              setTimerState((prev) => ({ ...prev, isFinished: true, isRunning: false }));
               return;
             } else if (timerConfig.restDuration > 0) {
-              setIsResting(true);
-              setRemainingSeconds(timerConfig.restDuration);
+              setTimerState((prev) => ({
+                ...prev,
+                isResting: true,
+                remainingSeconds: timerConfig.restDuration,
+              }));
             } else {
-              setCurrentRound((prev) => prev + 1);
-              setRemainingSeconds(timerConfig.workDuration);
+              setTimerState((prev) => ({
+                ...prev,
+                currentRound: prev.currentRound + 1,
+                remainingSeconds: timerConfig.workDuration,
+              }));
             }
           } else {
-            setRemainingSeconds(newVal);
+            setTimerState((prev) => ({ ...prev, remainingSeconds: newVal }));
           }
         }
       }
@@ -246,17 +279,17 @@ export const useTimer = (): UseTimerReturn => {
         rafRef.current = null;
       }
     };
-  }, [isRunning, isPaused, isFinished, timerConfig, isResting, currentRound]);
+  }, [timerState.isRunning, timerState.isPaused, timerState.isFinished, timerConfig, timerState.isResting, timerState.currentRound]);
 
   return {
     timerConfig,
-    isRunning,
-    isPaused,
-    isFinished,
-    isResting,
-    currentRound,
-    elapsedSeconds,
-    remainingSeconds,
+    isRunning: timerState.isRunning,
+    isPaused: timerState.isPaused,
+    isFinished: timerState.isFinished,
+    isResting: timerState.isResting,
+    currentRound: timerState.currentRound,
+    elapsedSeconds: timerState.elapsedSeconds,
+    remainingSeconds: timerState.remainingSeconds,
     displayTime: displayTimeStr,
     setTimerConfig,
     start,

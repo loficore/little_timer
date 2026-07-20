@@ -363,9 +363,7 @@ export class APIClient {
      * @returns Promise resolving to result object with success status, backup_path, or error message
      */
     async createBackup(): Promise<BackupCreateResult> {
-        const response = await fetch(`${this.baseUrl}/api/backup/create`, { method: "POST" });
-        const data = await response.json();
-        return data;
+        return this.fetchJson<BackupCreateResult>(`${this.baseUrl}/api/backup/create`, { method: "POST" });
     }
 
     /**

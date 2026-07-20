@@ -31,6 +31,12 @@ import (
 	"little-timer/internal/http/app"
 )
 
+// ponytail: package-level constants for hard-coded timer durations
+const (
+	DefaultWorkDuration = 25 * 60 // seconds
+	DefaultRestDuration = 5 * 60  // seconds
+)
+
 // appFromCtx pulls the *App placed by the auth middleware.  Panics if
 // the middleware was not installed — that's a programmer error, not a
 // runtime condition to handle.
@@ -148,7 +154,7 @@ func handleStart(c *gin.Context) {
 	}
 	work := req.WorkDuration
 	if work == 0 {
-		work = 25 * 60
+		work = DefaultWorkDuration
 	}
 	rest := req.RestDuration
 	loop := req.LoopCount
@@ -347,7 +353,7 @@ func handleModeSwitch(c *gin.Context) {
 // a 5-minute countdown and starts it.
 func handleStartRest(c *gin.Context) {
 	a := appFromCtx(c)
-	const restSeconds uint64 = 5 * 60
+	const restSeconds uint64 = DefaultRestDuration
 
 	a.Clock.HandleEvent(domain.UserChangeConfigEvent{
 		Config: domain.ClockTaskConfig{

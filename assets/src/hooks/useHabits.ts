@@ -9,13 +9,11 @@ import { logError } from "../utils/logger";
 import type { HabitSet, Habit, HabitWithProgress, HabitDetail } from "../types/habit";
 
 export interface UseHabitsReturn {
-  // 状态
   habitSets: HabitSet[];
   habits: HabitWithProgress[];
   isLoading: boolean;
   error: string | null;
-  
-  // 操作
+
   refresh: () => Promise<void>;
   createSet: (name: string, description: string, color: string) => Promise<HabitSet | null>;
   updateSet: (id: number, name: string, description: string, color: string) => Promise<void>;
@@ -34,6 +32,13 @@ export const useHabits = (): UseHabitsReturn => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const setHabitSetsRef = useRef(setHabitSets);
+  const setHabitsRef = useRef(setHabits);
+  setHabitSetsRef.current = setHabitSets;
+  setHabitsRef.current = setHabits;
+
+  const refreshRef = useRef<() => Promise<void>>(() => Promise.reject(new Error("refresh not initialized")));
+
   const refresh = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -43,8 +48,8 @@ export const useHabits = (): UseHabitsReturn => {
         client.getHabitSets(),
         client.getHabits(),
       ]);
-      setHabitSets(Array.isArray(setsData) ? setsData : []);
-      setHabits(
+      setHabitSetsRef.current(Array.isArray(setsData) ? setsData : []);
+      setHabitsRef.current(
         (Array.isArray(habitsData) ? habitsData : []).map((h: Habit) => ({
           ...h,
           today_seconds: 0,
@@ -61,19 +66,21 @@ export const useHabits = (): UseHabitsReturn => {
     }
   }, []);
 
+  refreshRef.current = refresh;
+
   const createSet = useCallback(
     async (name: string, description: string, color: string): Promise<HabitSet | null> => {
       try {
         const client = apiClientRef.current;
         const newSet = await client.createHabitSet(name, description, color);
-        await refresh();
+        await refreshRef.current();
         return newSet;
       } catch (e) {
         logError(`创建习惯集失败: ${e}`);
         return null;
       }
     },
-    [refresh]
+    []
   );
 
   const updateSet = useCallback(
@@ -81,12 +88,12 @@ export const useHabits = (): UseHabitsReturn => {
       try {
         const client = apiClientRef.current;
         await client.updateHabitSet(id, name, description, color);
-        await refresh();
+        await refreshRef.current();
       } catch (e) {
         logError(`更新习惯集失败: ${e}`);
       }
     },
-    [refresh]
+    []
   );
 
   const deleteSet = useCallback(
@@ -94,12 +101,12 @@ export const useHabits = (): UseHabitsReturn => {
       try {
         const client = apiClientRef.current;
         await client.deleteHabitSet(id);
-        await refresh();
+        await refreshRef.current();
       } catch (e) {
         logError(`删除习惯集失败: ${e}`);
       }
     },
-    [refresh]
+    []
   );
 
   const createHabit = useCallback(
@@ -112,14 +119,14 @@ export const useHabits = (): UseHabitsReturn => {
       try {
         const client = apiClientRef.current;
         const newHabit = await client.createHabit(setId, name, goalSeconds, color);
-        await refresh();
+        await refreshRef.current();
         return newHabit;
       } catch (e) {
         logError(`创建习惯失败: ${e}`);
         return null;
       }
     },
-    [refresh]
+    []
   );
 
   const updateHabit = useCallback(
@@ -132,12 +139,12 @@ export const useHabits = (): UseHabitsReturn => {
       try {
         const client = apiClientRef.current;
         await client.updateHabit(id, name, goalSeconds, color);
-        await refresh();
+        await refreshRef.current();
       } catch (e) {
         logError(`更新习惯失败: ${e}`);
       }
     },
-    [refresh]
+    []
   );
 
   const deleteHabit = useCallback(
@@ -145,12 +152,12 @@ export const useHabits = (): UseHabitsReturn => {
       try {
         const client = apiClientRef.current;
         await client.deleteHabit(id);
-        await refresh();
+        await refreshRef.current();
       } catch (e) {
         logError(`删除习惯失败: ${e}`);
       }
     },
-    [refresh]
+    []
   );
 
   const getHabitsBySet = useCallback(

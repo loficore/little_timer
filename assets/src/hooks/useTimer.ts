@@ -117,6 +117,7 @@ export const useTimer = (): UseTimerReturn => {
       await apiClientRef.current.pauseTimer();
     } catch (e) {
       logError(`暂停计时失败: ${e}`);
+      throw e;
     }
   }, []);
 
@@ -131,6 +132,7 @@ export const useTimer = (): UseTimerReturn => {
       await apiClientRef.current.resumeTimer(habitId);
     } catch (e) {
       logError(`恢复计时失败: ${e}`);
+      throw e;
     }
   }, []);
 
@@ -152,6 +154,7 @@ export const useTimer = (): UseTimerReturn => {
       await apiClientRef.current.resetTimer();
     } catch (e) {
       logError(`重置计时失败: ${e}`);
+      throw e;
     }
   }, [timerConfig.workDuration]);
 

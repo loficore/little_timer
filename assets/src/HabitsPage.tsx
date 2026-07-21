@@ -6,7 +6,7 @@ import { getAPIClient } from "./utils/apiClientSingleton";
 import { logSuccess, logError } from "./utils/logger";
 import { formatDurationShort } from "./utils/formatters";
 import { t } from "./utils/i18n";
-import { resolveWallpaperUrl, WALLPAPER_LOCAL_PREFIX } from "./utils/constants";
+import { resolveWallpaperUrl, WALLPAPER_LOCAL_PREFIX, isAllowedWallpaperUrl } from "./utils/constants";
 import type { HabitSet, Habit, HabitWithProgress } from "./types/habit";
 
 interface HabitsPageProps {
@@ -87,7 +87,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
 
         if (isGradient) {
             return { background: wp };
-        } else if (isImage) {
+        } else if (isImage && isAllowedWallpaperUrl(wp)) {
             const imgUrl = wp.startsWith(WALLPAPER_LOCAL_PREFIX) ? resolveWallpaperUrl(wp) : wp;
             return {
                 backgroundImage: `url(${imgUrl})`,

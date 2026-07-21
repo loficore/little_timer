@@ -263,13 +263,21 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
     const handlePause = async () => {
         audioEngine.stopTick();
-        await pause();
+        try {
+            await pause();
+        } catch (e) {
+            logError(`暂停计时失败: ${e}`);
+        }
     };
 
     const handleResume = async () => {
         void audioEngine.unlock();
-        await resume(selectedHabitId ?? undefined);
-        audioEngine.playTick();
+        try {
+            await resume(selectedHabitId ?? undefined);
+            audioEngine.playTick();
+        } catch (e) {
+            logError(`恢复计时失败: ${e}`);
+        }
     };
 
     const handleFinish = async () => {
@@ -290,7 +298,11 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
     const handleReset = async () => {
         audioEngine.stopTick();
-        await reset();
+        try {
+            await reset();
+        } catch (e) {
+            logError(`重置计时失败: ${e}`);
+        }
     };
 
     const handleSkipToNext = () => {

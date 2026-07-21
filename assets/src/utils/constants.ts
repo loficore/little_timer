@@ -49,6 +49,13 @@ export const TIMER_MODES = {
 // 页面类型
 export type Page = "timer" | "habits" | "stats" | "settings";
 
+// 允许的壁纸域名白名单
+export const ALLOWED_WALLPAPER_DOMAINS = [
+  "imgur.com",
+  "unsplash.com",
+  "picsum.photos",
+] as const;
+
 // 壁纸回退
 export const WALLPAPER_FALLBACK_GRADIENT =
   "linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 50%, #0d0d0d 100%)";
@@ -66,6 +73,27 @@ export function resolveWallpaperUrl(value: string): string {
         return `/api/wallpapers/${filename}`;
     }
     return value;
+}
+
+/**
+ * 校验壁纸 URL 是否安全
+ * @param url wallpaper URL
+ * @returns 是否允许
+ */
+export function isAllowedWallpaperUrl(url: string): boolean {
+    // 本地路径允许
+    if (url.startsWith("/")) return true;
+    // 必须 http/https
+    if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
+    // 域名白名单
+    try {
+        const hostname = new URL(url).hostname;
+        return ALLOWED_WALLPAPER_DOMAINS.some(
+            (d) => hostname === d || hostname.endsWith("." + d)
+        );
+    } catch {
+        return false;
+    }
 }
 
 // API 端点

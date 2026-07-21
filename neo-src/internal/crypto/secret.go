@@ -30,6 +30,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"little-timer/internal/log"
 )
 
 // SecretError mirrors `pub const SecretError = error{...}` in secret_storage.zig.
@@ -103,6 +105,7 @@ func New(filePath string) *SecretStorage {
 // this on an existing store re-encrypts the on-disk blob with the new
 // password.  Matches the Zig `setMasterPassword` semantics.
 func (s *SecretStorage) SetMasterPassword(password []byte) error {
+	log.Info("SetMasterPassword: success")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,6 +124,8 @@ func (s *SecretStorage) Unlock(password []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	log.Info("Unlock: attempt", "failed_attempts", s.failedAttempts)
+
 	if s.lockedUntilUnix > time.Now().Unix() {
 		return fmt.Errorf("%w: locked until %d", ErrSecretLocked, s.lockedUntilUnix)
 	}
@@ -130,11 +135,13 @@ func (s *SecretStorage) Unlock(password []byte) error {
 		if s.failedAttempts >= MaxUnlockAttempts {
 			s.lockedUntilUnix = time.Now().Unix() + LockoutDurationSeconds
 		}
+		log.Error("Unlock: failed", "error", err.Error())
 		return err
 	}
 
 	s.failedAttempts = 0
 	s.lockedUntilUnix = 0
+
 	return nil
 }
 

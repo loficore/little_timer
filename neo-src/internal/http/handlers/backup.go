@@ -52,6 +52,7 @@ func handleBackupConfigGet(c *gin.Context) {
 		"webdav_url":           cfg.WebDAVURL,
 		"webdav_username":      cfg.WebDAVUsername,
 		"webdav_password":      mask(cfg.WebDAVPassword),
+		"webdav_path_prefix":   cfg.WebDAVPathPrefix,
 		"s3_endpoint":          cfg.S3Endpoint,
 		"s3_bucket":            cfg.S3Bucket,
 		"s3_region":            cfg.S3Region,

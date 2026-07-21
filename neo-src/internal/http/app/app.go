@@ -16,11 +16,14 @@
 package app
 
 import (
+	"path/filepath"
+
 	"sync"
 	"time"
 
 	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
+	"little-timer/internal/log"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
@@ -211,10 +214,7 @@ func (a *App) SaveProgressLocked() {
 
 func (a *App) ensureSecrets() *crypto.SecretStorage {
 	if a.secrets == nil {
-		// ponytail: secrets live in-memory only here.  Persistent
-		// storage wiring lands once the user-data dir decision lands
-		// (W6+).
-		a.secrets = crypto.New("")
+		a.secrets = crypto.New(filepath.Join(filepath.Dir(a.DBPath), "secret.db"))
 	}
 	return a.secrets
 }
@@ -247,15 +247,19 @@ func (a *App) IsUnlocked() bool {
 func (a *App) UnlockCredentials(password string) domain.UnlockResult {
 	cfg := a.Settings.BackupConfig()
 	if !a.HasMasterPassword() {
+		log.Info("UnlockCredentials: no master password")
 		// No master password: always succeed.
 		cfg.CredentialLockedUntil = 0
 		cfg.CredentialsUnlockTime = time.Now().Unix()
 		_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
 		return domain.UnlockResult{Success: true, LockedUntil: 0}
 	}
-	if err := a.ensureSecrets().Unlock([]byte(password)); err != nil {
+	err := a.ensureSecrets().Unlock([]byte(password))
+	if err != nil {
+		log.Error("UnlockCredentials: failed", "error", err.Error())
 		return domain.UnlockResult{Success: false, LockedUntil: a.ensureSecrets().LockoutUntil()}
 	}
+	log.Info("UnlockCredentials: success")
 	cfg.CredentialLockedUntil = 0
 	cfg.CredentialsUnlockTime = time.Now().Unix()
 	_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
@@ -270,8 +274,10 @@ func (a *App) SetMasterPassword(password string) error {
 		return errPasswordTooShort
 	}
 	if err := a.ensureSecrets().SetMasterPassword([]byte(password)); err != nil {
+		log.Error("SetMasterPassword: failed", "error", err.Error())
 		return err
 	}
+	log.Info("SetMasterPassword: success")
 	cfg := a.Settings.BackupConfig()
 	cfg.HasMasterPassword = true
 	cfg.CredentialLockedUntil = 0
@@ -293,6 +299,7 @@ func (a *App) GetMasterPasswordStatus() domain.MasterPasswordStatus {
 // LockCredentials mirrors the body of `handleBackupLock` — sets the
 // lockout to "now+1s" and clears the in-memory secrets cache.
 func (a *App) LockCredentials() {
+	log.Info("LockCredentials: success")
 	cfg := a.Settings.BackupConfig()
 	cfg.CredentialLockedUntil = time.Now().Unix() + 1
 	_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))

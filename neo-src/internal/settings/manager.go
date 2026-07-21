@@ -327,6 +327,9 @@ func (sm *SettingsManager) UpdateBackupConfigFromJSON(jsonStr string) error {
 	if v, ok := raw["s3_path_prefix"].(string); ok {
 		sm.backupConfig.S3PathPrefix = v
 	}
+	if v, ok := raw["webdav_path_prefix"].(string); ok {
+		sm.backupConfig.WebDAVPathPrefix = v
+	}
 	if v, ok := raw["has_master_password"].(bool); ok {
 		sm.backupConfig.HasMasterPassword = v
 	}

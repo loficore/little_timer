@@ -39,6 +39,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
     webdav_url: config?.backup_webdav_url ?? '',
     webdav_username: config?.backup_webdav_username ?? '',
     webdav_password: config?.backup_webdav_password ?? '',
+    webdav_path_prefix: config?.backup_webdav_path_prefix ?? 'little_timer/',
     s3_endpoint: config?.backup_s3_endpoint ?? '',
     s3_bucket: config?.backup_s3_bucket ?? '',
     s3_region: config?.backup_s3_region ?? '',
@@ -57,6 +58,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       webdav_url: config?.backup_webdav_url ?? '',
       webdav_username: config?.backup_webdav_username ?? '',
       webdav_password: config?.backup_webdav_password ?? '',
+      webdav_path_prefix: config?.backup_webdav_path_prefix ?? 'little_timer/',
       s3_endpoint: config?.backup_s3_endpoint ?? '',
       s3_bucket: config?.backup_s3_bucket ?? '',
       s3_region: config?.backup_s3_region ?? '',
@@ -349,7 +351,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
               >
                 {masterPasswordStatus.unlocked
                   ? t("master_password.lock")
-                  : t("master_password.unlocked")}
+                  : t("master_password.unlock")}
               </button>
             )}
           </div>
@@ -405,6 +407,18 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
               className="input input-bordered w-full"
               value={backupConfig.webdav_password || ''}
               onChange={(e) => handleConfigChange('webdav_password', e.currentTarget.value)}
+            />
+          </div>
+          <div className="form-control">
+            <label className="label">
+              <span className="label-text">路径前缀</span>
+            </label>
+            <input
+              type="text"
+              className="input input-bordered w-full"
+              value={backupConfig.webdav_path_prefix ?? 'little_timer/'}
+              onChange={(e) => handleConfigChange('webdav_path_prefix', e.currentTarget.value)}
+              placeholder="little_timer/"
             />
           </div>
         </>

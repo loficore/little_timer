@@ -15,6 +15,7 @@ package backup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"little-timer/internal/domain"
+	"little-timer/internal/log"
 	"little-timer/internal/storage"
 )
 
@@ -82,7 +84,7 @@ func buildAdapter(ctx context.Context, cfg domain.BackupConfig, backupDir string
 			URL:      cfg.WebDAVURL,
 			Username: cfg.WebDAVUsername,
 			Password: cfg.WebDAVPassword,
-			BasePath: "/",
+			BasePath: cfg.WebDAVPathPrefix,
 		}), nil
 	case domain.BackupTargetS3:
 		return NewS3Adapter(ctx, S3Config{
@@ -132,16 +134,29 @@ func (m *BackupManager) CreateBackup() (string, error) {
 	// surface `wal_checkpoint` via stdlib; the SQL "PRAGMA wal_checkpoint
 	// (TRUNCATE)" is the canonical hook.
 	if _, err := m.sqlite.DB().Exec("PRAGMA wal_checkpoint(TRUNCATE);"); err != nil {
+		log.Error("CreateBackup: checkpoint failed", "error", err.Error())
 		return "", fmt.Errorf("%w: wal_checkpoint: %v", ErrBackupFailed, err)
 	}
 
 	if err := m.adapter.Backup(m.dbPath, name); err != nil {
+		log.Error("CreateBackup: backup failed", "error", err.Error())
 		return "", err
 	}
+
+	if m.adapter.Target() == "webdav" { // Use string comparison for backup.BackupTarget vs domain.BackupTargetType
+		manifest, err := m.buildManifest(name, ts)
+		if err != nil {
+			log.Error("CreateBackup: build manifest failed", "error", err.Error())
+		} else if err := m.adapter.WriteManifest("", manifest); err != nil {
+			log.Error("CreateBackup: write manifest failed", "error", err.Error())
+		}
+	}
+
 	if err := m.cleanupOldBackups(); err != nil {
 		// Retention is best-effort; log but don't fail the backup.
-		fmt.Fprintf(os.Stderr, "backup: cleanup: %v\n", err)
+		log.Error("CreateBackup: cleanup failed", "error", err.Error())
 	}
+	log.Info("CreateBackup: success", "name", name)
 	return name, nil
 }
 
@@ -168,6 +183,37 @@ func (m *BackupManager) RestoreFromBackup(name string) error {
 		return err
 	}
 	return nil
+}
+
+// buildManifest creates the manifest JSON string for WriteManifest.
+func (m *BackupManager) buildManifest(backupName string, timestamp int64) (string, error) {
+	backups, err := m.adapter.List()
+	if err != nil {
+		return "", fmt.Errorf("list backups: %w", err)
+	}
+
+	backups = append(backups, BackupInfo{
+		Name:      backupName,
+		Timestamp: timestamp,
+		SizeBytes: 0, // Caller should populate from source file if needed.
+	})
+
+	manifest := struct {
+		Version  int           `json:"version"`
+		Backups  []BackupInfo  `json:"backups"`
+		DBVersion string       `json:"db_version"`
+	}{
+		Version:  1,
+		Backups:  backups,
+		DBVersion: "1.0",
+	}
+
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return "", fmt.Errorf("marshal manifest: %w", err)
+	}
+
+	return string(data), nil
 }
 
 // swapDatabase closes the SQLite connection, replaces the file, then

@@ -71,7 +71,7 @@ go-dev:
         sleep 3
 
         echo "=== 启动 Go 后端 ==="
-        cd {{go_src}} && go build -o bin/server ./cmd/server && bin/server serve --http-only &
+        cd {{go_src}} && go build -o bin/server ./cmd/server && bin/server serve --http-only 2>&1 &
         GO_PID=$!
 
         echo ""

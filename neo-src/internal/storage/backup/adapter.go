@@ -110,6 +110,8 @@ type BackupAdapter interface {
 	Delete(backupName string) error
 	// TestConnection validates credentials / network reachability.
 	TestConnection() error
+	// WriteManifest writes the backup manifest JSON to the adapter's base path.
+	WriteManifest(path string, data string) error
 	// Target returns the discriminator (local / webdav / s3).
 	Target() BackupTarget
 }
@@ -206,7 +208,11 @@ func (l *LocalAdapter) List() ([]BackupInfo, error) {
 			SizeBytes: uint64(info.Size()),
 		})
 	}
-	return out, nil
+		return out, nil
+}
+
+func (l *LocalAdapter) WriteManifest(path, data string) error {
+	return nil
 }
 
 // -----------------------------------------------------------------------------
@@ -282,6 +288,25 @@ func (w *WebDAVAdapter) Backup(srcPath, backupName string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("%w: PUT status %d", ErrBackupFailed, resp.StatusCode)
+	}
+	return nil
+}
+
+func (w *WebDAVAdapter) WriteManifest(path, data string) error {
+	url := w.joinURL(w.basePathWithSlash(), "manifest.json")
+	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("%w: build PUT: %v", ErrBackupFailed, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	w.applyAuth(req)
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: PUT manifest: %v", ErrNetworkError, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("%w: PUT manifest status %d", ErrBackupFailed, resp.StatusCode)
 	}
 	return nil
 }
@@ -562,6 +587,10 @@ func (s *S3Adapter) Delete(backupName string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrBackupFailed, err)
 	}
+	return nil
+}
+
+func (s *S3Adapter) WriteManifest(path, data string) error {
 	return nil
 }
 

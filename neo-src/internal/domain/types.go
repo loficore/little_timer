@@ -406,6 +406,7 @@ type BackupConfig struct {
 	WebDAVURL      string `json:"webdav_url"`
 	WebDAVUsername string `json:"webdav_username"`
 	WebDAVPassword string `json:"webdav_password"` // encrypted at rest
+	WebDAVPathPrefix string `json:"webdav_path_prefix"`
 
 	// S3-only.
 	S3Endpoint   string `json:"s3_endpoint"`
@@ -434,6 +435,7 @@ func NewDefaultBackupConfig() BackupConfig {
 		WebDAVURL:      "",
 		WebDAVUsername: "",
 		WebDAVPassword: "",
+		WebDAVPathPrefix: "little_timer/",
 		S3Endpoint:     "",
 		S3Bucket:       "",
 		S3Region:       "",

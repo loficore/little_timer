@@ -21,6 +21,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -183,7 +184,7 @@ func handleStart(c *gin.Context) {
 			}
 			// Paused branch — resume.
 			state := a.Clock.Update()
-			if state.IsPaused() && !state.IsFinished() || row.IsPaused {
+			if state.IsPaused() && (!state.IsFinished() || row.IsPaused) {
 				pausedTotal := row.PausedTotalSeconds
 				now := time.Now().Unix()
 				if row.PauseStartedAt != nil && now > *row.PauseStartedAt {
@@ -215,7 +216,7 @@ func handleStart(c *gin.Context) {
 
 	sessionID, err := a.CreateTimerSession(req.HabitID, mode, work, rest, loop)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to create timer session"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create timer session"})
 		return
 	}
 	a.CurrentHabitID = req.HabitID
@@ -279,7 +280,9 @@ func handleFinish(c *gin.Context) {
 		state := a.Clock.Update()
 		elapsedSeconds := state.GetElapsedSeconds()
 		if habitID != nil && elapsedSeconds > 0 {
-			_, _ = a.SQLite.Timers().CreateSession(*habitID, elapsedSeconds, 1, todayString())
+			if _, err := a.SQLite.Timers().CreateSession(*habitID, elapsedSeconds, 1, todayString()); err != nil {
+				log.Printf("failed to create fallback session: %v", err)
+			}
 		}
 		a.ResetTimerSession()
 		c.JSON(http.StatusOK, gin.H{
@@ -290,7 +293,9 @@ func handleFinish(c *gin.Context) {
 	}
 
 	if habitID != nil && elapsed > 0 {
-		_, _ = a.SQLite.Timers().CreateSession(*habitID, elapsed, 1, todayString())
+		if _, err := a.SQLite.Timers().CreateSession(*habitID, elapsed, 1, todayString()); err != nil {
+			log.Printf("failed to create session at end: %v", err)
+		}
 	}
 	a.ResetTimerSession()
 
@@ -407,7 +412,7 @@ func handleUpdateConfig(c *gin.Context) {
 	a := appFromCtx(c)
 	var req domain.ClockTaskConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "invalid json"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid json"})
 		return
 	}
 	// Reuse the same UserChangeConfigEvent path the Zig source uses.

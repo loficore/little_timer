@@ -86,11 +86,13 @@ func registerHabits(r *gin.Engine) {
 	g.GET("/habits", handlers.HabitList)
 	g.POST("/habits", handlers.HabitCreate)
 	g.PUT("/habits/:id", handlers.HabitUpdate)
-	g.DELETE("/habits/:id", handlers.HabitDelete)
-	g.GET("/habits/:id/detail", handlers.HabitDetail)
+  g.DELETE("/habits/:id", handlers.HabitDelete)
+    g.GET("/habits/:id/detail", handlers.HabitDetail)
+    g.GET("/habits/:id/stats", handlers.HabitStats)
 
-	g.GET("/sessions", handlers.SessionList)
-	g.POST("/sessions", handlers.SessionCreate)
+    g.GET("/sessions", handlers.SessionList)
+    g.POST("/sessions", handlers.SessionCreate)
+    g.DELETE("/sessions/:id", handlers.SessionDelete)
 
 	g.GET("/timer-sessions", handlers.TimerSessionList)
 	g.POST("/timer-sessions", handlers.TimerSessionCreate)

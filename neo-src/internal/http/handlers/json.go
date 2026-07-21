@@ -18,11 +18,19 @@ func validBackupName(name string) bool {
 	if name == "" {
 		return false
 	}
+	// Reject path traversal ".."
 	if strings.Contains(name, "..") {
 		return false
 	}
+	// Reject / or \ anywhere (no path separators allowed)
 	if strings.ContainsAny(name, "/\\") {
 		return false
+	}
+	// Reject control characters
+	for _, c := range name {
+		if c < 0x20 {
+			return false
+		}
 	}
 	return true
 }

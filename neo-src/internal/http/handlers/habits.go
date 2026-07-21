@@ -24,6 +24,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
@@ -31,6 +32,50 @@ import (
 
 	"little-timer/internal/storage"
 )
+
+// -----------------------------------------------------------------------------
+// Helper: pagination parsing
+// -----------------------------------------------------------------------------
+
+// parsePagination extracts limit and offset from query params.
+// Default: limit=100, offset=0. Caps at 1000. Returns (limit, offset, valid).
+func parsePagination(c *gin.Context) (limit, offset int, valid bool) {
+	limitStr := c.DefaultQuery("limit", "100")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 0 {
+		return 0, 0, false
+	}
+	offset, err = strconv.Atoi(offsetStr)
+	if err != nil || offset < 0 {
+		return 0, 0, false
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	return limit, offset, true
+}
+
+// habitNameExistsInSet checks if a habit with the given name already exists in the specified set.
+// excludeHabitID is used to skip the habit when checking for duplicates during updates.
+func habitNameExistsInSet(c *gin.Context, setID int64, name string, excludeHabitID *int64) (bool, error) {
+	a := appFromCtx(c)
+	const limit, offset = 100, 0
+	habits, err := a.SQLite.Habits().ListBySet(setID, limit, offset)
+	if err != nil {
+		return false, err
+	}
+	for _, h := range habits {
+		if excludeHabitID != nil && h.ID == *excludeHabitID {
+			continue
+		}
+		if h.Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // -----------------------------------------------------------------------------
 // /api/habit-sets
@@ -41,18 +86,18 @@ import (
 func handleHabitSetCreate(c *gin.Context) {
 	a := appFromCtx(c)
 
-	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Color       string `json:"color"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid JSON"})
-		return
-	}
-	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Missing name"})
-		return
+		var req struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Color       string `json:"color"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid JSON"})
+			return
+		}
+		if req.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Missing name"})
+			return
 	}
 	if req.Color == "" {
 		req.Color = "#6366f1"
@@ -60,7 +105,7 @@ func handleHabitSetCreate(c *gin.Context) {
 
 	id, err := a.SQLite.HabitSets().Create(req.Name, req.Description, req.Color)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to create habit set"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create habit set"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -74,9 +119,14 @@ func handleHabitSetCreate(c *gin.Context) {
 // handleHabitSetList mirrors `handleGetHabitSets`.
 func handleHabitSetList(c *gin.Context) {
 	a := appFromCtx(c)
-	rows, err := a.SQLite.HabitSets().List()
+	limit, offset, ok := parsePagination(c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid pagination params"})
+		return
+	}
+	rows, err := a.SQLite.HabitSets().List(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to get habit sets"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to get habit sets"})
 		return
 	}
 	c.JSON(http.StatusOK, rows)
@@ -87,7 +137,7 @@ func handleHabitSetUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/habit-sets/")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid id"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
 		return
 	}
 
@@ -98,18 +148,18 @@ func handleHabitSetUpdate(c *gin.Context) {
 		Wallpaper   string `json:"wallpaper"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid JSON"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid JSON"})
 		return
 	}
 	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Missing name"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Missing name"})
 		return
 	}
 	if req.Color == "" {
 		req.Color = "#6366f1"
 	}
 	if err := a.SQLite.HabitSets().Update(id, req.Name, req.Description, req.Color, req.Wallpaper); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to update habit set"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to update habit set"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -126,11 +176,11 @@ func handleHabitSetDelete(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/habit-sets/")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid id"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
 		return
 	}
 	if err := a.SQLite.HabitSets().Delete(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to delete habit set"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to delete habit set"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -152,11 +202,11 @@ func handleHabitCreate(c *gin.Context) {
 		Color       string `json:"color"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid JSON"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid JSON"})
 		return
 	}
 	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Missing name"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Missing name"})
 		return
 	}
 	if req.GoalSeconds == 0 {
@@ -166,9 +216,19 @@ func handleHabitCreate(c *gin.Context) {
 		req.Color = "#6366f1"
 	}
 
+	exists, err := habitNameExistsInSet(c, req.SetID, req.Name, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "check failed"})
+		return
+	}
+	if exists {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "habit name already exists in this set"})
+		return
+	}
+
 	id, err := a.SQLite.Habits().Create(req.SetID, req.Name, req.GoalSeconds, req.Color)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to create habit"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create habit"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -184,23 +244,28 @@ func handleHabitCreate(c *gin.Context) {
 // narrows the list to a single habit set.
 func handleHabitList(c *gin.Context) {
 	a := appFromCtx(c)
+	limit, offset, ok := parsePagination(c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid pagination params"})
+		return
+	}
 	if setIDStr := c.Query("set_id"); setIDStr != "" {
 		setID, err := strconv.ParseInt(setIDStr, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid set_id"})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid set_id"})
 			return
 		}
-		rows, err := a.SQLite.Habits().ListBySet(setID)
+		rows, err := a.SQLite.Habits().ListBySet(setID, limit, offset)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to get habits"})
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to get habits"})
 			return
 		}
 		c.JSON(http.StatusOK, rows)
 		return
 	}
-	rows, err := a.SQLite.Habits().List()
+	rows, err := a.SQLite.Habits().List(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to get habits"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to get habits"})
 		return
 	}
 	c.JSON(http.StatusOK, rows)
@@ -211,7 +276,7 @@ func handleHabitUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/habits/")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid id"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
 		return
 	}
 
@@ -222,11 +287,11 @@ func handleHabitUpdate(c *gin.Context) {
 		Wallpaper   string `json:"wallpaper"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid JSON"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid JSON"})
 		return
 	}
 	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Missing name"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Missing name"})
 		return
 	}
 	if req.GoalSeconds == 0 {
@@ -235,8 +300,25 @@ func handleHabitUpdate(c *gin.Context) {
 	if req.Color == "" {
 		req.Color = "#6366f1"
 	}
+
+	row, err := a.SQLite.Habits().GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Habit not found"})
+		return
+	}
+
+	exists, err := habitNameExistsInSet(c, row.SetID, req.Name, &id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "check failed"})
+		return
+	}
+	if exists {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "habit name already exists in this set"})
+		return
+	}
+
 	if err := a.SQLite.Habits().Update(id, req.Name, req.GoalSeconds, req.Color, req.Wallpaper); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to update habit"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to update habit"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -253,11 +335,11 @@ func handleHabitDelete(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/habits/")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid id"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
 		return
 	}
 	if err := a.SQLite.Habits().Delete(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to delete habit"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to delete habit"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -269,7 +351,7 @@ func handleHabitDetail(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathIDWithSuffix(c, "/api/habits/", "/detail")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid id"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
 		return
 	}
 
@@ -280,11 +362,14 @@ func handleHabitDetail(c *gin.Context) {
 
 	row, err := a.SQLite.Habits().GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"err": "Habit not found"})
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Habit not found"})
 		return
 	}
 
-	todaySeconds, _ := a.SQLite.Timers().TodaySecondsForHabit(id, date)
+	todaySeconds, err := a.SQLite.Timers().TodaySecondsForHabit(id, date)
+	if err != nil {
+		log.Printf("failed to get today seconds for habit %d: %v", id, err)
+	}
 	var progressPercent int64
 	if row.GoalSeconds > 0 {
 		progressPercent = (todaySeconds * 100) / row.GoalSeconds
@@ -314,7 +399,7 @@ func handleSessionCreate(c *gin.Context) {
 		Count           int64 `json:"count"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid JSON"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid JSON"})
 		return
 	}
 	if req.Count == 0 {
@@ -323,7 +408,7 @@ func handleSessionCreate(c *gin.Context) {
 
 	id, err := a.SQLite.Timers().CreateSession(req.HabitID, req.DurationSeconds, req.Count, todayString())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to create session"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create session"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -334,11 +419,55 @@ func handleSessionCreate(c *gin.Context) {
 	})
 }
 
+// SessionDelete mirrors `handleDeleteSession`.
+func SessionDelete(c *gin.Context) {
+	a := appFromCtx(c)
+	id, err := pathID(c, "/api/sessions/")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
+		return
+	}
+	if err := a.SQLite.Timers().DeleteSession(id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Session not found"})
+		return
+	}
+	c.JSON(http.StatusNoContent, nil)
+}
+
+// handleHabitStats returns aggregated stats for a habit.
+func HabitStats(c *gin.Context) {
+	a := appFromCtx(c)
+	id, err := pathIDWithSuffix(c, "/api/habits/", "/stats")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
+		return
+	}
+
+	// Verify habit exists
+	_, err = a.SQLite.Habits().GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Habit not found"})
+		return
+	}
+
+	stats, err := a.SQLite.Timers().GetHabitStats(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to get stats"})
+		return
+	}
+	c.JSON(http.StatusOK, stats)
+}
+
 // handleSessionList mirrors `handleGetSessions`.  Supports three query
 // shapes (matching the Zig source): `?date=YYYY-MM-DD`,
 // `?start_date=…&end_date=…`, or no date → today.
 func handleSessionList(c *gin.Context) {
 	a := appFromCtx(c)
+	limit, offset, ok := parsePagination(c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid pagination params"})
+		return
+	}
 	date := c.Query("date")
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
@@ -349,14 +478,14 @@ func handleSessionList(c *gin.Context) {
 	)
 	switch {
 	case startDate != "" && endDate != "":
-		rows, err = a.SQLite.Timers().ListSessionsByDateRange(startDate, endDate)
+		rows, err = a.SQLite.Timers().ListSessionsByDateRange(startDate, endDate, limit, offset)
 	case date != "":
-		rows, err = a.SQLite.Timers().ListSessionsByDate(date)
+		rows, err = a.SQLite.Timers().ListSessionsByDate(date, limit, offset)
 	default:
-		rows, err = a.SQLite.Timers().ListSessionsByDate(todayString())
+		rows, err = a.SQLite.Timers().ListSessionsByDate(todayString(), limit, offset)
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to get sessions"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to get sessions"})
 		return
 	}
 	c.JSON(http.StatusOK, rows)
@@ -365,8 +494,6 @@ func handleSessionList(c *gin.Context) {
 // -----------------------------------------------------------------------------
 // /api/timer-sessions
 // -----------------------------------------------------------------------------
-
-// handleTimerSessionCreate mirrors `handleCreateTimerSession` (the
 // Zig source uses the same body shape as `POST /api/start` minus the
 // paused/finished fields).
 func handleTimerSessionCreate(c *gin.Context) {
@@ -380,7 +507,7 @@ func handleTimerSessionCreate(c *gin.Context) {
 		LoopCount    int64  `json:"loop_count,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid JSON"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid JSON"})
 		return
 	}
 	if req.WorkDuration == 0 {
@@ -392,7 +519,7 @@ func handleTimerSessionCreate(c *gin.Context) {
 
 	id, err := a.SQLite.Timers().CreateTimerSession(req.HabitID, req.Mode, req.WorkDuration, req.RestDuration, req.LoopCount)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to create timer session"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create timer session"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id})
@@ -406,12 +533,12 @@ func handleTimerSessionList(c *gin.Context) {
 	if idStr := c.Query("id"); idStr != "" {
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid id"})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
 			return
 		}
 		row, err := a.SQLite.Timers().GetTimerSessionByID(id)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"err": "Timer session not found"})
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Timer session not found"})
 			return
 		}
 		c.JSON(http.StatusOK, row)
@@ -419,7 +546,7 @@ func handleTimerSessionList(c *gin.Context) {
 	}
 	row, err := a.SQLite.Timers().GetActiveTimerSession()
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"err": "No active timer session"})
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "No active timer session"})
 		return
 	}
 	c.JSON(http.StatusOK, row)
@@ -430,7 +557,7 @@ func handleTimerSessionUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/timer-sessions/")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid id"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
 		return
 	}
 
@@ -446,7 +573,7 @@ func handleTimerSessionUpdate(c *gin.Context) {
 		InRest             bool   `json:"in_rest"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid JSON"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid JSON"})
 		return
 	}
 	now := nowUnix()
@@ -456,7 +583,7 @@ func handleTimerSessionUpdate(c *gin.Context) {
 		req.IsRunning, req.IsPaused, req.IsFinished,
 		req.CurrentRound, req.InRest,
 	); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to update timer session"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to update timer session"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -467,11 +594,11 @@ func handleTimerSessionDelete(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/timer-sessions/")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "Invalid id"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid id"})
 		return
 	}
 	if err := a.SQLite.Timers().DeleteTimerSession(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "Failed to delete timer session"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to delete timer session"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})

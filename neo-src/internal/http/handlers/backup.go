@@ -442,7 +442,7 @@ func handleAuthEnable(c *gin.Context) {
 	newAuth.AuthEnabled = true
 	newAuth.AuthToken = token
 	if err := a.Settings.UpdateAuth(newAuth); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "save failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "save failed"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "token": token})
@@ -454,7 +454,7 @@ func handleAuthDisable(c *gin.Context) {
 	newAuth := a.Settings.Config().Auth
 	newAuth.AuthEnabled = false
 	if err := a.Settings.UpdateAuth(newAuth); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "save failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "save failed"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})

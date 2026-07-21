@@ -1,14 +1,14 @@
 # === Build Outputs ===
-.zig-cache/
-.ziglng/
-zig-out/
-test-tmp/
-test_tmp/
-temp.txt
+/.zig-cache/
+/.ziglng/
+/zig-out/
+/test-tmp/
+/test_tmp/
+/temp.txt
 
 # === Go ===
-neo-src/bin/
-neo-src/server
+/neo-src/bin/
+/neo-src/server
 
 # === Node / Frontend ===
 node_modules/
@@ -17,6 +17,11 @@ dist/
 dist-ssr/
 *.local
 *.db
+
+# === Configs ===
+/*.json
+/*.jsonc
+.env
 
 # === Android ===
 android/.gradle/
@@ -31,7 +36,7 @@ build/android/
 # === IDE / Editor ===
 .vscode/
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
@@ -40,12 +45,11 @@ build/android/
 *.sw?
 *~
 
-# === OS ===
+# === OS & Temp Files ===
 core.*
 *.bak
 *.backup
 *.tmp
-*.swp
 
 # === Logs ===
 logs/
@@ -57,21 +61,15 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # === Scripts ===
-# Note: scripts/ dir is tracked, *.sh exclusion + re-includes is redundant
-# but kept for safety if someone adds .sh files outside scripts/
 *.sh
-!scripts/
-!scripts/*.sh
-!scripts/**/*.sh
-!android-build.sh
+!/scripts/
+!/android-build.sh
 
 # === CI/CD ===
-.github/*
-!.github/workflows/
-!.github/workflows/**
+/.github/*
+!/.github/workflows
 
 # === Project Specific ===
-.env
 AGENTS.md
 cliff.toml
 
@@ -82,16 +80,14 @@ neo-src/cmd/server/assets/bindings/
 neo-src/frontend/bindings/
 neo-src/cmd/server/assets/index.html
 
-# Visual regression test
-assets/src/test/visual/specs/snapshots/
-!assets/src/test/visual/specs/snapshots/
-
-# === Agent / Tooling ===
+# === Agent & Tooling ===
 .agents/
 .opencode/
 .omo/
 .playwright-mcp/
 roo/
-assets/playwright-report
-assets/test-results
+assets/playwright-report/
+assets/test-results/
 example/
+
+.tool-versions

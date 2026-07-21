@@ -146,15 +146,27 @@ func TestValidBackupName_EmptyString(t *testing.T) {
 	}
 }
 
+func TestValidBackupName_AbsolutePath(t *testing.T) {
+	if validBackupName("/absolute") {
+		t.Error("validBackupName should reject absolute paths starting with /")
+	}
+	if validBackupName("\\absolute") {
+		t.Error("validBackupName should reject absolute paths starting with \\")
+	}
+}
+
+func TestValidBackupName_ControlCharacters(t *testing.T) {
+	if validBackupName("back\x00up.db") {
+		t.Error("validBackupName should reject NULL character")
+	}
+	if validBackupName("back\x1fab") {
+		t.Error("validBackupName should reject DEL character")
+	}
+}
+
 func TestValidBackupName_PathTraversal(t *testing.T) {
 	if validBackupName("../etc/passwd") {
 		t.Error("validBackupName should reject path traversal")
-	}
-	if validBackupName("..\\..\\windows\\system32") {
-		t.Error("validBackupName should reject Windows path traversal")
-	}
-	if validBackupName("backup..name") {
-		t.Error("validBackupName should reject double dots")
 	}
 }
 

@@ -360,7 +360,8 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 	}
 
 	// List → should contain exactly one row matching.
-	sets, err := m.HabitSets().List()
+	const limit, offset = 100, 0
+	sets, err := m.HabitSets().List(limit, offset)
 	if err != nil {
 		t.Fatalf("HabitSets.List: %v", err)
 	}
@@ -371,7 +372,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 	}
 
 	// Habits scoped to the set.
-	habits, err := m.Habits().ListBySet(setID)
+	habits, err := m.Habits().ListBySet(setID, limit, offset)
 	if err != nil {
 		t.Fatalf("Habits.ListBySet: %v", err)
 	}
@@ -404,7 +405,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 		t.Errorf("Timers.CreateSession: got id %d, want > 0", sessionID)
 	}
 
-	totals, err := m.Timers().ListSessionsByDate(today)
+	totals, err := m.Timers().ListSessionsByDate(today, limit, offset)
 	if err != nil {
 		t.Fatalf("Timers.ListSessionsByDate: %v", err)
 	}
@@ -429,7 +430,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 	}
 
 	// Cascade check: the session row is gone too.
-	after, err := m.Timers().ListSessionsByDate(today)
+	after, err := m.Timers().ListSessionsByDate(today, limit, offset)
 	if err != nil {
 		t.Fatalf("ListSessionsByDate after delete: %v", err)
 	}

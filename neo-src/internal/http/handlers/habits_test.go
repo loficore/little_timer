@@ -503,6 +503,80 @@ func TestHandleHabitUpdate_MissingName(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Dedup Tests
+// =============================================================================
+
+func TestHandleHabitCreate_DuplicateName(t *testing.T) {
+	a := newTestApp(t)
+	setID := newHabitSetID(t, a, "DedupSet")
+	// Create first habit
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/habits",
+		strings.NewReader(`{"set_id":`+itoa(setID)+`,"name":"Read","goal_seconds":600}`))
+	c.Set("app", a)
+	handleHabitCreate(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first create: %d", w.Code)
+	}
+	// Try duplicate name in same set
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodPost, "/api/habits",
+		strings.NewReader(`{"set_id":`+itoa(setID)+`,"name":"Read","goal_seconds":600}`))
+	c2.Set("app", a)
+	handleHabitCreate(c2)
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("duplicate: got %d, want 400", w2.Code)
+	}
+}
+
+func TestHandleHabitCreate_DuplicateNameCrossSet(t *testing.T) {
+	a := newTestApp(t)
+	setID1 := newHabitSetID(t, a, "DedupSet1")
+	setID2 := newHabitSetID(t, a, "DedupSet2")
+	// Create habit in set1
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/habits",
+		strings.NewReader(`{"set_id":`+itoa(setID1)+`,"name":"Read","goal_seconds":600}`))
+	c.Set("app", a)
+	handleHabitCreate(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first create: %d", w.Code)
+	}
+	// Same name in set2 → should succeed
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodPost, "/api/habits",
+		strings.NewReader(`{"set_id":`+itoa(setID2)+`,"name":"Read","goal_seconds":600}`))
+	c2.Set("app", a)
+	handleHabitCreate(c2)
+	if w2.Code != http.StatusOK {
+		t.Errorf("cross-set duplicate: got %d, want 200", w2.Code)
+	}
+}
+
+func TestHandleHabitUpdate_DuplicateName(t *testing.T) {
+	a := newTestApp(t)
+	setID := newHabitSetID(t, a, "UpdDedupSet")
+	// Create two habits
+	habit1ID := newHabitID(t, a, setID, "Book")
+	_ = newHabitID(t, a, setID, "Movie")
+
+	// Update habit1's name to habit2's name
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/habits/"+itoa(habit1ID),
+		strings.NewReader(`{"name":"Movie","goal_seconds":600}`))
+	c.Set("app", a)
+	handleHabitUpdate(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("update to duplicate: got %d, want 400", w.Code)
+	}
+}
+
 func TestHandleHabitDelete(t *testing.T) {
 	a := newTestApp(t)
 	setID := newHabitSetID(t, a, "Del")
@@ -973,4 +1047,246 @@ func itoa(i int64) string {
 		buf[pos] = '-'
 	}
 	return string(buf[pos:])
+}
+
+// =============================================================================
+// /api/sessions DELETE & pagination
+// =============================================================================
+
+func TestHandleSessionDelete(t *testing.T) {
+	a := newTestApp(t)
+	setID := newHabitSetID(t, a, "DelSession")
+	habitID := newHabitID(t, a, setID, "DelHabit")
+
+	// Create session via handler
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/sessions",
+		strings.NewReader(`{"habit_id":`+itoa(habitID)+`,"duration_seconds":300,"count":1}`))
+	c.Set("app", a)
+	handleSessionCreate(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := int64(created["id"].(float64))
+
+	// Delete it
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodDelete, "/api/sessions/"+itoa(sessionID), nil)
+	c2.Params = gin.Params{{Key: "id", Value: itoa(sessionID)}}
+	c2.Set("app", a)
+	SessionDelete(c2)
+
+	if w2.Code != http.StatusNoContent {
+		t.Errorf("code = %d, want 204", w2.Code)
+	}
+}
+
+func TestHandleSessionDelete_NotFound(t *testing.T) {
+	a := newTestApp(t)
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/sessions/99999", nil)
+	c.Params = gin.Params{{Key: "id", Value: "99999"}}
+	c.Set("app", a)
+	SessionDelete(c)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("code = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleSessionList_Pagination(t *testing.T) {
+	a := newTestApp(t)
+	setID := newHabitSetID(t, a, "SessPag")
+	habitID := newHabitID(t, a, setID, "SessPagHabit")
+
+	// Create 3 sessions
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/sessions",
+			strings.NewReader(`{"habit_id":`+itoa(habitID)+`,"duration_seconds":100,"count":1}`))
+		c.Set("app", a)
+		handleSessionCreate(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("create failed: code=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+
+	// List with limit=2
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/api/sessions?limit=2", nil)
+	c2.Set("app", a)
+	handleSessionList(c2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("code = %d, body = %s", w2.Code, w2.Body.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(w2.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Errorf("limit=2 should return exactly 2 sessions, got %d", len(rows))
+	}
+}
+
+// =============================================================================
+// Pagination Tests
+// =============================================================================
+
+func TestHandleHabitList_Pagination(t *testing.T) {
+	a := newTestApp(t)
+	setID := newHabitSetID(t, a, "HabPagSet")
+	// Create 3 habits
+	for _, name := range []string{"HabPag1", "HabPag2", "HabPag3"} {
+		gin.SetMode(gin.TestMode)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/habits",
+			strings.NewReader(`{"set_id":`+itoa(setID)+`,"name":"`+name+`","goal_seconds":600}`))
+		c.Set("app", a)
+		handleHabitCreate(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("create habit: %d", w.Code)
+		}
+	}
+	// List with limit=2
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/api/habits?limit=2", nil)
+	c2.Set("app", a)
+	handleHabitList(c2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("list: %d", w2.Code)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(w2.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Errorf("limit=2: got %d rows, want 2", len(rows))
+	}
+}
+
+func TestHandleHabitSetList_Pagination(t *testing.T) {
+	a := newTestApp(t)
+	for _, name := range []string{"PagSet1", "PagSet2"} {
+		gin.SetMode(gin.TestMode)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/habit-sets",
+			strings.NewReader(`{"name":"`+name+`"}`))
+		c.Set("app", a)
+		handleHabitSetCreate(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("create set: %d", w.Code)
+		}
+	}
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/api/habit-sets?limit=1", nil)
+	c2.Set("app", a)
+	handleHabitSetList(c2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("list: %d", w2.Code)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(w2.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("limit=1: got %d rows, want 1", len(rows))
+	}
+}
+
+func TestHandleSessionList_PaginationInvalid(t *testing.T) {
+	a := newTestApp(t)
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/sessions?limit=invalid", nil)
+	c.Set("app", a)
+	handleSessionList(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("code = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleHabitStats(t *testing.T) {
+	a := newTestApp(t)
+	setID := newHabitSetID(t, a, "StatsSet")
+	habitID := newHabitID(t, a, setID, "StatsHabit")
+
+	// Create a session
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/sessions",
+		strings.NewReader(`{"habit_id":`+itoa(habitID)+`,"duration_seconds":3600,"count":1}`))
+	c.Set("app", a)
+	handleSessionCreate(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create session: %d", w.Code)
+	}
+
+	// Get stats
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/api/habits/"+itoa(habitID)+"/stats", nil)
+	c2.Set("app", a)
+	HabitStats(c2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("stats: got %d, want 200: %s", w2.Code, w2.Body.String())
+	}
+  var stats map[string]any
+  if err := json.Unmarshal(w2.Body.Bytes(), &stats); err != nil {
+    t.Fatalf("not JSON: %v", err)
+  }
+
+  requiredFields := []string{"total_seconds_week", "total_sessions_week", "current_streak", "longest_streak", "weekly_breakdown"}
+  for _, field := range requiredFields {
+    val, ok := stats[field]
+    if !ok {
+      t.Errorf("missing field %q in stats response", field)
+    } else if val == nil {
+      t.Errorf("field %q is null, want non-nil value", field)
+    }
+  }
+
+  if wb, ok := stats["weekly_breakdown"].(map[string]interface{}); ok {
+    _ = wb
+  } else if stats["weekly_breakdown"] != nil {
+    t.Errorf("weekly_breakdown = %T, want map", stats["weekly_breakdown"])
+  }
+}
+
+func TestHandleHabitStats_NotFound(t *testing.T) {
+	a := newTestApp(t)
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/habits/99999/stats", nil)
+	c.Set("app", a)
+	HabitStats(c)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("code = %d, want 404", w.Code)
+	}
+	var got map[string]any
+	json.Unmarshal(w.Body.Bytes(), &got)
+	if got["success"] != false {
+		t.Errorf("success = %v, want false", got["success"])
+	}
 }

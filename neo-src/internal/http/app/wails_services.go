@@ -301,7 +301,7 @@ func NewHabitService(app *App) *HabitService { return &HabitService{app: app} }
 
 // ListHabitSets mirrors handleHabitSetList.
 func (s *HabitService) ListHabitSets() (any, error) {
-	rows, err := s.app.SQLite.HabitSets().List()
+	rows, err := s.app.SQLite.HabitSets().List(100, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -363,10 +363,11 @@ func (s *HabitService) ListHabits(setID *int64) (any, error) {
 		rows []storage.HabitRow
 		err  error
 	)
+	const limit, offset = 100, 0
 	if setID != nil {
-		rows, err = s.app.SQLite.Habits().ListBySet(*setID)
+		rows, err = s.app.SQLite.Habits().ListBySet(*setID, limit, offset)
 	} else {
-		rows, err = s.app.SQLite.Habits().List()
+		rows, err = s.app.SQLite.Habits().List(limit, offset)
 	}
 	if err != nil {
 		return nil, err
@@ -458,13 +459,14 @@ func (s *HabitService) ListSessions(date string, startDate string, endDate strin
 		rows []storage.SessionRow
 		err  error
 	)
+	const limit, offset = 100, 0
 	switch {
 	case startDate != "" && endDate != "":
-		rows, err = s.app.SQLite.Timers().ListSessionsByDateRange(startDate, endDate)
+		rows, err = s.app.SQLite.Timers().ListSessionsByDateRange(startDate, endDate, limit, offset)
 	case date != "":
-		rows, err = s.app.SQLite.Timers().ListSessionsByDate(date)
+		rows, err = s.app.SQLite.Timers().ListSessionsByDate(date, limit, offset)
 	default:
-		rows, err = s.app.SQLite.Timers().ListSessionsByDate(todayString())
+		rows, err = s.app.SQLite.Timers().ListSessionsByDate(todayString(), limit, offset)
 	}
 	if err != nil {
 		return nil, err

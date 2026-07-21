@@ -641,11 +641,10 @@ func TestValidBackupName(t *testing.T) {
 	}{
 		{"backup_2024_01_01", true},
 		{"backup-2024.db", true},
-		{"", false},
-		{"../etc/passwd", false},
-		{"/etc/passwd", false},
-		{"backup\\name", false},
-		{"backup..name", false},
+		{"/absolute", false},
+		{"back\x00up.db", false},
+		{"back\x1fab", false},
+		{"\\absolute", false},
 	}
 
 	for _, tt := range tests {

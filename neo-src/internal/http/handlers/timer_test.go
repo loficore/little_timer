@@ -801,8 +801,8 @@ func TestTimer_UpdateConfig_InvalidJSON(t *testing.T) {
 		t.Fatalf("response not JSON: %v", err)
 	}
 
-	if got["err"] != "invalid json" {
-		t.Errorf("err = %v, want 'invalid json'", got["err"])
+	if got["error"] != "invalid json" {
+		t.Errorf("error = %v, want 'invalid json'", got["error"])
 	}
 }
 

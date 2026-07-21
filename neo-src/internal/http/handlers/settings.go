@@ -33,11 +33,11 @@ func handleSettingsUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	raw, err := c.GetRawData()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": "read body"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "read body"})
 		return
 	}
 	if err := a.Settings.HandleSettingsEvent(domain.SettingsChangeEvent{JSON: string(raw)}); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 	// Sanity check: response must be valid JSON object (Gin's c.JSON

@@ -128,12 +128,13 @@ func (h *HabitSetCrud) Create(name, description, color string) (int64, error) {
 
 // List returns every habit_set ordered by created_at DESC.  Mirrors the
 // Zig `pub fn getAllHabitSets`.
-func (h *HabitSetCrud) List() ([]HabitSetRow, error) {
+func (h *HabitSetCrud) List(limit, offset int) ([]HabitSetRow, error) {
 	if h.db == nil {
 		return nil, ErrHabitQueryFailed
 	}
 	rows, err := h.db.Query(
-		`SELECT id, name, description, color, COALESCE(wallpaper, '') FROM habit_sets ORDER BY created_at DESC;`,
+		`SELECT id, name, description, color, COALESCE(wallpaper, '') FROM habit_sets ORDER BY created_at DESC LIMIT ? OFFSET ?;`,
+		limit, offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrHabitQueryFailed, err)
@@ -210,12 +211,13 @@ func (h *HabitCrud) Create(setID int64, name string, goalSeconds int64, color st
 
 // List returns every habit ordered by created_at DESC.  Mirrors Zig
 // `getAllHabits`.
-func (h *HabitCrud) List() ([]HabitRow, error) {
+func (h *HabitCrud) List(limit, offset int) ([]HabitRow, error) {
 	if h.db == nil {
 		return nil, ErrHabitQueryFailed
 	}
 	rows, err := h.db.Query(
-		`SELECT id, set_id, name, goal_seconds, color, COALESCE(wallpaper, '') FROM habits ORDER BY created_at DESC;`,
+		`SELECT id, set_id, name, goal_seconds, color, COALESCE(wallpaper, '') FROM habits ORDER BY created_at DESC LIMIT ? OFFSET ?;`,
+		limit, offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrHabitQueryFailed, err)
@@ -234,13 +236,13 @@ func (h *HabitCrud) List() ([]HabitRow, error) {
 }
 
 // ListBySet returns habits scoped to a single set.  Mirrors `getHabitsBySet`.
-func (h *HabitCrud) ListBySet(setID int64) ([]HabitRow, error) {
+func (h *HabitCrud) ListBySet(setID int64, limit, offset int) ([]HabitRow, error) {
 	if h.db == nil {
 		return nil, ErrHabitQueryFailed
 	}
 	rows, err := h.db.Query(
-		`SELECT id, set_id, name, goal_seconds, color, COALESCE(wallpaper, '') FROM habits WHERE set_id = ? ORDER BY created_at DESC;`,
-		setID,
+		`SELECT id, set_id, name, goal_seconds, color, COALESCE(wallpaper, '') FROM habits WHERE set_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?;`,
+		setID, limit, offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrHabitQueryFailed, err)
@@ -338,13 +340,13 @@ func (t *TimerSessionCrud) CreateSession(habitID, durationSeconds, count int64, 
 
 // ListSessionsByDate returns sessions for a single date, ordered by
 // started_at DESC.  Mirrors `getSessionsByDate`.
-func (t *TimerSessionCrud) ListSessionsByDate(date string) ([]SessionRow, error) {
+func (t *TimerSessionCrud) ListSessionsByDate(date string, limit, offset int) ([]SessionRow, error) {
 	if t.db == nil {
 		return nil, ErrHabitQueryFailed
 	}
 	rows, err := t.db.Query(
-		`SELECT id, habit_id, duration_seconds, count, started_at, date FROM sessions WHERE date = ? ORDER BY started_at DESC;`,
-		date,
+		`SELECT id, habit_id, duration_seconds, count, started_at, date FROM sessions WHERE date = ? ORDER BY started_at DESC LIMIT ? OFFSET ?;`,
+		date, limit, offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrHabitQueryFailed, err)
@@ -364,13 +366,13 @@ func (t *TimerSessionCrud) ListSessionsByDate(date string) ([]SessionRow, error)
 
 // ListSessionsByDateRange returns sessions in a half-open date window.
 // Mirrors `getSessionsByDateRange`.
-func (t *TimerSessionCrud) ListSessionsByDateRange(start, end string) ([]SessionRow, error) {
+func (t *TimerSessionCrud) ListSessionsByDateRange(start, end string, limit, offset int) ([]SessionRow, error) {
 	if t.db == nil {
 		return nil, ErrHabitQueryFailed
 	}
 	rows, err := t.db.Query(
-		`SELECT id, habit_id, duration_seconds, count, started_at, date FROM sessions WHERE date >= ? AND date <= ? ORDER BY date DESC;`,
-		start, end,
+		`SELECT id, habit_id, duration_seconds, count, started_at, date FROM sessions WHERE date >= ? AND date <= ? ORDER BY date DESC LIMIT ? OFFSET ?;`,
+		start, end, limit, offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrHabitQueryFailed, err)
@@ -553,6 +555,22 @@ func (t *TimerSessionCrud) DeleteTimerSession(sessionID int64) error {
 	return nil
 }
 
+// DeleteSession removes a session row.
+func (t *TimerSessionCrud) DeleteSession(sessionID int64) error {
+	if t.db == nil {
+		return ErrHabitQueryFailed
+	}
+	res, err := t.db.Exec(`DELETE FROM sessions WHERE id = ?;`, sessionID)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrHabitDeleteFailed, err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return ErrHabitNotFound
+	}
+	return nil
+}
+
 // FinishTimerSession marks a timer_session as finished and stopped.
 func (t *TimerSessionCrud) FinishTimerSession(sessionID int64) error {
 	if t.db == nil {
@@ -568,4 +586,105 @@ func (t *TimerSessionCrud) FinishTimerSession(sessionID int64) error {
 		return fmt.Errorf("%w: %w", ErrHabitUpdateFailed, err)
 	}
 	return nil
+}
+
+// GetHabitStats returns aggregated stats for a habit over the current week.
+func (t *TimerSessionCrud) GetHabitStats(habitID int64) (map[string]interface{}, error) {
+	now := time.Now()
+	weekday := int(now.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+	weekStart := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, time.UTC)
+	weekStartStr := weekStart.Format("2006-01-02")
+
+	// Query sessions for this habit since week start
+	rows, err := t.db.Query(`
+		SELECT date, SUM(duration_seconds)
+		FROM sessions
+		WHERE habit_id = ? AND date >= ?
+		GROUP BY date
+		ORDER BY date ASC`,
+		habitID, weekStartStr)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Calculate totals and build weekly breakdown
+	totalSeconds := int64(0)
+	totalSessions := 0
+	weeklyBreakdown := make(map[string]int64)
+	daysOfWeek := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+
+	for rows.Next() {
+		var date string
+		var seconds int64
+		if err := rows.Scan(&date, &seconds); err != nil {
+			return nil, err
+		}
+		totalSeconds += seconds
+		totalSessions++
+		// Parse date to get day of week
+		if t, err := time.Parse("2006-01-02", date); err == nil {
+			dow := int(t.Weekday())
+			if dow == 0 {
+				dow = 7
+			}
+			weeklyBreakdown[daysOfWeek[dow-1]] = seconds
+		}
+	}
+
+	// Calculate streaks (simplified: count consecutive days with sessions)
+	currentStreak := calculateStreak(habitID, t.db)
+	longestStreak := currentStreak // simplified
+
+	return map[string]interface{}{
+		"habit_id":          habitID,
+		"total_seconds_week": totalSeconds,
+		"total_sessions_week": totalSessions,
+		"current_streak":    currentStreak,
+		"longest_streak":    longestStreak,
+		"weekly_breakdown":  weeklyBreakdown,
+	}, nil
+}
+
+// calculateStreak returns the current streak for a habit (consecutive days with sessions).
+func calculateStreak(habitID int64, db *sql.DB) int64 {
+	// Query sessions ordered by date desc, count consecutive days
+	rows, err := db.Query(`
+		SELECT DISTINCT date FROM sessions
+		WHERE habit_id = ?
+		ORDER BY date DESC LIMIT 30`, habitID)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+
+	streak := int64(0)
+	var prevDate time.Time
+	for rows.Next() {
+		var dateStr string
+		if err := rows.Scan(&dateStr); err != nil {
+			break
+		}
+		t, _ := time.Parse("2006-01-02", dateStr)
+		if prevDate.IsZero() {
+			// First row - check if it's today or yesterday
+			if time.Since(t) < 48*time.Hour {
+				streak = 1
+				prevDate = t
+			} else {
+				break
+			}
+		} else {
+			if t.Sub(prevDate) == 24*time.Hour {
+				streak++
+				prevDate = t
+			} else {
+				break
+			}
+		}
+	}
+	return streak
 }

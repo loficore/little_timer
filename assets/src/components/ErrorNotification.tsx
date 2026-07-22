@@ -1,5 +1,6 @@
 import type { FunctionalComponent } from "preact";
 import { useState, useEffect } from "preact/hooks";
+import { t } from "../utils/i18n";
 
 interface ErrorNotificationProps {
   visible?: boolean;
@@ -39,7 +40,7 @@ export const ErrorNotification: FunctionalComponent<ErrorNotificationProps> = ({
         <div className="flex items-start gap-2 sm:gap-3">
           <span className="text-lg flex-shrink-0">⚠️</span>
           <div className="flex-1 min-w-0">
-            <strong className="text-white text-sm sm:text-base">操作失败</strong>
+            <strong className="text-white text-sm sm:text-base">{t("errors.operation_failed")}</strong>
             <p className="text-red-100 mt-1 text-xs sm:text-sm break-words">{displayMessage}</p>
           </div>
           <button
@@ -49,7 +50,7 @@ export const ErrorNotification: FunctionalComponent<ErrorNotificationProps> = ({
               onDismiss?.();
             }}
             className="text-red-200 hover:text-white flex-shrink-0"
-            aria-label="关闭"
+            aria-label={t("errors.close")}
           >
             ✕
           </button>
@@ -67,8 +68,8 @@ export const OfflineModeIndicator: FunctionalComponent<{
       <div className="flex items-center gap-2 sm:gap-3">
         <span className="text-lg flex-shrink-0">⚠️</span>
         <div>
-          <strong>连接中断</strong>
-          <p className="text-yellow-100 mt-1">请检查网络连接</p>
+          <strong>{t("errors.disconnected")}</strong>
+          <p className="text-yellow-100 mt-1">{t("errors.check_network")}</p>
         </div>
       </div>
     </div>

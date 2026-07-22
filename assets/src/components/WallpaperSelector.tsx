@@ -10,15 +10,15 @@ interface WallpaperSelectorProps {
 }
 
 const GRADIENTS = [
-  { id: "", name: "无", value: "" },
-  { id: "sunset", name: "日落", value: "linear-gradient(135deg, #f97316 0%, #ec4899 50%, #8b5cf6 100%)" },
-  { id: "ocean", name: "海洋", value: "linear-gradient(135deg, #0ea5e9 0%, #14b8a6 50%, #22c55e 100%)" },
-  { id: "night", name: "深夜", value: "linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%)" },
-  { id: "forest", name: "森林", value: "linear-gradient(135deg, #14532d 0%, #166534 50%, #15803d 100%)" },
-  { id: "dawn", name: "黎明", value: "linear-gradient(135deg, #fdf4ff 0%, #f0abfc 50%, #c084fc 100%)" },
-  { id: "aurora", name: "极光", value: "linear-gradient(135deg, #134e4a 0%, #0d9488 50%, #2dd4bf 100%)" },
-  { id: "coral", name: "珊瑚", value: "linear-gradient(135deg, #7f1d1d 0%, #be123c 50%, #f43f5e 100%)" },
-  { id: "mint", name: "薄荷", value: "linear-gradient(135deg, #042f2e 0%, #134e4a 50%, #14b8a6 100%)" },
+  { id: "", value: "" },
+  { id: "sunset", value: "linear-gradient(135deg, #f97316 0%, #ec4899 50%, #8b5cf6 100%)" },
+  { id: "ocean", value: "linear-gradient(135deg, #0ea5e9 0%, #14b8a6 50%, #22c55e 100%)" },
+  { id: "night", value: "linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%)" },
+  { id: "forest", value: "linear-gradient(135deg, #14532d 0%, #166534 50%, #15803d 100%)" },
+  { id: "dawn", value: "linear-gradient(135deg, #fdf4ff 0%, #f0abfc 50%, #c084fc 100%)" },
+  { id: "aurora", value: "linear-gradient(135deg, #134e4a 0%, #0d9488 50%, #2dd4bf 100%)" },
+  { id: "coral", value: "linear-gradient(135deg, #7f1d1d 0%, #be123c 50%, #f43f5e 100%)" },
+  { id: "mint", value: "linear-gradient(135deg, #042f2e 0%, #134e4a 50%, #14b8a6 100%)" },
 ];
 
 const COLORS = [

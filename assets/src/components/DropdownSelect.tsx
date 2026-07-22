@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "preact/hooks";
 import type { FunctionalComponent } from "preact";
+import { t } from "../utils/i18n";
 
 interface DropdownOption {
   value: string | number;
@@ -76,7 +77,7 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
         disabled={disabled}
       >
         <span className="flex-1 text-left text-base">
-          {selectedOption?.label || "选择"}
+          {selectedOption?.label || t("common.select")}
         </span>
         <svg
           xmlns="http://www.w3.org/2000/svg"

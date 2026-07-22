@@ -6,6 +6,7 @@
 import { memo } from "preact/compat";
 import type { FunctionalComponent } from "preact";
 import { formatDuration } from "../utils/formatters";
+import { t } from "../utils/i18n";
 import type { Habit, HabitSet } from "../types/habit";
 
 interface HabitPickerProps {
@@ -31,7 +32,7 @@ export const HabitPicker: FunctionalComponent<HabitPickerProps> = memo(({
     <div className="my-overlay-backdrop fixed inset-0 z-[60] flex items-center justify-center">
       <div className="relative my-surface-modal rounded-xl w-full max-w-md mx-4 max-h-[70vh] overflow-hidden flex flex-col">
         <div className="p-4 border-b border-[var(--my-outline)] flex justify-between items-center">
-          <h3 className="text-lg font-bold">选择习惯</h3>
+          <h3 className="text-lg font-bold">{t("habit.picker_title")}</h3>
           <button className="btn btn-ghost btn-sm btn-circle" onClick={onClose}>
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -41,7 +42,7 @@ export const HabitPicker: FunctionalComponent<HabitPickerProps> = memo(({
         <div className="flex-1 overflow-y-auto p-2">
           {habitSets.length === 0 ? (
             <div className="text-center py-8 text-[var(--my-on-surface-variant)]">
-              <p>暂无习惯</p>
+              <p>{t("habit.no_habits")}</p>
             </div>
           ) : (
             <div className="space-y-2">

@@ -100,10 +100,10 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
     const map: Record<string, string> = {
       'FileNotFound': '',
       'BackupFailed': '',
-      'NetworkError': '网络连接失败，请检查网络后重试',
-      'ConnectionFailed': '连接失败，请检查服务器地址',
-      'AuthenticationFailed': '认证失败，请检查用户名和密码',
-      'PermissionDenied': '权限不足，请检查访问权限',
+      'NetworkError': t("backup.network_error"),
+      'ConnectionFailed': t("backup.connection_failed"),
+      'AuthenticationFailed': t("backup.authentication_failed"),
+      'PermissionDenied': t("backup.permission_denied"),
     };
     if (code in map) {
       const text = map[code];
@@ -126,7 +126,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       }
     } catch (err) {
       console.error('Failed to load backups:', err);
-      showMessage('error', 'Failed to load backups');
+      showMessage('error', t("backup.load_failed"));
     } finally {
       setIsLoading(false);
     }
@@ -142,12 +142,12 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         await loadBackups();
       } else {
         if (!handleApiError(result)) {
-          showMessage('error', result.error || 'Failed to create backup');
+          showMessage('error', result.error || t("backup.create_failed"));
         }
       }
     } catch (err) {
       console.error('Failed to create backup:', err);
-      showMessage('error', 'Failed to create backup');
+      showMessage('error', t("backup.create_failed"));
     } finally {
       setIsCreating(false);
     }

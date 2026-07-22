@@ -1,6 +1,7 @@
 import type { FunctionalComponent, ComponentChildren } from "preact";
 import { Component } from "preact";
 import { logError } from "../utils/logger";
+import { t } from "../utils/i18n";
 
 /**
  * ErrorBoundary 组件属性
@@ -59,16 +60,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <div className="flex flex-col items-center justify-center min-h-[200px] p-8 text-center">
           <div className="text-error text-4xl mb-4">⚠️</div>
-          <h2 className="text-xl font-bold text-error mb-2">出错了</h2>
+          <h2 className="text-xl font-bold text-error mb-2">{t("errors.error_occurred")}</h2>
           <p className="text-base-content/70 mb-4 max-w-md">
-            {this.state.error.message || "发生了未知错误"}
+            {this.state.error.message || t("errors.unknown_error")}
           </p>
-          <button
-            className="btn btn-primary"
-            onClick={() => window.location.reload()}
-          >
-            重新加载
-          </button>
+           <button
+             className="btn btn-primary"
+             onClick={() => window.location.reload()}
+           >
+             {t("errors.reload")}
+           </button>
         </div>
       );
     }
@@ -90,7 +91,7 @@ interface PageErrorBoundaryProps {
  */
 export const PageErrorBoundary: FunctionalComponent<PageErrorBoundaryProps> = ({
   children,
-  title = "页面加载失败",
+   title = t("errors.page_load_failed"),
 }) => {
   return (
     <ErrorBoundary

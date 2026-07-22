@@ -18,6 +18,7 @@ version = "Little Timer v0.1.0"
 hours = "H"
 minutes = "M"
 seconds = "S"
+select = "Select"
 
 [home]
 status_running = "▶ Running"
@@ -65,6 +66,14 @@ set_now = "Set Now"
 credentials_not_available = "Credentials unavailable, please set master password first"
 master_password_required = "Please set master password to use cloud backup"
 master_password_not_unlocked = "Credentials expired, please unlock again"
+operation_failed = "Operation failed"
+close = "Close"
+disconnected = "Connection interrupted"
+check_network = "Please check your network connection"
+error_occurred = "Error occurred"
+unknown_error = "An unknown error occurred"
+reload = "Reload"
+page_load_failed = "Page failed to load"
 
 [validation]
 load_error = "Failed to load settings: {error}"
@@ -103,6 +112,7 @@ add_habit = "Add habit"
 no_sets = "No habit sets"
 no_sets_desc = "Click \\\"Add\\\" above to create your first habit set"
 no_habits = "No habits, click below to add"
+picker_title = "Select Habit"
 habits_count = "habits"
 confirm_delete = "Confirm delete"
 delete_warning = "This action cannot be undone"
@@ -286,6 +296,14 @@ name_required = "Please enter a name"
 confirm_delete = "Delete preset \\\"{name}\\\"?"
 list_count = "Presets ({count}/10)"
 
+[backup]
+network_error = "Network connection failed, please check your network and try again"
+connection_failed = "Connection failed, please check the server address"
+authentication_failed = "Authentication failed, please check username and password"
+permission_denied = "Permission denied, please check access rights"
+load_failed = "Failed to load backups"
+create_failed = "Failed to create backup"
+
 [settings.messages]
 apply_success = "⚡ Preset applied, click save"
 
@@ -302,3 +320,4 @@ error = "❌ Connection error"
 [errors.offline]
 title = "⚠️ Offline mode"
 message = "Backend service is unavailable. Some features may be limited. Please check network or restart the app."
+

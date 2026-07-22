@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "lint:i18n": "node ../scripts/lint_i18n.js",
+    "validate:i18n": "node ../scripts/validate-i18n.js",
     "build:check": "tsc -b --noEmit",
     "preview": "vite preview",
     "test": "vitest",

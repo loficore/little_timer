@@ -146,7 +146,7 @@ func TestHandleBackupConfigUpdate_S3(t *testing.T) {
 	a, _ := newBackupTestApp(t)
 	gin.SetMode(gin.TestMode)
 
-	// Given: S3 updates require an unlocked master password.
+	// Given：S3 更新要求主口令已解锁。
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	body := strings.NewReader(`{"password":"testpass123"}`)
@@ -176,7 +176,7 @@ func TestHandleBackupConfigUpdate_S3(t *testing.T) {
 		t.Errorf("success = %v, want true", got["success"])
 	}
 
-	// When: the persisted config is read back and reflects the S3 settings.
+	// When：读回持久化的配置，确认反映了 S3 设置。
 	w = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/backup/config", nil)

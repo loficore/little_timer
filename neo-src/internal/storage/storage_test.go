@@ -12,13 +12,10 @@ import (
 	"little-timer/internal/domain"
 )
 
-// -----------------------------------------------------------------------------
-// Test helpers
-// -----------------------------------------------------------------------------
+// 测试辅助函数
 
-// openTempSqlite spins up a fresh SqliteManager at t.TempDir()/test.db,
-// runs Migrate, and registers cleanup.  Each test gets its own file so
-// they don't share state.
+// openTempSqlite 在 t.TempDir()/test.db 拉起全新的 SqliteManager、
+// 执行 Migrate 并注册清理。每个测试独占一个文件，互不共享状态。
 func openTempSqlite(t *testing.T) *SqliteManager {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.db")
@@ -33,10 +30,9 @@ func openTempSqlite(t *testing.T) *SqliteManager {
 	return m
 }
 
-// expectedTables mirrors the v0 schema tables (excluding `schema_version`
-// and `backup_config`, which the manager verifies but doesn't create on
-// fresh-DB migration; they exist on first migrateToV7/v8 from an older
-// schema, never on greenfield).
+// expectedTables 列出由 createTables 直接创建的表。
+// `schema_version` 和 `backup_config` 在迁移流程的其他环节处理，
+// 所以新库检查不经由这个 slice 断言它们。
 var expectedTables = []string{
 	"health_check",
 	"habit_sets",
@@ -46,9 +42,7 @@ var expectedTables = []string{
 	"settings",
 }
 
-// -----------------------------------------------------------------------------
-// Schema tests
-// -----------------------------------------------------------------------------
+// Schema 测试
 
 func TestFreshDatabaseCreatesSchema(t *testing.T) {
 	m := openTempSqlite(t)
@@ -87,9 +81,8 @@ func TestSchemaVersionIs8(t *testing.T) {
 func TestSettingsTableConstraints(t *testing.T) {
 	m := openTempSqlite(t)
 
-	// Default-row INSERT happens during migration; verify the seed is
-	// present and matches the Zig defaults (timezone=8, language='ZH',
-	// duration_seconds=1500, …).
+	// 默认行的 INSERT 发生在迁移期间；验证种子存在且与播种的默认值
+	// 一致（timezone=8、language='ZH'、duration_seconds=1500 等）。
 	var (
 		timezone    int64
 		language    string
@@ -115,13 +108,13 @@ func TestSettingsTableConstraints(t *testing.T) {
 		t.Errorf("default duration_seconds: got %d, want 1500", durationSec)
 	}
 
-	// CHECK constraints: out-of-range timezone should reject the write.
+	// CHECK 约束：越界的 timezone 应拒绝写入。
 	if _, err := m.DB().Exec(
 		`UPDATE settings SET timezone = 99 WHERE id = 1;`,
 	); err == nil {
 		t.Errorf("expected CHECK(timezone BETWEEN -12 AND 14) to reject 99")
 	} else if !strings.Contains(err.Error(), "CHECK") && !strings.Contains(err.Error(), "constraint") {
-		// sqlite returns "CHECK constraint failed" — accept either wording.
+		// sqlite 返回 "CHECK constraint failed" —— 两种措辞都接受。
 		t.Logf("rejection error (acceptable): %v", err)
 	}
 }
@@ -183,9 +176,7 @@ func TestFilePermissionIs0600(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Settings round-trip
-// -----------------------------------------------------------------------------
+// Settings 往返
 
 func TestSettingsRoundTrip(t *testing.T) {
 	m := openTempSqlite(t)
@@ -279,7 +270,7 @@ func TestSettingsSurvivesReopen(t *testing.T) {
 	want.Basic.Wallpaper = "wallpapers/sakura.png"
 	want.ClockDefaults.Countdown.DurationSeconds = 3000
 
-	// First lifecycle: write.
+	// 第一轮生命周期：写入。
 	{
 		m := NewSqliteManager().Init(path)
 		if err := m.Open(); err != nil {
@@ -296,7 +287,7 @@ func TestSettingsSurvivesReopen(t *testing.T) {
 		}
 	}
 
-	// Second lifecycle: reopen, read back.
+	// 第二轮生命周期：重开、读回。
 	m := NewSqliteManager().Init(path)
 	if err := m.Open(); err != nil {
 		t.Fatalf("Open #2: %v", err)
@@ -325,7 +316,7 @@ func TestSettingsSurvivesReopen(t *testing.T) {
 			want.ClockDefaults.Countdown.DurationSeconds)
 	}
 
-	// Schema version should still be 8 after reopen.
+	// 重开后 schema 版本应仍为 8。
 	var v int
 	if err := m.DB().QueryRow(`SELECT MAX(version) FROM schema_version;`).Scan(&v); err != nil {
 		t.Fatalf("read schema_version: %v", err)
@@ -335,14 +326,12 @@ func TestSettingsSurvivesReopen(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Habit CRUD
-// -----------------------------------------------------------------------------
+// Habit CRUD。
 
 func TestHabitCRUDLifecycle(t *testing.T) {
 	m := openTempSqlite(t)
 
-	// Create a habit_set.
+	// 创建一个 habit_set。
 	setID, err := m.HabitSets().Create("Daily Reading", "books", "#abcdef")
 	if err != nil {
 		t.Fatalf("HabitSets.Create: %v", err)
@@ -351,7 +340,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 		t.Errorf("HabitSets.Create: got id %d, want > 0", setID)
 	}
 
-	// Create a habit under it.
+	// 在其下创建一个 habit。
 	habitID, err := m.Habits().Create(setID, "Read 30 min", 1800, "#123456")
 	if err != nil {
 		t.Fatalf("Habits.Create: %v", err)
@@ -360,7 +349,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 		t.Errorf("Habits.Create: got id %d, want > 0", habitID)
 	}
 
-	// List → should contain exactly one row matching.
+	// List → 应恰好包含一行匹配。
 	const limit, offset = 100, 0
 	sets, err := m.HabitSets().List(limit, offset)
 	if err != nil {
@@ -372,7 +361,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 		t.Errorf("HabitSets.List row: got %+v, want Daily Reading / #abcdef", sets[0])
 	}
 
-	// Habits scoped to the set.
+	// 限定在该 set 内的 habits。
 	habits, err := m.Habits().ListBySet(setID, limit, offset)
 	if err != nil {
 		t.Fatalf("Habits.ListBySet: %v", err)
@@ -384,7 +373,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 		t.Errorf("Habits row: got %+v, want Read 30 min / 1800", habits[0])
 	}
 
-	// Update the habit.
+	// 更新该 habit。
 	if err := m.Habits().Update(habitID, "Read 45 min", 2700, "#654321", "/wallpapers/book.jpg"); err != nil {
 		t.Fatalf("Habits.Update: %v", err)
 	}
@@ -396,7 +385,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 		t.Errorf("Habits.GetByID after Update: got %+v", got)
 	}
 
-	// Record a session for the habit.
+	// 为该 habit 记录一次 session。
 	today := "2026-06-28"
 	sessionID, err := m.Timers().CreateSession(habitID, 2700, 1, today)
 	if err != nil {
@@ -422,7 +411,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 		t.Errorf("TodaySecondsForHabit: got %d, want 2700", totalSec)
 	}
 
-	// Delete the habit — sessions should cascade.
+	// 删除该 habit —— sessions 应级联删除。
 	if err := m.Habits().Delete(habitID); err != nil {
 		t.Fatalf("Habits.Delete: %v", err)
 	}
@@ -430,7 +419,7 @@ func TestHabitCRUDLifecycle(t *testing.T) {
 		t.Errorf("GetByID after Delete: got %v, want ErrHabitNotFound", err)
 	}
 
-	// Cascade check: the session row is gone too.
+	// 级联检查：session 行也应消失。
 	after, err := m.Timers().ListSessionsByDate(today, limit, offset)
 	if err != nil {
 		t.Fatalf("ListSessionsByDate after delete: %v", err)
@@ -511,7 +500,7 @@ func TestTimerSessionCRUD(t *testing.T) {
 			got.IsRunning, got.IsFinished, got.IsPaused)
 	}
 
-	// Update → marks as paused, advances current_round.
+	// Update → 标记为暂停并推进 current_round。
 	remaining := int64(900)
 	lastSync := int64(1234567890)
 	if err := m.Timers().UpdateTimerSession(
@@ -546,7 +535,7 @@ func TestTimerSessionCRUD(t *testing.T) {
 		t.Errorf("RemainingSeconds: got %v, want 900", updated.RemainingSeconds)
 	}
 
-	// Active session query should return this row.
+	// 活动 session 查询应返回这一行。
 	active, err := m.Timers().GetActiveTimerSession()
 	if err != nil {
 		t.Fatalf("GetActiveTimerSession: %v", err)
@@ -555,7 +544,7 @@ func TestTimerSessionCRUD(t *testing.T) {
 		t.Errorf("active session: got id %d, want %d", active.ID, sessionID)
 	}
 
-	// Finish + verify the active query no longer returns it.
+	// Finish + 验证活动查询不再返回它。
 	if err := m.Timers().FinishTimerSession(sessionID); err != nil {
 		t.Fatalf("FinishTimerSession: %v", err)
 	}
@@ -564,9 +553,7 @@ func TestTimerSessionCRUD(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Health check
-// -----------------------------------------------------------------------------
+// 健康检查
 
 func TestHealthCheckIsHealthy(t *testing.T) {
 	m := openTempSqlite(t)
@@ -595,9 +582,7 @@ func TestHealthCheckIsHealthy(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Unwritable-dir guard — pre-existing behavior, unchanged.
-// -----------------------------------------------------------------------------
+// 不可写目录防护 —— 既有行为，保持不变。
 
 func TestOpenUnwritableDir(t *testing.T) {
 	m := NewSqliteManager().Init("/proc/nonexistent/little_timer.db")

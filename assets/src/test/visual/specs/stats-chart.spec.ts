@@ -4,7 +4,7 @@ const baseURL = "http://127.0.0.1:5173";
 
 test.describe("StatsPage - 图表显示测试", () => {
   test("计时完成后统计页应该正常显示图表", async ({ page }) => {
-    // 1. Seed data via API (http://127.0.0.1:8080)
+    // 1. 通过 API 灌入数据 (http://127.0.0.1:8080)
     await page.goto(baseURL);
 
     const created = await page.evaluate(async () => {
@@ -34,22 +34,22 @@ test.describe("StatsPage - 图表显示测试", () => {
       return { set, habit, session };
     });
 
-    // 2. Navigate to stats page
+    // 2. 进入统计页
     await page.locator('[data-testid="nav-stats"]').filter({ visible: true }).first().click();
     await page.waitForLoadState("networkidle");
 
-    // 3. Click week range
+    // 3. 点击本周范围
     const weekBtn = page.getByRole("button", { name: "本周" });
     if (await weekBtn.isVisible()) {
       await weekBtn.click();
       await page.waitForLoadState("networkidle");
     }
 
-    // 4. Verify total focus time card is visible
+    // 4. 验证总专注时间卡片可见
     const totalCard = page.locator("text=总专注时间");
     await expect(totalCard).toBeVisible();
 
-    // 5. Verify bar chart canvas is visible (Chart.js renders as canvas)
+    // 5. 验证柱状图 canvas 可见（Chart.js 渲染为 canvas）
     const canvas = page.locator("canvas").first();
     await expect(canvas).toBeVisible({ timeout: 5000 });
   });

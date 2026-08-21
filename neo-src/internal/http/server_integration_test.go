@@ -1,17 +1,15 @@
-// Integration tests for the HTTP layer.
+// HTTP 层的集成测试。
 //
-// Unlike server_test.go (which uses httptest.NewRecorder + r.ServeHTTP),
-// this file uses httptest.NewServer so the tests exercise the full
-// client → router → handler → storage pipeline the way a real browser
-// or curl invocation would.  That's the level the spec calls for:
+// 与 server_test.go（用 httptest.NewRecorder + r.ServeHTTP）不同，本文件
+// 用 httptest.NewServer，让测试以真实浏览器或 curl 调用的方式走完
+// client → router → handler → storage 全流水线。这才是规范要求的级别：
 //
-//   - TimerStartStop: state transitions via the HTTP surface.
-//   - SettingsRoundTrip: POST /api/settings then GET /api/settings.
-//   - HabitCRUD: full habit-set / habit lifecycle via REST.
-//   - BackupFlow: create / list / restore via the local adapter.
+//   - TimerStartStop：经 HTTP 表面驱动状态机转换。
+//   - SettingsRoundTrip：POST /api/settings 然后 GET /api/settings。
+//   - HabitCRUD：经 REST 走完 habit-set / habit 全生命周期。
+//   - BackupFlow：经 local adapter 走 create / list / restore。
 //
-// No mocks — every test wires the same real App that cmd/server would
-// at boot.
+// 没有 mock —— 每个测试都接上与 cmd/server 启动时相同的真实 App。
 package http
 
 import (
@@ -35,17 +33,17 @@ import (
 	"little-timer/internal/storage/backup"
 )
 
-// integrationFixture bundles a running httptest.Server with the
-// underlying App + Storage + Settings.  Tests get a `*integrationFixture`
-// via `newIntegrationServer(t)` and call methods against it.
+// integrationFixture 把运行中的 httptest.Server 与底层 App + Storage +
+// Settings 打包在一起。测试通过 `newIntegrationServer(t)` 拿到
+// `*integrationFixture` 并对它发起调用。
 type integrationFixture struct {
-	server  *httptest.Server
-	app     *app.App
-	sqlite  *storage.SqliteManager
-	settings *settings.SettingsManager
-	backup  *backup.BackupManager
+	server    *httptest.Server
+	app       *app.App
+	sqlite    *storage.SqliteManager
+	settings  *settings.SettingsManager
+	backup    *backup.BackupManager
 	backupDir string
-	dbPath  string
+	dbPath    string
 }
 
 func (f *integrationFixture) URL(path string) string {
@@ -56,9 +54,8 @@ func (f *integrationFixture) Close() {
 	f.server.Close()
 }
 
-// newIntegrationServer wires every layer with a real SQLite file and
-// a real LocalAdapter for backups.  All temp files live under
-// t.TempDir() so the test is hermetic.
+// newIntegrationServer 用真实 SQLite 文件和真实备份 LocalAdapter 把每一层
+// 接起来。所有临时文件都在 t.TempDir() 下，测试自包含。
 func newIntegrationServer(t *testing.T) *integrationFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -110,8 +107,8 @@ func newIntegrationServer(t *testing.T) *integrationFixture {
 	}
 }
 
-// httpDo is a small helper: send `method path body`, parse the JSON
-// response into `out` (if non-nil), return status + body for assertions.
+// httpDo 是个小辅助函数：发送 `method path body`，返回响应状态码 +
+// 原始 body 供断言。
 func (f *integrationFixture) httpDo(t *testing.T, method, path string, body any) (int, []byte) {
 	t.Helper()
 	var reqBody io.Reader
@@ -141,14 +138,12 @@ func (f *integrationFixture) httpDo(t *testing.T, method, path string, body any)
 	return resp.StatusCode, raw
 }
 
-// -----------------------------------------------------------------------------
-// /api/start / pause / reset — the full state-machine round-trip.
-// -----------------------------------------------------------------------------
+// /api/start / pause / reset —— 完整状态机往返。
 
 func TestAPI_TimerStartStop(t *testing.T) {
 	f := newIntegrationServer(t)
 
-	// Initial state — should be idle / paused / not running.
+	// 初始状态 —— 应为 idle / paused / not running。
 	state := f.fetchState(t)
 	if running, _ := state["is_running"].(bool); running {
 		t.Errorf("initial state is_running = true, want false; state=%v", state)
@@ -157,7 +152,7 @@ func TestAPI_TimerStartStop(t *testing.T) {
 		t.Errorf("initial mode = %q, want countdown|stopwatch", mode)
 	}
 
-	// Start the timer.
+	// 启动计时器。
 	code, body := f.httpDo(t, http.MethodPost, "/api/start", map[string]any{
 		"mode":          "stopwatch",
 		"work_duration": 1500,
@@ -173,7 +168,7 @@ func TestAPI_TimerStartStop(t *testing.T) {
 		t.Errorf("start status = %q, want started|already_running", status)
 	}
 
-	// /api/state has no is_paused; /api/timer/progress does.
+	// /api/state 没有 is_paused；/api/timer/progress 有。
 	progress := f.fetchProgress(t)
 	if paused, _ := progress["is_paused"].(bool); paused {
 		t.Errorf("after start is_paused = true, want false; progress=%v", progress)
@@ -182,7 +177,7 @@ func TestAPI_TimerStartStop(t *testing.T) {
 		t.Errorf("after start is_running = false, want true; progress=%v", progress)
 	}
 
-	// Pause.
+	// 暂停。
 	code, body = f.httpDo(t, http.MethodPost, "/api/pause", nil)
 	if code != http.StatusOK {
 		t.Fatalf("POST /api/pause: code=%d body=%s", code, body)
@@ -196,7 +191,7 @@ func TestAPI_TimerStartStop(t *testing.T) {
 		t.Errorf("after pause is_paused = false, want true")
 	}
 
-	// Reset.
+	// 复位。
 	code, body = f.httpDo(t, http.MethodPost, "/api/reset", nil)
 	if code != http.StatusOK {
 		t.Fatalf("POST /api/reset: code=%d body=%s", code, body)
@@ -224,8 +219,8 @@ func (f *integrationFixture) fetchProgress(t *testing.T) map[string]any {
 	return out
 }
 
-// fetchState hits /api/state and parses the JSON body.  Fails the
-// test on any non-200 or parse error.
+// fetchState 请求 /api/state 并解析 JSON body。任何非 200 或解析错误都会
+// 让测试失败。
 func (f *integrationFixture) fetchState(t *testing.T) map[string]any {
 	t.Helper()
 	code, body := f.httpDo(t, http.MethodGet, "/api/state", nil)
@@ -239,9 +234,7 @@ func (f *integrationFixture) fetchState(t *testing.T) map[string]any {
 	return state
 }
 
-// -----------------------------------------------------------------------------
-// /api/settings round-trip.
-// -----------------------------------------------------------------------------
+// /api/settings 往返。
 
 func TestAPI_SettingsRoundTrip(t *testing.T) {
 	f := newIntegrationServer(t)
@@ -292,9 +285,7 @@ func (f *integrationFixture) fetchSettings(t *testing.T) map[string]any {
 	return state
 }
 
-// -----------------------------------------------------------------------------
-// Habit CRUD: create habit-set → create habit → update → delete.
-// -----------------------------------------------------------------------------
+// Habit CRUD：创建 habit-set → 创建 habit → 更新 → 删除。
 
 func TestAPI_HabitCRUD(t *testing.T) {
 	f := newIntegrationServer(t)
@@ -388,9 +379,7 @@ func TestAPI_HabitCRUD(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Backup flow: create → list → restore → verify data persists.
-// -----------------------------------------------------------------------------
+// 备份流程：create → list → restore → 校验数据留存。
 
 func TestAPI_BackupFlow(t *testing.T) {
 	f := newIntegrationServer(t)

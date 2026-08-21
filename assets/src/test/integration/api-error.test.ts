@@ -19,8 +19,6 @@ import { useHabits } from "../../hooks/useHabits";
 import { useTimer } from "../../hooks/useTimer";
 import { logError } from "../../utils/logger";
 
-// === Mocks ===
-//
 // mockApiClient 默认成功；每个 case 在 beforeEach 里覆盖具体方法。
 const mockApiClient = {
   getHabitSets: vi.fn(),
@@ -74,9 +72,6 @@ describe("集成测试 - API 错误处理", () => {
     vi.restoreAllMocks();
   });
 
-  // ============================================
-  // useHabits.refresh() 错误场景
-  // ============================================
   describe("useHabits.refresh() - 错误处理", () => {
     it("网络错误（fetch throw）应该设置 error state 并调用 logError", async () => {
       const networkError = new TypeError("Failed to fetch");
@@ -228,9 +223,6 @@ describe("集成测试 - API 错误处理", () => {
     });
   });
 
-  // ============================================
-  // useTimer.start() 错误场景
-  // ============================================
   describe("useTimer.start() - 错误处理", () => {
     it("start 失败时应该调用 logError", async () => {
       mockApiClient.startTimer.mockRejectedValueOnce(
@@ -283,9 +275,6 @@ describe("集成测试 - API 错误处理", () => {
     });
   });
 
-  // ============================================
-  // APIClient.fetchJson 错误信息格式校验
-  // ============================================
   describe("APIClient.fetchJson 错误格式", () => {
     it("HTTP 500 错误信息应包含 status 和 body", () => {
       const err = httpError(500, "database locked");

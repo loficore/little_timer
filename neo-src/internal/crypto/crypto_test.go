@@ -1,8 +1,7 @@
-// Package crypto — tests for the encryption + secret-storage helpers.
+// Package crypto —— 加密 + secret 存储辅助函数的测试。
 //
-// We test the public surface: round-trip equality, tamper detection,
-// wrong-key rejection, key-derivation determinism, and the lockout /
-// persistence behaviour of SecretStorage.
+// 只测公开接口：往返一致性、篡改检测、错误密钥拒绝、密钥派生的确定性，
+// 以及 SecretStorage 的锁定 / 持久化行为。
 package crypto
 
 import (
@@ -13,9 +12,7 @@ import (
 	"testing"
 )
 
-// -----------------------------------------------------------------------------
-// Encrypt / Decrypt.
-// -----------------------------------------------------------------------------
+// Encrypt / Decrypt。
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
 	key := GenerateKey()
@@ -69,7 +66,7 @@ func TestDecryptRejectsTamperedCiphertext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
-	// Flip a byte in the ciphertext region (skip the nonce prefix).
+	// 翻转 ciphertext 区域的一个字节（跳过 nonce 前缀）。
 	blob[AES256GCMNonceSize] ^= 0x01
 	_, err = Decrypt(blob, key)
 	if !errors.Is(err, ErrAuthenticationFailed) {
@@ -95,9 +92,7 @@ func TestDecryptRejectsShortBlob(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// EncryptWithPassword / DecryptWithPassword.
-// -----------------------------------------------------------------------------
+// EncryptWithPassword / DecryptWithPassword。
 
 func TestPasswordRoundTrip(t *testing.T) {
 	plaintext := []byte("the cake is a lie")
@@ -126,9 +121,7 @@ func TestPasswordRoundTripWrongPassword(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// DeriveKey.
-// -----------------------------------------------------------------------------
+// DeriveKey。
 
 func TestDeriveKeyDeterministic(t *testing.T) {
 	password := []byte("password")
@@ -156,9 +149,7 @@ func TestDeriveKeyWrongSaltSize(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Random helpers.
-// -----------------------------------------------------------------------------
+// 随机数辅助函数。
 
 func TestGenerateKeyNonceSaltLengths(t *testing.T) {
 	if l := len(GenerateKey()); l != AES256GCMKeySize {
@@ -179,9 +170,7 @@ func TestGenerateProducesDistinctValues(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// SecretStorage.
-// -----------------------------------------------------------------------------
+// SecretStorage。
 
 func TestSecretStorageSetStoreRetrieveUnlock(t *testing.T) {
 	dir := t.TempDir()
@@ -216,7 +205,7 @@ func TestSecretStorageSetStoreRetrieveUnlock(t *testing.T) {
 		t.Fatalf("Retrieve = %q, want %q", got, "deadbeef")
 	}
 
-	// Round-trip via Unlock on a fresh instance.
+	// 用新实例通过 Unlock 做往返验证。
 	store2 := New(path)
 	if err := store2.Unlock([]byte("master-pw")); err != nil {
 		t.Fatalf("Unlock: %v", err)
@@ -312,7 +301,7 @@ func TestSecretStorageInMemoryOnly(t *testing.T) {
 	}
 }
 
-// Belt-and-braces: confirm the on-disk file has the magic prefix.
+// 双保险：确认磁盘文件带 magic 前缀。
 func TestSecretStorageDiskBlobHasMagic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.enc")

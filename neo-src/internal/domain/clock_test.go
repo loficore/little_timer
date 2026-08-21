@@ -1,21 +1,5 @@
 package domain
 
-// Tests in this file mirror `src/test/test_clock.zig`. The Zig suite covers
-// countdown init/tick/pause/reset/loop, stopwatch init/tick/pause/reset/cap,
-// mode switching, and state query helpers — every one of those has a Go twin
-// here.
-//
-// Notes on parity:
-//
-//   - The Zig `expectEqual` checks values via `==` on integer literals; we
-//     use `reflect.DeepEqual` for structs and direct `==` for scalars. We
-//     also assert pointer-presence (`s.Countdown != nil`) where the Zig
-//     source would crash on a missing variant.
-//   - `t.Log` is used in lieu of Zig's `logger` calls so the domain layer
-//     stays I/O-free — no fmt.Println anywhere.
-//   - Where the Zig source asserts on `manager.state.COUNTDOWN_MODE.x`, the
-//     Go equivalent is `manager.state.Countdown().x`.
-
 import (
 	"context"
 	"reflect"
@@ -54,10 +38,8 @@ func TestTodayStringOffsetArithmetic(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Small assertion helpers — ponytail prefers stdlib-only, but a two-line
-// helper avoids the noise of `if got != want { t.Errorf(...) }` on every line.
-// -----------------------------------------------------------------------------
+// 小型断言辅助函数 —— 只用标准库，省去每行
+// `if got != want { t.Errorf(...) }` 的噪音。
 
 func mustEqual(t *testing.T, name string, got, want any) {
 	t.Helper()
@@ -80,9 +62,7 @@ func mustFalse(t *testing.T, name string, got bool) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Common config builders.
-// -----------------------------------------------------------------------------
+// 常用配置构造函数。
 
 func cfgCountdownOnly(durationSeconds uint64) ClockTaskConfig {
 	return ClockTaskConfig{
@@ -124,9 +104,7 @@ func cfgStopwatch(maxSeconds uint64) ClockTaskConfig {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Countdown tests.
-// -----------------------------------------------------------------------------
+// 倒计时测试。
 
 func TestCountdownInit(t *testing.T) {
 	m := NewClockManager(cfgCountdownOnly(60))
@@ -158,13 +136,13 @@ func TestCountdownPauseAndResume(t *testing.T) {
 	defer m.Deinit()
 
 	m.HandleEvent(UserStartTimerEvent{})
-	m.HandleEvent(TickEvent{DeltaMs: 5000}) // 5s elapsed
+	m.HandleEvent(TickEvent{DeltaMs: 5000}) // 已用 5s
 
 	m.HandleEvent(UserPauseTimerEvent{})
 	mustTrue(t, "IsPaused after pause", m.state.Countdown.IsPaused)
 
 	beforePause := m.state.Countdown.RemainingMs
-	m.HandleEvent(TickEvent{DeltaMs: 3000}) // ignored while paused
+	m.HandleEvent(TickEvent{DeltaMs: 3000}) // 暂停期间被忽略
 	mustEqual(t, "RemainingMs unchanged while paused", m.state.Countdown.RemainingMs, beforePause)
 
 	m.HandleEvent(UserStartTimerEvent{})
@@ -219,13 +197,13 @@ func TestCountdownLoopFiniteNoRest(t *testing.T) {
 	m.HandleEvent(UserStartTimerEvent{})
 	m.HandleEvent(TickEvent{DeltaMs: 5000})
 
-	// Loop with no rest interval: finishes round 1, immediately resets to
-	// round 2 with the same duration.
+	// 无休息间隔的循环：第 1 轮结束后立即以相同时长
+	// 重置进入第 2 轮。
 	mustEqual(t, "LoopRemaining after round 1", m.state.Countdown.LoopRemaining, uint32(1))
 	mustFalse(t, "IsFinished mid-loop", m.state.Countdown.IsFinished)
 	mustEqual(t, "RemainingMs reset for round 2", m.state.Countdown.RemainingMs, int64(5000))
 
-	m.HandleEvent(TickEvent{DeltaMs: 5000}) // round 2 completes
+	m.HandleEvent(TickEvent{DeltaMs: 5000}) // 第 2 轮完成
 	mustTrue(t, "LoopCompleted after last round", m.state.Countdown.LoopCompleted)
 }
 
@@ -236,7 +214,7 @@ func TestCountdownLoopFiniteWithRest(t *testing.T) {
 	mustEqual(t, "initial LoopRemaining", m.state.Countdown.LoopRemaining, uint32(2))
 
 	m.HandleEvent(UserStartTimerEvent{})
-	m.HandleEvent(TickEvent{DeltaMs: 5000}) // round 1 done → rest begins
+	m.HandleEvent(TickEvent{DeltaMs: 5000}) // 第 1 轮结束 → 开始休息
 
 	mustEqual(t, "LoopRemaining after round 1", m.state.Countdown.LoopRemaining, uint32(1))
 	mustFalse(t, "IsFinished during rest", m.state.Countdown.IsFinished)
@@ -245,17 +223,17 @@ func TestCountdownLoopFiniteWithRest(t *testing.T) {
 	mustTrue(t, "state.InRest()", m.state.InRest())
 	mustEqual(t, "GetRestRemainingTime", m.state.GetRestRemainingTime(), int64(3))
 
-	m.HandleEvent(TickEvent{DeltaMs: 1500}) // mid-rest
+	m.HandleEvent(TickEvent{DeltaMs: 1500}) // 休息中
 	mustTrue(t, "InRest mid-rest", m.state.Countdown.InRest)
 	mustEqual(t, "GetRestRemainingTime mid-rest", m.state.GetRestRemainingTime(), int64(1))
 
-	m.HandleEvent(TickEvent{DeltaMs: 1500}) // rest completes → round 2
+	m.HandleEvent(TickEvent{DeltaMs: 1500}) // 休息完成 → 第 2 轮
 	mustFalse(t, "InRest after rest", m.state.Countdown.InRest)
 	mustEqual(t, "RemainingMs reset for round 2", m.state.Countdown.RemainingMs, int64(5000))
 	mustEqual(t, "LoopRemaining", m.state.Countdown.LoopRemaining, uint32(1))
 	mustFalse(t, "IsFinished in round 2", m.state.Countdown.IsFinished)
 
-	m.HandleEvent(TickEvent{DeltaMs: 5000}) // round 2 done
+	m.HandleEvent(TickEvent{DeltaMs: 5000}) // 第 2 轮完成
 	mustTrue(t, "LoopCompleted", m.state.Countdown.LoopCompleted)
 	mustEqual(t, "RemainingMs", m.state.Countdown.RemainingMs, int64(0))
 	mustTrue(t, "IsFinished", m.state.Countdown.IsFinished)
@@ -270,15 +248,15 @@ func TestCountdownLoopInfinite(t *testing.T) {
 	mustEqual(t, "GetLoopTotal infinite", m.state.GetLoopTotal(), uint32(0))
 
 	m.HandleEvent(UserStartTimerEvent{})
-	m.HandleEvent(TickEvent{DeltaMs: 3000}) // round 1 done
+	m.HandleEvent(TickEvent{DeltaMs: 3000}) // 第 1 轮结束
 	mustTrue(t, "InRest after round 1", m.state.Countdown.InRest)
 	mustEqual(t, "LoopRemaining never decremented", m.state.Countdown.LoopRemaining, uint32(0))
 
-	m.HandleEvent(TickEvent{DeltaMs: 2000}) // rest over
+	m.HandleEvent(TickEvent{DeltaMs: 2000}) // 休息结束
 	mustFalse(t, "InRest after rest", m.state.Countdown.InRest)
 	mustEqual(t, "RemainingMs reset", m.state.Countdown.RemainingMs, int64(3000))
 
-	m.HandleEvent(TickEvent{DeltaMs: 3000}) // round 2 done
+	m.HandleEvent(TickEvent{DeltaMs: 3000}) // 第 2 轮结束
 	mustTrue(t, "InRest after round 2", m.state.Countdown.InRest)
 	mustEqual(t, "LoopRemaining still infinite", m.state.Countdown.LoopRemaining, uint32(0))
 	mustFalse(t, "LoopCompleted never true", m.state.Countdown.LoopCompleted)
@@ -306,9 +284,7 @@ func TestCountdownLoopQueryHelpers(t *testing.T) {
 	mustEqual(t, "GetLoopTotal unchanged", m.state.GetLoopTotal(), uint32(3))
 }
 
-// -----------------------------------------------------------------------------
-// Stopwatch tests.
-// -----------------------------------------------------------------------------
+// 正计时测试。
 
 func TestStopwatchInit(t *testing.T) {
 	m := NewClockManager(cfgStopwatch(3600))
@@ -379,7 +355,7 @@ func TestStopwatchPauseIgnoresTicks(t *testing.T) {
 	mustTrue(t, "IsPaused", m.state.Stopwatch.IsPaused)
 
 	before := m.state.Stopwatch.ElapsedMs
-	m.HandleEvent(TickEvent{DeltaMs: 3000}) // ignored
+	m.HandleEvent(TickEvent{DeltaMs: 3000}) // 被忽略
 	mustEqual(t, "ElapsedMs unchanged while paused", m.state.Stopwatch.ElapsedMs, before)
 }
 
@@ -396,9 +372,7 @@ func TestStopwatchFinishedIgnoresFurtherTicks(t *testing.T) {
 	mustTrue(t, "IsFinished still true", m.state.Stopwatch.IsFinished)
 }
 
-// -----------------------------------------------------------------------------
-// Mode switch tests.
-// -----------------------------------------------------------------------------
+// 模式切换测试。
 
 func TestModeSwitchCountdownToStopwatch(t *testing.T) {
 	m := NewClockManager(cfgCountdownOnly(60))
@@ -441,8 +415,8 @@ func TestUserChangeConfigUpdatesInitialConfig(t *testing.T) {
 	mustEqual(t, "RemainingMs after config change",
 		m.state.Countdown.RemainingMs, int64(120000))
 
-	// After reset, we should snap back to the NEW initial config (120 s),
-	// not the original 60 s.
+	// 复位后应回到新的初始配置（120 秒），
+	// 而不是最初的 60 秒。
 	m.HandleEvent(UserStartTimerEvent{})
 	m.HandleEvent(TickEvent{DeltaMs: 10000})
 	m.HandleEvent(UserResetTimerEvent{})
@@ -451,9 +425,7 @@ func TestUserChangeConfigUpdatesInitialConfig(t *testing.T) {
 		m.state.Countdown.RemainingMs, int64(120000))
 }
 
-// -----------------------------------------------------------------------------
-// State query tests.
-// -----------------------------------------------------------------------------
+// 状态查询测试。
 
 func TestGetTimeInfoCountdown(t *testing.T) {
 	m := NewClockManager(cfgCountdownOnly(100))
@@ -488,9 +460,7 @@ func TestIsPausedAndIsFinishedHelpers(t *testing.T) {
 	mustFalse(t, "IsPaused after start", m.state.IsPaused())
 }
 
-// -----------------------------------------------------------------------------
-// Boundary condition tests.
-// -----------------------------------------------------------------------------
+// 边界条件测试。
 
 func TestCountdownZeroSeconds(t *testing.T) {
 	m := NewClockManager(cfgCountdownOnly(0))
@@ -527,12 +497,9 @@ func TestManySmallTicksAccumulate(t *testing.T) {
 		m.state.Countdown.RemainingMs, int64(99000))
 }
 
-// -----------------------------------------------------------------------------
-// Spec-required smoke tests.
-// -----------------------------------------------------------------------------
+// Smoke 测试。
 
 func TestCountdown25MinSingleTickDecrements(t *testing.T) {
-	// Spec: 25min → tick(60000ms) → remaining decrements to 24min.
 	cfg := cfgCountdownOnly(25 * Minute)
 	m := NewClockManager(cfg)
 	defer m.Deinit()
@@ -614,9 +581,7 @@ func TestModeSwitchResetsState(t *testing.T) {
 	mustTrue(t, "Stopwatch IsPaused after switch", w.IsPaused)
 }
 
-// -----------------------------------------------------------------------------
-// Event bus test — exercises the channel-based path the spec requires.
-// -----------------------------------------------------------------------------
+// 事件总线测试 —— 覆盖基于 channel 的派发路径。
 
 func TestRunReadsFromEventChannel(t *testing.T) {
 	m := NewClockManager(cfgStopwatch(3600))

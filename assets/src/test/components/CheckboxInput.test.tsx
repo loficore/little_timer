@@ -73,7 +73,6 @@ describe("CheckboxInput 组件", () => {
     const checkbox = screen.getByRole("checkbox");
     fireEvent.click(checkbox);
 
-    // 禁用状态下不会触发 onChange
     expect(mockOnChange).not.toHaveBeenCalled();
   });
 });

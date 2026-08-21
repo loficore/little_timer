@@ -35,11 +35,11 @@ export class HabitsPage extends BasePage {
     await this.page.goto(this.baseUrl);
     await this.page.locator('[data-testid="nav-habits"]').filter({ visible: true }).first().click();
     await this.page.waitForLoadState("networkidle");
-    // ponytail: wait for habit content to load
+    // 等待习惯内容加载完成。
     try {
       await this.page.waitForSelector('[data-testid="habit-set-item"]', { state: 'visible', timeout: 8000 });
     } catch {
-      // fallback: content may already be loaded or empty
+      // 回退：内容可能已加载或为空
     }
   }
 
@@ -72,7 +72,6 @@ export class HabitsPage extends BasePage {
     if (await this.isVisible(this.habitGoalInput)) {
       const goalHours = Math.floor(goalSeconds / 3600);
       const goalMinutes = Math.floor((goalSeconds % 3600) / 60);
-      // If there's a habit-goal-hours and habit-goal-minutes input, fill those
       const hoursInput = this.page.locator('[data-testid="habit-goal-hours"]');
       const minutesInput = this.page.locator('[data-testid="habit-goal-minutes"]');
       if (await hoursInput.isVisible()) { await hoursInput.fill(goalHours.toString()); }

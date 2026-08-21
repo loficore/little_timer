@@ -74,7 +74,7 @@ describe("logger utils", () => {
     });
 
     it("without wails bridge: falls back to fetch /api/log", () => {
-      // beforeEach stubs window without wails — desktop fallback
+      // beforeEach 桩的 window 没有 wails —— 走桌面回退路径
       logInfo("desktop test message");
 
       expect(mockFetch).toHaveBeenCalledWith(

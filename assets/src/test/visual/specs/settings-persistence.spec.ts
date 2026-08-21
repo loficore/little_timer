@@ -1,9 +1,9 @@
 import { test, expect, Page } from "@playwright/test";
 
-// ponytail: keys follow task spec verbatim. Note: actual app stores timezone/
-// sound_enabled server-side (API); theme_mode uses STORAGE_KEYS.THEME_MODE
-// ("lt_theme_mode") in useAppSettings.ts. These tests assert that any value
-// written to localStorage survives a full page reload.
+// Key 命名严格沿用任务规格。应用的 timezone/sound_enabled
+// 存于服务端（API）；theme_mode 在 useAppSettings.ts 中使用
+// STORAGE_KEYS.THEME_MODE（"lt_theme_mode"）。
+// 这些测试断言：写入 localStorage 的值能在整页刷新后保留。
 const baseURL = "http://127.0.0.1:5173";
 
 async function presetLocalStorage(page: Page, key: string, value: string) {

@@ -4,18 +4,15 @@ import (
 	"testing"
 )
 
-// -----------------------------------------------------------------------------
-// Test helper — small wrapper that opens a temp DB and seeds wallpaper rows.
-// -----------------------------------------------------------------------------
+// 测试辅助函数 —— 小包装：打开临时 DB 并播种壁纸行。
 
-// seedWallpaperRefs inserts a habit_set, a habit, and updates the settings
-// row (id=1) to all reference the same wallpaper ref.  Returns the habit_set
-// id and habit id.
+// seedWallpaperRefs 插入一个 habit_set、一个 habit，并把 settings 行
+// （id=1）都改为引用同一个壁纸 ref。返回 habit_set id 与 habit id。
 func seedWallpaperRefs(t *testing.T, m *SqliteManager, ref string) (int64, int64) {
 	t.Helper()
 	db := m.DB()
 
-	// Create a habit_set with the wallpaper ref.
+	// 创建一个带壁纸 ref 的 habit_set。
 	res, err := db.Exec(
 		`INSERT INTO habit_sets (name, description, color, wallpaper) VALUES (?, ?, ?, ?)`,
 		"test-set", "test desc", "#123456", ref,
@@ -28,7 +25,7 @@ func seedWallpaperRefs(t *testing.T, m *SqliteManager, ref string) (int64, int64
 		t.Fatalf("seed habit_set LastInsertId: %v", err)
 	}
 
-	// Create a habit under that set with the wallpaper ref.
+	// 在该 set 下创建一个带壁纸 ref 的 habit。
 	res, err = db.Exec(
 		`INSERT INTO habits (set_id, name, goal_seconds, color, wallpaper) VALUES (?, ?, ?, ?, ?)`,
 		setID, "test-habit", 600, "#654321", ref,
@@ -41,7 +38,7 @@ func seedWallpaperRefs(t *testing.T, m *SqliteManager, ref string) (int64, int64
 		t.Fatalf("seed habit LastInsertId: %v", err)
 	}
 
-	// Update the default settings row (id=1) to reference the wallpaper.
+	// 把默认 settings 行（id=1）也改为引用该壁纸。
 	_, err = db.Exec(`UPDATE settings SET wallpaper = ? WHERE id = 1`, ref)
 	if err != nil {
 		t.Fatalf("seed settings wallpaper: %v", err)
@@ -50,9 +47,7 @@ func seedWallpaperRefs(t *testing.T, m *SqliteManager, ref string) (int64, int64
 	return setID, habitID
 }
 
-// -----------------------------------------------------------------------------
-// Tests
-// -----------------------------------------------------------------------------
+// 测试。
 
 func TestCountWallpaperRefsWithSeededData(t *testing.T) {
 	m := openTempSqlite(t)
@@ -81,7 +76,7 @@ func TestUnbindWallpaperClearsAllThree(t *testing.T) {
 		t.Errorf("UnbindWallpaper affected = %d, want 3", affected)
 	}
 
-	// Verify all three tables' wallpaper columns are now empty.
+	// 验证三张表的 wallpaper 列现在都为空。
 	var habitWP string
 	if err := m.DB().QueryRow(
 		`SELECT wallpaper FROM habits WHERE name = 'test-habit'`,
@@ -118,7 +113,7 @@ func TestUnbindWallpaperIdempotent(t *testing.T) {
 	ref := "local:a.png"
 	seedWallpaperRefs(t, m, ref)
 
-	// First unbind — should return 3.
+	// 第一次 unbind —— 应返回 3。
 	affected, err := m.UnbindWallpaper(ref)
 	if err != nil {
 		t.Fatalf("UnbindWallpaper #1: %v", err)
@@ -127,7 +122,7 @@ func TestUnbindWallpaperIdempotent(t *testing.T) {
 		t.Errorf("UnbindWallpaper #1 = %d, want 3", affected)
 	}
 
-	// Second unbind — should return 0 (idempotent).
+	// 第二次 unbind —— 应返回 0（幂等）。
 	affected, err = m.UnbindWallpaper(ref)
 	if err != nil {
 		t.Fatalf("UnbindWallpaper #2: %v", err)
@@ -136,7 +131,7 @@ func TestUnbindWallpaperIdempotent(t *testing.T) {
 		t.Errorf("UnbindWallpaper #2 = %d, want 0 (idempotent)", affected)
 	}
 
-	// Count should also be 0.
+	// 计数也应为 0。
 	count, err := m.CountWallpaperRefs(ref)
 	if err != nil {
 		t.Fatalf("CountWallpaperRefs after unbind: %v", err)
@@ -149,7 +144,7 @@ func TestUnbindWallpaperIdempotent(t *testing.T) {
 func TestCountWallpaperRefsEmptyDB(t *testing.T) {
 	m := openTempSqlite(t)
 
-	// Fresh DB — no rows should reference any wallpaper.
+	// 全新 DB —— 不应有任何行引用壁纸。
 	count, err := m.CountWallpaperRefs("local:nonexistent.png")
 	if err != nil {
 		t.Fatalf("CountWallpaperRefs on empty DB: %v", err)
@@ -171,15 +166,15 @@ func TestUnbindWallpaperEmptyDB(t *testing.T) {
 	}
 }
 
-// TestLegacyWallpaperNotCounted verifies that legacy Zig-era values like
-// `/wallpapers/book.jpg` (which lack the `local:` prefix) are NOT matched
-// by CountWallpaperRefs or UnbindWallpaper.  The SQL uses exact-match
-// `wallpaper = ?`, so only the exact same string is affected.
+// TestLegacyWallpaperNotCounted 验证像 `/wallpapers/book.jpg` 这样的
+// 遗留壁纸值（缺少 `local:` 前缀）不会被 CountWallpaperRefs 或
+// UnbindWallpaper 匹配。SQL 使用精确匹配 `wallpaper = ?`，因此只有完全
+// 相同的字符串会受影响。
 func TestLegacyWallpaperNotCounted(t *testing.T) {
 	m := openTempSqlite(t)
 	db := m.DB()
 
-	// Seed a habit_set and habit with a legacy wallpaper path.
+	// 播种一个 habit_set 和一个 habit，壁纸用遗留路径。
 	_, err := db.Exec(
 		`INSERT INTO habit_sets (name, color, wallpaper) VALUES (?, ?, ?)`,
 		"legacy-set", "#000", "/wallpapers/book.jpg",
@@ -196,7 +191,7 @@ func TestLegacyWallpaperNotCounted(t *testing.T) {
 		t.Fatalf("seed legacy habit: %v", err)
 	}
 
-	// Counting a local: ref should return 0 — the legacy rows are NOT matched.
+	// 统计 local: ref 应返回 0 —— 遗留行不会被匹配。
 	count, err := m.CountWallpaperRefs("local:a.png")
 	if err != nil {
 		t.Fatalf("CountWallpaperRefs for local: ref: %v", err)
@@ -205,7 +200,7 @@ func TestLegacyWallpaperNotCounted(t *testing.T) {
 		t.Errorf("CountWallpaperRefs(local:a.png) with legacy rows = %d, want 0", count)
 	}
 
-	// Unbinding a local: ref should also leave legacy rows untouched.
+	// unbind 一个 local: ref 同样不应触碰遗留行。
 	affected, err := m.UnbindWallpaper("local:a.png")
 	if err != nil {
 		t.Fatalf("UnbindWallpaper for local: ref: %v", err)
@@ -214,7 +209,7 @@ func TestLegacyWallpaperNotCounted(t *testing.T) {
 		t.Errorf("UnbindWallpaper(local:a.png) with legacy rows = %d, want 0", affected)
 	}
 
-	// Verify the legacy rows still have their wallpaper.
+	// 验证遗留行的壁纸仍在。
 	var wp string
 	if err := db.QueryRow(
 		`SELECT wallpaper FROM habit_sets WHERE name = 'legacy-set'`,
@@ -235,13 +230,13 @@ func TestLegacyWallpaperNotCounted(t *testing.T) {
 	}
 }
 
-// TestUnbindWallpaperOnlyAffectsMatchingRef verifies that unbinding one
-// wallpaper ref does not clear other wallpaper refs.
+// TestUnbindWallpaperOnlyAffectsMatchingRef 验证 unbind 一个壁纸 ref
+// 不会清掉其他壁纸 ref。
 func TestUnbindWallpaperOnlyAffectsMatchingRef(t *testing.T) {
 	m := openTempSqlite(t)
 	db := m.DB()
 
-	// Seed one set with ref A and one with ref B.
+	// 一个 set 播种 ref A，另一个播种 ref B。
 	_, err := db.Exec(
 		`INSERT INTO habit_sets (name, color, wallpaper) VALUES (?, ?, ?)`,
 		"set-a", "#aaa", "local:a.png",
@@ -257,7 +252,7 @@ func TestUnbindWallpaperOnlyAffectsMatchingRef(t *testing.T) {
 		t.Fatalf("seed set-b: %v", err)
 	}
 
-	// Unbind only ref A.
+	// 只 unbind ref A。
 	affected, err := m.UnbindWallpaper("local:a.png")
 	if err != nil {
 		t.Fatalf("UnbindWallpaper: %v", err)
@@ -266,7 +261,7 @@ func TestUnbindWallpaperOnlyAffectsMatchingRef(t *testing.T) {
 		t.Errorf("UnbindWallpaper affected = %d, want 1", affected)
 	}
 
-	// Ref B should still be there.
+	// ref B 应还在。
 	var wp string
 	if err := db.QueryRow(
 		`SELECT wallpaper FROM habit_sets WHERE name = 'set-b'`,

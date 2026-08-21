@@ -20,7 +20,7 @@ describe("SSEClient", () => {
       onerror: null,
       addEventListener: vi.fn((event: string, handler: Function) => {
         if (event === "ping") {
-          // noop
+          // 空操作
         }
       }),
       readyState: 1,

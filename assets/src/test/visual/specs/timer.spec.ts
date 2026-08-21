@@ -130,15 +130,12 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.locator('.dropdown-select-btn').click();
     await page.waitForLoadState("networkidle");
     await page.locator('.my-surface-modal button').nth(1).click();
-    // Wait for display state transition
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-stopwatch-mode.png", { maxDiffPixels: 100 });
 
-    // Re-open dropdown (text changed to "秒表")
     await page.locator('.dropdown-select-btn').first().click();
     await page.waitForLoadState("networkidle");
     await page.locator('.my-surface-modal button').nth(0).click();
-    // Wait for display state transition
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-countdown-mode.png", { maxDiffPixels: 100 });
   });
@@ -166,53 +163,53 @@ test.describe("Timer 用户旅程 E2E", () => {
   test("stopwatch 完整旅程: start → pause → resume → reset", async ({ page }) => {
     const timerPage = new TimerPage(page);
 
-    // 1. Navigate and select stopwatch mode
+    // 1. 进入页面并选择正计时模式
     await timerPage.goto();
 
-    // 2. Select habit
+    // 2. 选择习惯
     await timerPage.selectHabit();
 
-    // Guard: reset any stale timer state from SSE sync or previous runs
+    // 防护：清理 SSE 同步或此前运行残留的过期计时器状态
     if (!(await timerPage.isTimerStopped())) {
       await timerPage.clickPause();
       await timerPage.clickReset();
       await page.waitForTimeout(300);
     }
 
-    // Click start - verify timer is running
+    // 点击开始 —— 验证计时器正在运行
     await timerPage.clickStart();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
-    // 3. Wait 1s - verify display ticks
+    // 3. 等待 1 秒 —— 验证显示在跳动
     const displayBefore = await timerPage.getTimerDisplayText();
     await page.waitForTimeout(1000);
 
     const displayAfter = await timerPage.getTimerDisplayText();
     expect(displayAfter).not.toBe(displayBefore);
 
-    // 4. Click pause - verify paused (neither running nor fully stopped)
+    // 4. 点击暂停 —— 验证已暂停（既非运行中也未完全停止）
     await timerPage.clickPause();
     expect(await timerPage.isTimerStopped()).toBe(false);
     expect(await timerPage.isTimerRunning()).toBe(false);
 
-    // 5. Resume via clickResume - verify running again
+    // 5. 通过 clickResume 继续 —— 验证恢复运行
     await timerPage.clickResume();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
-    // 6. Click reset - verify back to initial state (start button visible)
+    // 6. 点击重置 —— 验证回到初始状态（开始按钮可见）
     await timerPage.clickReset();
     expect(await timerPage.isTimerStopped()).toBe(true);
     expect(await timerPage.isTimerRunning()).toBe(false);
   });
 
   test("countdown 流程: start → finish → 验证状态", async ({ page }) => {
-    test.setTimeout(180000); // Allow up to 3 minutes
+    test.setTimeout(180000); // 最长允许 3 分钟
 
     const timerPage = new TimerPage(page);
 
     await timerPage.goto();
     await timerPage.selectMode("countdown");
-    await timerPage.setWorkDuration(1); // 1 minute
+    await timerPage.setWorkDuration(1); // 1 分钟
 
     await timerPage.selectHabit();
     await timerPage.clickStart();
@@ -220,7 +217,7 @@ test.describe("Timer 用户旅程 E2E", () => {
 
     await page.waitForTimeout(6000);
 
-    // Poll with longer interval (1s) to avoid busy waiting
+    // 以较长间隔（1 秒）轮询，避免忙等
     const finished = await timerPage.waitForTimerFinishPolling(120000, 1000);
     expect(finished).toBe(true);
     console.log("Timer finished successfully");
@@ -231,13 +228,13 @@ test.describe("Timer 用户旅程 E2E", () => {
   });
 
   test("countdown 完整旅程: start pause resume reset", async ({ page }) => {
-    test.setTimeout(180000); // Allow up to 3 minutes
+    test.setTimeout(180000); // 最长允许 3 分钟
 
     const timerPage = new TimerPage(page);
 
     await timerPage.goto();
     await timerPage.selectMode("countdown");
-    await timerPage.setWorkDuration(1); // 1 minute
+    await timerPage.setWorkDuration(1); // 1 分钟
 
     await timerPage.selectHabit();
     await timerPage.clickStart();
@@ -250,10 +247,10 @@ test.describe("Timer 用户旅程 E2E", () => {
     await timerPage.clickResume();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
-    // Poll with longer interval (1s) to avoid busy waiting
+    // 以较长间隔（1 秒）轮询，避免忙等
     const finished = await timerPage.waitForTimerFinishPolling(120000, 1000);
     if (!finished) {
-      // Fallback: manually finish if timer didn't finish in time
+      // 回退：超时未结束时手动完成
       await timerPage.clickFinish();
     }
 

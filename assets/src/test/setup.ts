@@ -1,13 +1,10 @@
-// 测试环境设置文件
 import { afterEach, vi, beforeAll } from 'vitest'
 import { cleanup } from '@testing-library/preact'
 
-// 每个测试后清理
 afterEach(() => {
   cleanup()
 })
 
-// Mock import.meta
 beforeAll(() => {
   vi.stubGlobal('import.meta', {
     env: {},
@@ -27,7 +24,6 @@ beforeAll(() => {
   });
 })
 
-// Mock 图标组件
 vi.mock('../utils/icons', async () => {
   const MockIcon = () => null;
   return {
@@ -71,7 +67,6 @@ vi.mock('../utils/icons', async () => {
   };
 });
 
-// Mock window.webui
 declare global {
   interface Window {
     webui?: {
@@ -80,7 +75,6 @@ declare global {
   }
 }
 
-// Mock localStorage
 const localStorageMock = {
   getItem: vi.fn(),
   setItem: vi.fn(),
@@ -89,7 +83,6 @@ const localStorageMock = {
 }
 global.localStorage = localStorageMock as any
 
-// Mock matchMedia
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: vi.fn().mockImplementation((query) => ({

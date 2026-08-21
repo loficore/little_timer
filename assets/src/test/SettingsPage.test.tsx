@@ -136,6 +136,10 @@ vi.mock("../components/StopwatchSettings", () => ({
   ),
 }));
 
+vi.mock("../components/GalleryContent", () => ({
+  GalleryContent: () => <div data-testid="gallery-content">Gallery</div>,
+}));
+
 describe("SettingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -213,6 +217,20 @@ describe("SettingsPage", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("stopwatch-settings")).toBeTruthy();
+    });
+  });
+
+  it("点击图库标签应该显示图库内容", async () => {
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-gallery")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("tab-gallery"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("gallery-content")).toBeTruthy();
     });
   });
 

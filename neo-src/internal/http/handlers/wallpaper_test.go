@@ -70,7 +70,7 @@ func createTestWallpaper(t *testing.T, dir, name string, content []byte) string 
 	return name
 }
 
-// createTestPNG generates a valid PNG of the given size (pixels) and returns the bytes.
+// createTestPNG 生成给定尺寸（像素）的合法 PNG 并返回字节。
 func createTestPNG(t *testing.T, width, height int) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -81,7 +81,7 @@ func createTestPNG(t *testing.T, width, height int) []byte {
 	return buf.Bytes()
 }
 
-// createTestJPEG generates a valid JPEG of the given size and returns the bytes.
+// createTestJPEG 生成给定尺寸的合法 JPEG 并返回字节。
 func createTestJPEG(t *testing.T, width, height int) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -92,7 +92,7 @@ func createTestJPEG(t *testing.T, width, height int) []byte {
 	return buf.Bytes()
 }
 
-// testWebpBytes is a valid lossless webp from golang.org/x/image/testdata.
+// testWebpBytes 是取自 golang.org/x/image/testdata 的合法无损 webp。
 var testWebpBytes = []byte{
 	0x52, 0x49, 0x46, 0x46, 0xb2, 0x01, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x4c,
 	0xa5, 0x01, 0x00, 0x00, 0x2f, 0x4a, 0xc0, 0x18, 0x00, 0x0f, 0x30, 0xff, 0xf3, 0x3f, 0xff, 0xf3,
@@ -124,13 +124,13 @@ var testWebpBytes = []byte{
 	0xd6, 0xf1, 0x2a, 0xc4, 0x08, 0x68, 0xb6, 0x87, 0x00, 0x00,
 }
 
-// uuidFilenameRe matches UUID-based filenames: 32 lowercase hex chars + dot + extension.
+// uuidFilenameRe 匹配 UUID 文件名：32 位小写 hex + 点 + 扩展名。
 var uuidFilenameRe = regexp.MustCompile(`^[0-9a-f]{32}\.(jpg|png|gif|svg|bmp)$`)
 
 func TestHandleWallpaperUpload(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 
-	// Generate a real PNG so the decode pipeline works.
+	// 生成真 PNG，让 decode 流水线能工作。
 	pngData := createTestPNG(t, 100, 100)
 
 	body := &bytes.Buffer{}
@@ -198,8 +198,8 @@ func TestHandleWallpaperUpload_MissingFile(t *testing.T) {
 	}
 }
 
-// TestHandleWallpaperUpload_InvalidImage verifies that non-image data
-// (e.g. text pretending to be PNG) is rejected with 400.
+// TestHandleWallpaperUpload_InvalidImage 验证非图片数据
+// （如伪装成 PNG 的文本）被 400 拒绝。
 func TestHandleWallpaperUpload_InvalidImage(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 
@@ -229,12 +229,11 @@ func TestHandleWallpaperUpload_InvalidImage(t *testing.T) {
 	}
 }
 
-// TestHandleWallpaperUpload_Resize verifies that images with a long edge
-// >2560px are scaled down.
+// TestHandleWallpaperUpload_Resize 验证长边 >2560px 的图片被缩小。
 func TestHandleWallpaperUpload_Resize(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 
-	// 4000×3000 PNG — long edge 4000 > 2560, should be scaled to 2560×1920.
+	// 4000×3000 PNG —— 长边 4000 > 2560，应缩放到 2560×1920。
 	pngData := createTestPNG(t, 4000, 3000)
 
 	body := &bytes.Buffer{}
@@ -261,7 +260,6 @@ func TestHandleWallpaperUpload_Resize(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &got)
 	filename := got["filename"].(string)
 
-	// Read back the saved file and check its dimensions.
 	filePath := filepath.Join(wallpaperDir, filename)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -274,18 +272,18 @@ func TestHandleWallpaperUpload_Resize(t *testing.T) {
 	if cfg.Width > 2560 || cfg.Height > 2560 {
 		t.Errorf("expected dimensions ≤2560, got %d×%d", cfg.Width, cfg.Height)
 	}
-	// Long edge should be exactly 2560 (or at least close, allowing minor rounding).
+	// 长边应恰好是 2560（或至少接近，允许微小取整误差）。
 	if cfg.Width != 2560 && cfg.Height != 2560 {
 		t.Errorf("expected long edge 2560, got %d×%d", cfg.Width, cfg.Height)
 	}
 }
 
-// TestHandleWallpaperUpload_DimensionsTooLarge verifies that images
-// >12000px in either dimension are rejected with 413.
+// TestHandleWallpaperUpload_DimensionsTooLarge 验证任一维度 >12000px
+// 的图片被 413 拒绝。
 func TestHandleWallpaperUpload_DimensionsTooLarge(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 
-	// 12001×1 PNG — exceeds the 12000px limit.
+	// 12001×1 PNG —— 超过 12000px 限制。
 	pngData := createTestPNG(t, 12001, 1)
 
 	body := &bytes.Buffer{}
@@ -314,8 +312,8 @@ func TestHandleWallpaperUpload_DimensionsTooLarge(t *testing.T) {
 	}
 }
 
-// TestHandleWallpaperUpload_GIFPassthrough verifies that GIF files are
-// stored unchanged (no decode/re-encode).
+// TestHandleWallpaperUpload_GIFPassthrough 验证 GIF 文件原样存储
+// （不解码/重编码）。
 func TestHandleWallpaperUpload_GIFPassthrough(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 
@@ -350,7 +348,6 @@ func TestHandleWallpaperUpload_GIFPassthrough(t *testing.T) {
 		t.Errorf("expected .gif extension, got %q", filename)
 	}
 
-	// Verify content is unchanged.
 	filePath := filepath.Join(wallpaperDir, filename)
 	saved, err := os.ReadFile(filePath)
 	if err != nil {
@@ -361,8 +358,8 @@ func TestHandleWallpaperUpload_GIFPassthrough(t *testing.T) {
 	}
 }
 
-// TestHandleWallpaperUpload_UniqueNames verifies that two uploads in the
-// same second produce different filenames (no overwrite).
+// TestHandleWallpaperUpload_UniqueNames 验证同一秒内两次上传产生不同
+// 文件名（不会覆盖）。
 func TestHandleWallpaperUpload_UniqueNames(t *testing.T) {
 	a, _ := newWallpaperTestApp(t)
 
@@ -442,12 +439,12 @@ func TestHandleWallpaperList(t *testing.T) {
 func TestHandleWallpaperList_SizeAndRefs(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 
-	// Two real PNG wallpapers on disk.
+	// 磁盘上两个真实 PNG 壁纸。
 	fileA := createTestWallpaper(t, wallpaperDir, "refA.png", createTestPNG(t, 10, 10))
 	fileB := createTestWallpaper(t, wallpaperDir, "refB.png", createTestPNG(t, 20, 20))
 
-	// Seed a habit_set + habit that references local:<fileA>.  habits.set_id
-	// is NOT NULL with FK → habit_sets, so create the set first.
+	// 播种一个引用 local:<fileA> 的 habit_set + habit。habits.set_id 是
+	// NOT NULL 且外键指向 habit_sets，所以先建 set。
 	if _, err := a.SQLite.DB().Exec(`INSERT INTO habit_sets (name) VALUES (?)`, "test-set"); err != nil {
 		t.Fatalf("insert habit_set: %v", err)
 	}
@@ -626,20 +623,17 @@ func TestHandleWallpaperDelete(t *testing.T) {
 	}
 }
 
-// TestHandleWallpaperDelete_UnbindsRefs verifies that deleting a wallpaper
-// referenced by habits first clears the wallpaper column (via the
-// transactional UnbindWallpaper) and returns the unbound count, then removes
-// the file.  Two habits bound to the same wallpaper => unbound=2 and both
-// rows' wallpaper column becomes ''.
+// TestHandleWallpaperDelete_UnbindsRefs 验证删除被 habits 引用的壁纸时，
+// 先清空 wallpaper 列（经事务性的 UnbindWallpaper）并返回解绑数量，再删除
+// 文件。两个 habit 绑定同一壁纸 => unbound=2，且两行的 wallpaper 列都被清空。
 func TestHandleWallpaperDelete_UnbindsRefs(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 	filename := createTestWallpaper(t, wallpaperDir, "bound_delete.png", []byte("to delete"))
 
-	// Seed a habit_set first — habits.set_id is NOT NULL FK to habit_sets.
+	// 先播种 habit_set —— habits.set_id 是 NOT NULL 且外键指向 habit_sets。
 	if _, err := a.SQLite.DB().Exec(`INSERT INTO habit_sets (name) VALUES (?)`, "set-A"); err != nil {
 		t.Fatalf("insert habit_set: %v", err)
 	}
-	// Two habits referencing the same wallpaper.
 	for _, name := range []string{"habit-1", "habit-2"} {
 		if _, err := a.SQLite.DB().Exec(
 			`INSERT INTO habits (set_id, name, goal_seconds, color, wallpaper) VALUES (1, ?, 0, '#000000', ?)`,
@@ -649,7 +643,7 @@ func TestHandleWallpaperDelete_UnbindsRefs(t *testing.T) {
 		}
 	}
 
-	// Sanity: refs before delete.
+	// 合理性检查：删除前的引用数。
 	refs, err := a.SQLite.CountWallpaperRefs("local:" + filename)
 	if err != nil {
 		t.Fatalf("count refs: %v", err)
@@ -682,12 +676,10 @@ func TestHandleWallpaperDelete_UnbindsRefs(t *testing.T) {
 		t.Errorf("unbound = %v, want 2", got["unbound"])
 	}
 
-	// File physically removed.
 	if _, err := os.Stat(filepath.Join(wallpaperDir, filename)); !os.IsNotExist(err) {
 		t.Errorf("file still exists after deletion")
 	}
 
-	// Both habits' wallpaper column now empty.
 	var w1, w2 string
 	if err := a.SQLite.DB().QueryRow(`SELECT wallpaper FROM habits WHERE name = 'habit-1'`).Scan(&w1); err != nil {
 		t.Fatalf("read habit-1 wallpaper: %v", err)
@@ -700,8 +692,8 @@ func TestHandleWallpaperDelete_UnbindsRefs(t *testing.T) {
 	}
 }
 
-// TestHandleWallpaperDelete_Unbound verifies that deleting a wallpaper with
-// no DB references still succeeds and reports unbound=0.
+// TestHandleWallpaperDelete_Unbound 验证删除没有 DB 引用的壁纸仍然成功，
+// 且报告 unbound=0。
 func TestHandleWallpaperDelete_Unbound(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 	filename := createTestWallpaper(t, wallpaperDir, "unbound_delete.png", []byte("to delete"))
@@ -830,9 +822,7 @@ func TestWallpapersDir(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// processWallpaperImage unit tests
-// ---------------------------------------------------------------------------
+// processWallpaperImage 单元测试
 
 func TestProcessWallpaperImage_PNG(t *testing.T) {
 	pngData := createTestPNG(t, 100, 100)
@@ -871,7 +861,7 @@ func TestProcessWallpaperImage_JPEG(t *testing.T) {
 }
 
 func TestProcessWallpaperImage_Resize(t *testing.T) {
-	// 4000×3000 — long edge 4000, should scale to 2560×1920.
+	// 4000×3000 —— 长边 4000，应缩放到 2560×1920。
 	pngData := createTestPNG(t, 4000, 3000)
 	out, outExt, err := processWallpaperImage(bytes.NewReader(pngData), ".png")
 	if err != nil {
@@ -890,7 +880,7 @@ func TestProcessWallpaperImage_Resize(t *testing.T) {
 }
 
 func TestProcessWallpaperImage_WebpToJPEG(t *testing.T) {
-	// webp produces .jpg output.
+	// webp 输出 .jpg。
 	out, outExt, err := processWallpaperImage(bytes.NewReader(testWebpBytes), ".webp")
 	if err != nil {
 		t.Fatalf("processWallpaperImage webp: %v", err)
@@ -947,16 +937,14 @@ func TestNewUUIDHex(t *testing.T) {
 		t.Errorf("uuid %q does not match hex pattern", u)
 	}
 
-	// Uniqueness check.
+	// 唯一性检查。
 	u2 := newUUIDHex()
 	if u == u2 {
 		t.Errorf("two UUIDs are identical: %q", u)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// POST /api/wallpapers/from-url  tests
-// ---------------------------------------------------------------------------
+// POST /api/wallpapers/from-url 测试
 
 func TestHandleWallpaperFromURL(t *testing.T) {
 	t.Run("FromURL_Happy", func(t *testing.T) {
@@ -1104,7 +1092,7 @@ func TestHandleWallpaperFromURL(t *testing.T) {
 
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "image/png")
-			// Write 50MB + 1 byte
+			// 写入 50MB + 1 字节
 			chunk := make([]byte, 1024*1024)
 			for i := 0; i < 50; i++ {
 				w.Write(chunk)
@@ -1144,7 +1132,7 @@ func TestHandleWallpaperFromURL(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
-		// ponytail: 5s client timeout for the test — 35s server sleep triggers it
+		// 客户端 5s 超时 —— server 端 35s 睡眠触发它。
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		req := httptest.NewRequest(http.MethodPost, "/api/wallpapers/from-url", bytes.NewReader(body))
@@ -1221,7 +1209,7 @@ func TestHandleWallpaperFromURL(t *testing.T) {
 	t.Run("FromURL_WebpToJPEG", func(t *testing.T) {
 		a, wallpaperDir := newWallpaperTestApp(t)
 
-		// Serve a valid webp; the handler should transcode to .jpg.
+		// 提供合法 webp；handler 应转码为 .jpg。
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "image/webp")
 			w.Write(testWebpBytes)
@@ -1256,9 +1244,7 @@ func TestHandleWallpaperFromURL(t *testing.T) {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// SSRF guard tests (WallpaperFromURL host / redirect checks)
-// ---------------------------------------------------------------------------
+// SSRF 防护测试（WallpaperFromURL 的 host / redirect 检查）
 
 func TestIsBlockedHost(t *testing.T) {
 	cases := []struct {
@@ -1266,7 +1252,7 @@ func TestIsBlockedHost(t *testing.T) {
 		host string
 		want bool
 	}{
-		// Blocked: cloud metadata + non-routable private / link-local ranges.
+		// 应拦截：云 metadata + 不可路由的 private / link-local 段。
 		{"metadata ipv4", "169.254.169.254", true},
 		{"private 10/8", "10.0.0.1", true},
 		{"private 172.16/12", "172.16.0.1", true},
@@ -1277,7 +1263,7 @@ func TestIsBlockedHost(t *testing.T) {
 		{"ipv6 unique local", "fd00::1", true},
 		{"unspecified", "0.0.0.0", true},
 		{"multicast", "224.0.0.1", true},
-		// Allowed: loopback (dev/test httptest) + public addresses.
+		// 应放行：loopback（dev/test httptest）+ 公网地址。
 		{"loopback ipv4", "127.0.0.1", false},
 		{"loopback ipv6", "::1", false},
 		{"public ipv4", "8.8.8.8", false},
@@ -1293,14 +1279,14 @@ func TestIsBlockedHost(t *testing.T) {
 }
 
 func TestIsBlockedHost_ResolutionFailure(t *testing.T) {
-	// A hostname that cannot resolve must be treated as blocked (conservative).
+	// 无法解析的 host 名必须按拦截处理（保守策略）。
 	if !isBlockedHost("does-not-exist.invalid") {
 		t.Errorf("isBlockedHost(does-not-exist.invalid) = false, want true (blocked)")
 	}
 }
 
 func TestIsBlockedHost_MappedIPv6(t *testing.T) {
-	// ::ffff:127.0.0.1 is loopback → allowed; ::ffff:10.0.0.1 is private → blocked.
+	// ::ffff:127.0.0.1 是 loopback → 放行；::ffff:10.0.0.1 是 private → 拦截。
 	if isBlockedHost("::ffff:127.0.0.1") {
 		t.Errorf("::ffff:127.0.0.1 should be allowed (loopback)")
 	}
@@ -1309,8 +1295,8 @@ func TestIsBlockedHost_MappedIPv6(t *testing.T) {
 	}
 }
 
-// postFromURL is a small helper: POST {"url": u} to WallpaperFromURL and
-// return the recorder.
+// postFromURL 是个小辅助函数：POST {"url": u} 到 WallpaperFromURL 并
+// 返回 recorder。
 func postFromURL(t *testing.T, a *app.App, rawURL string) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"url": rawURL})
@@ -1327,8 +1313,8 @@ func postFromURL(t *testing.T, a *app.App, rawURL string) *httptest.ResponseReco
 func TestHandleWallpaperFromURL_SSRFBlocked(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 
-	// Real private / metadata IPs must be rejected before any connection is
-	// attempted — no server needed, the block happens at parse time.
+	// 真实的 private / metadata IP 必须在任何连接发起之前被拒绝 ——
+	// 不需要 server，拦截发生在 parse 时。
 	for _, rawURL := range []string{
 		"http://169.254.169.254/latest/meta-data/",
 		"http://10.0.0.1/",
@@ -1352,8 +1338,8 @@ func TestHandleWallpaperFromURL_SSRFBlocked(t *testing.T) {
 }
 
 func TestHandleWallpaperFromURL_SSRFBlockedHostname(t *testing.T) {
-	// A hostname resolving to a blocked IP must be rejected.  Stub the
-	// resolver so the test is hermetic (no external DNS).
+	// 解析到被拦截 IP 的 host 名必须被拒绝。打桩 resolver 让测试自包含
+	// （不依赖外部 DNS）。
 	a, wallpaperDir := newWallpaperTestApp(t)
 
 	orig := netLookupIP
@@ -1378,8 +1364,8 @@ func TestHandleWallpaperFromURL_SSRFBlockedHostname(t *testing.T) {
 func TestHandleWallpaperFromURL_SSRFRedirectBlocked(t *testing.T) {
 	a, wallpaperDir := newWallpaperTestApp(t)
 
-	// Public-ish start (loopback httptest is allowed) that redirects into a
-	// blocked private range → must be refused, not followed.
+	// 起点看似公开（loopback httptest 被放行），但 redirect 进被拦截的
+	// private 段 → 必须拒绝，不能跟随。
 	redirectSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "http://10.0.0.1/x.png", http.StatusFound)
 	}))
@@ -1399,9 +1385,7 @@ func TestHandleWallpaperFromURL_SSRFRedirectBlocked(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Content-Type case-insensitivity (RFC 7231 §3.1.1.1)
-// ---------------------------------------------------------------------------
+// Content-Type 大小写不敏感（RFC 7231 §3.1.1.1）
 
 func TestContentTypeToExt_CaseInsensitive(t *testing.T) {
 	cases := []struct{ in, want string }{
@@ -1429,7 +1413,7 @@ func TestHandleWallpaperFromURL_ContentTypeCaseInsensitive(t *testing.T) {
 
 	pngData := createTestPNG(t, 100, 100)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Uppercase Content-Type per RFC 7231 (media types are case-insensitive).
+		// 按 RFC 7231 用大写 Content-Type（media type 大小写不敏感）。
 		w.Header().Set("Content-Type", "IMAGE/PNG")
 		w.Write(pngData)
 	}))

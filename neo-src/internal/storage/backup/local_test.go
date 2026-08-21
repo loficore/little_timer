@@ -1,32 +1,9 @@
 package backup
 
-// Tests for LocalAdapter and BackupManager.cleanupOldBackups.
+// LocalAdapter 与 BackupManager.cleanupOldBackups 的测试。
 //
-// The task spec described a JSON-based "PresetInfo / presetID" API that
-// doesn't exist in this codebase; the real adapter deals in flat
-// `presets_backup_<unix>.db` files via the BackupAdapter interface
-// (Backup / Restore / List / Delete / TestConnection).  These tests
-// map the spec's intent onto the actual surface:
-//
-//   Save happy path          → TestLocalBackupRestoreRoundTrip
-//   Save with traversal name → TestLocalBackupPathTraversalEscapesDir
-//   Save to unreadable dir   → TestLocalBackupUnwritableDir
-//   Save overwrites          → TestLocalBackupOverwritesExisting
-//   Load nonexistent         → TestLocalRestoreNotFound
-//   Load corrupt / empty     → TestLocalRestoreCorruptOrEmptyFile
-//   List empty dir           → TestLocalListEmptyDir
-//   List multiple files      → TestLocalListMultipleBackups
-//   Delete existing          → TestLocalDeleteExisting
-//   Delete nonexistent       → TestLocalDeleteNonexistentIsIdempotent
-//   Retention keepCount=0    → TestRetentionKeepZero
-//   Retention keepCount=1    → TestRetentionKeepOne
-//   Retention keepCount=2    → TestRetentionKeepTwoOfFive
-//   Retention mixed groups   → TestRetentionMixedGroupsKeepsNewest
-//   Retention skips corrupt  → TestRetentionSkipsCorruptFiles
-//
-// Retention tests drive the BackupManager (the only owner of
-// cleanupOldBackups) but exercise the LocalAdapter's Delete path
-// underneath, which is what we're really guarding.
+// 保留策略测试驱动 BackupManager（cleanupOldBackups 的唯一持有者），
+// 但底下实际走的是 LocalAdapter 的 Delete 路径 —— 那才是真正要守住的。
 
 import (
 	"encoding/json"
@@ -42,13 +19,8 @@ import (
 	"little-timer/internal/storage"
 )
 
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-// writeBytes writes content to path with 0600 perms and fails the test
-// on error.  Used to seed both "src" files (for Backup) and to plant
-// pre-existing backup files (for List / retention tests).
+// writeBytes 以 0600 权限把内容写入 path，出错则测试失败。既用来播种
+// "src" 文件（供 Backup），也用来预置已存在的备份文件（供 List / 保留策略测试）。
 func writeBytes(t *testing.T, path string, content []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, content, 0o600); err != nil {
@@ -56,8 +28,7 @@ func writeBytes(t *testing.T, path string, content []byte) {
 	}
 }
 
-// readBytes is the read-side counterpart — convenience for asserting
-// round-trip integrity without dragging in io.ReadFile noise.
+// readBytes 是读侧对应物 —— 方便断言往返完整性，省去 io.ReadFile 噪音。
 func readBytes(t *testing.T, path string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -67,26 +38,23 @@ func readBytes(t *testing.T, path string) []byte {
 	return b
 }
 
-// backupName builds a canonical filename: `presets_backup_<ts>.db`.
-// Keeping the format in one place means tests stay in sync if the
-// convention ever changes.
+// backupName 构造规范文件名：`presets_backup_<ts>.db`。格式集中一处，
+// 约定将来变化时测试能保持同步。
 func backupName(ts int64) string {
 	return filenamePrefix + strconv.FormatInt(ts, 10) + filenameSuffix
 }
 
-// makeAdapter creates a LocalAdapter rooted at t.TempDir()/backups and
-// returns both the adapter and the underlying directory (tests that
-// need to inspect files reach for it directly).
+// makeAdapter 创建根在 t.TempDir()/backups 的 LocalAdapter，同时返回
+// adapter 和底层目录（需要检查文件的测试直接用后者）。
 func makeAdapter(t *testing.T) (*LocalAdapter, string) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "backups")
 	return NewLocalAdapter(dir), dir
 }
 
-// newManager is the minimum-viable BackupManager for retention tests:
-// it doesn't need a live sqlite connection because we call
-// cleanupOldBackups directly.  The adapter is the real LocalAdapter so
-// Delete round-trips through the filesystem.
+// newManager 是保留策略测试最小可用的 BackupManager：直接调用
+// cleanupOldBackups，不需要活的 sqlite 连接。adapter 用真 LocalAdapter，
+// 所以 Delete 会真实走文件系统。
 func newManager(t *testing.T, dir string, maxBackups int) *BackupManager {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -100,14 +68,10 @@ func newManager(t *testing.T, dir string, maxBackups int) *BackupManager {
 	return m
 }
 
-// -----------------------------------------------------------------------------
-// Backup / Restore round-trip
-// -----------------------------------------------------------------------------
-
 func TestLocalBackupRestoreRoundTrip(t *testing.T) {
 	adapter, dir := makeAdapter(t)
 
-	// Seed a "database" file with deterministic content.
+	// 播种一个内容确定性的 "database" 文件。
 	src := filepath.Join(t.TempDir(), "presets.db")
 	payload := []byte("SQLite-format-3\x00fake-presets-bytes")
 	writeBytes(t, src, payload)
@@ -117,13 +81,13 @@ func TestLocalBackupRestoreRoundTrip(t *testing.T) {
 		t.Fatalf("Backup: %v", err)
 	}
 
-	// The backup file must now exist on disk in the configured dir.
+	// 备份文件现在必须存在于配置的目录里。
 	backupPath := filepath.Join(dir, name)
 	if _, err := os.Stat(backupPath); err != nil {
 		t.Fatalf("expected backup at %s: %v", backupPath, err)
 	}
 
-	// Restore into a fresh destination and confirm byte-identical copy.
+	// 恢复到全新目的地并确认逐字节一致的拷贝。
 	dst := filepath.Join(t.TempDir(), "restored.db")
 	if err := adapter.Restore(name, dst); err != nil {
 		t.Fatalf("Restore: %v", err)
@@ -133,21 +97,20 @@ func TestLocalBackupRestoreRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLocalBackupPathTraversalEscapesDir documents a known limitation:
-// filepath.Join collapses `..` segments, so a backupName of
-// "../../../tmp/x" escapes the configured directory.  We're not
-// asserting the spec's "should reject" expectation (the code doesn't
-// reject) — we assert what actually happens so future fixes show up
-// as a behavior change in the diff rather than a silent regression.
+// TestLocalBackupPathTraversalEscapesDir 记录一个已知限制：
+// filepath.Join 会折叠 `..` 段，所以形如 "../../../tmp/x" 的 backupName
+// 会逃出配置的目录。我们并不断言规范里的 "should reject" 预期（代码
+// 没拒绝）—— 断言实际发生的行为，未来的修复会表现为 diff 里的行为变化，
+// 而不是无声回归。
 func TestLocalBackupPathTraversalEscapesDir(t *testing.T) {
 	adapter, dir := makeAdapter(t)
 
-	// Plant a "src" file outside the backup dir; we'll point Backup at
-	// it and ask it to land somewhere outside the configured dir via `..`.
+	// 在备份目录外放一个 "src" 文件；让 Backup 指向它，并借助 `..` 把它
+	// 落到配置目录之外。
 	src := filepath.Join(t.TempDir(), "src.db")
 	writeBytes(t, src, []byte("traversal"))
 
-	// Two levels up + a sibling temp dir.
+	// 上跳两级 + 一个同级临时目录。
 	outsideDir := t.TempDir()
 	outsideFile := filepath.Base(outsideDir) + "_" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".db"
 	backupName := filepath.Join("..", "..", filepath.Base(outsideDir), outsideFile)
@@ -156,7 +119,7 @@ func TestLocalBackupPathTraversalEscapesDir(t *testing.T) {
 		t.Fatalf("Backup with traversal name: %v", err)
 	}
 
-	// The file should NOT have been written inside the backup dir.
+	// 文件不应写进备份目录内。
 	if entries, err := os.ReadDir(dir); err != nil {
 		t.Fatalf("ReadDir %s: %v", dir, err)
 	} else if len(entries) != 0 {
@@ -167,16 +130,14 @@ func TestLocalBackupPathTraversalEscapesDir(t *testing.T) {
 		t.Errorf("backup dir should be empty, got: %v", names)
 	}
 
-	// And it SHOULD have landed outside (filepath.Join cleans the
-	// traversal segments).
+	// 而且它应该落在了外面（filepath.Join 清理了 traversal 段）。
 	resolved := filepath.Join(outsideDir, outsideFile)
 	if _, err := os.Stat(resolved); err != nil {
 		t.Fatalf("expected escape at %s: %v", resolved, err)
 	}
 
-	// Restore resolves the same way (filepath.Join + Clean), so it
-	// happily reads the escaped file.  Document the symmetric
-	// behavior — both sides honor the traversal equally.
+	// Restore 的解析方式相同（filepath.Join + Clean），所以它照样读到
+	// 逃出的文件。记录这个对称行为 —— 两侧同等地接受 traversal。
 	dst := filepath.Join(t.TempDir(), "dst.db")
 	if err := adapter.Restore(backupName, dst); err != nil {
 		t.Errorf("Restore with traversal name should mirror Backup: %v", err)
@@ -185,13 +146,12 @@ func TestLocalBackupPathTraversalEscapesDir(t *testing.T) {
 	}
 }
 
-// TestLocalBackupUnwritableDir confirms Backup fails when the target
-// directory can't be created.  We point the adapter at a path that
-// definitively cannot exist (a child of /proc, which is read-only on
-// Linux), so neither MkdirAll nor the subsequent copy can succeed.
+// TestLocalBackupUnwritableDir 确认目标目录无法创建时 Backup 失败。
+// 我们把 adapter 指向一个确定不可能存在的路径（/proc 的子路径，Linux 上
+// 只读），MkdirAll 和随后的拷贝都无法成功。
 //
-// As root, filesystem perms don't bind — skip to keep the suite
-// meaningful for non-root users without spurious failures on root CI.
+// root 用户不受文件系统权限约束 —— 跳过，以免 root CI 上出现无谓失败，
+// 同时保持对非 root 用户的意义。
 func TestLocalBackupUnwritableDir(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("permission test is unreliable as root")
@@ -224,7 +184,7 @@ func TestLocalBackupOverwritesExisting(t *testing.T) {
 		t.Fatalf("Backup #2: %v", err)
 	}
 
-	// Exactly one file in the backup dir, and it's the second payload.
+	// 备份目录里恰好一个文件，且是第二个 payload。
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
@@ -246,10 +206,6 @@ func TestLocalBackupOverwritesExisting(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Restore error / edge cases
-// -----------------------------------------------------------------------------
-
 func TestLocalRestoreNotFound(t *testing.T) {
 	adapter, _ := makeAdapter(t)
 
@@ -266,12 +222,10 @@ func TestLocalRestoreNotFound(t *testing.T) {
 	}
 }
 
-// TestLocalRestoreCorruptOrEmptyFile confirms Restore doesn't validate
-// payload content — it just copies bytes.  We're guarding against
-// panics, not data semantics (semantics belong to whatever opens the
-// restored file as a SQLite DB at a higher level).  Three flavors of
-// "garbage" cover the practical edge cases: empty, partial SQLite
-// header, and pure random bytes.
+// TestLocalRestoreCorruptOrEmptyFile 确认 Restore 不校验 payload 内容 ——
+// 它只拷字节。我们防的是 panic，不是数据语义（语义归上层那个把恢复文件当
+// SQLite DB 打开的角色）。三种“垃圾”覆盖实际边缘情况：空、残缺 SQLite
+// 头、纯随机字节。
 func TestLocalRestoreCorruptOrEmptyFile(t *testing.T) {
 	adapter, dir := makeAdapter(t)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -294,8 +248,8 @@ func TestLocalRestoreCorruptOrEmptyFile(t *testing.T) {
 
 			dst := filepath.Join(t.TempDir(), "dst.db")
 
-			// Must not panic; outcome depends on content but Restore
-			// itself never errors on bad bytes — it's a raw copy.
+			// 不得 panic；结果取决于内容，但 Restore 本身对坏字节从不报错 ——
+			// 它是裸拷贝。
 			defer func() {
 				if r := recover(); r != nil {
 					t.Errorf("Restore panicked on %s content: %v", tc.name, r)
@@ -311,16 +265,11 @@ func TestLocalRestoreCorruptOrEmptyFile(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// List
-// -----------------------------------------------------------------------------
-
 func TestLocalListEmptyDir(t *testing.T) {
 	adapter, dir := makeAdapter(t)
 
-	// Adapter is configured but the dir doesn't exist yet — the
-	// documented behavior is "no entries, no error" rather than an
-	// ErrFileNotFound surfaced to the caller.
+	// adapter 已配置但目录还不存在 —— 文档行为是“无条目、无错误”，
+	// 而不是向调用方抛 ErrFileNotFound。
 	got, err := adapter.List()
 	if err != nil {
 		t.Fatalf("List on missing dir: %v", err)
@@ -329,8 +278,7 @@ func TestLocalListEmptyDir(t *testing.T) {
 		t.Errorf("List on missing dir: got %d entries, want 0: %+v", len(got), got)
 	}
 
-	// Now create an empty dir; List should also return an empty slice
-	// (and the returned slice must be non-nil-able to range over).
+	// 现在创建空目录；List 也应返回空 slice（返回的 slice 必须可安全 range）。
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -349,8 +297,7 @@ func TestLocalListMultipleBackups(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	// Three well-formed backups + a couple of decoys (wrong prefix /
-	// wrong suffix / wrong ts) to exercise the filter.
+	// 三个格式正确的备份 + 几个诱饵（错前缀 / 错后缀 / 错 ts）来考验过滤器。
 	good := []struct {
 		name string
 		ts   int64
@@ -363,11 +310,11 @@ func TestLocalListMultipleBackups(t *testing.T) {
 	for _, g := range good {
 		writeBytes(t, filepath.Join(dir, g.name), make([]byte, g.size))
 	}
-	// Decoys — must be ignored.
+	// 诱饵 —— 必须被忽略。
 	writeBytes(t, filepath.Join(dir, "unrelated.txt"), []byte("nope"))
 	writeBytes(t, filepath.Join(dir, "presets_backup_notanumber.db"), []byte("garbage"))
 	writeBytes(t, filepath.Join(dir, "presets_backup_4000"), []byte("missing suffix"))
-	// A directory with the right name should also be skipped.
+	// 名字正确的目录也应被跳过。
 	if err := os.Mkdir(filepath.Join(dir, backupName(5000)), 0o700); err != nil {
 		t.Fatalf("mkdir decoy: %v", err)
 	}
@@ -380,8 +327,7 @@ func TestLocalListMultipleBackups(t *testing.T) {
 		t.Fatalf("List len: got %d, want %d (entries: %+v)", len(got), len(good), got)
 	}
 
-	// Sort by timestamp for stable comparison — List ordering isn't
-	// guaranteed by the contract.
+	// 按时间戳排序以获得稳定比较 —— 契约不保证 List 的顺序。
 	sort.Slice(got, func(i, j int) bool { return got[i].Timestamp < got[j].Timestamp })
 	for i, g := range good {
 		if got[i].Name != g.name {
@@ -395,10 +341,6 @@ func TestLocalListMultipleBackups(t *testing.T) {
 		}
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Delete
-// -----------------------------------------------------------------------------
 
 func TestLocalDeleteExisting(t *testing.T) {
 	adapter, dir := makeAdapter(t)
@@ -421,28 +363,22 @@ func TestLocalDeleteExisting(t *testing.T) {
 func TestLocalDeleteNonexistentIsIdempotent(t *testing.T) {
 	adapter, _ := makeAdapter(t)
 
-	// Spec calls this "idempotent" — Delete of a missing file must NOT
-	// return an error.  This matches the Zig source's "not-found is
-	// OK on delete" comment.
+	// 规范称之为“幂等” —— 删除缺失文件绝不能返回错误：
+	// delete 时 not-found 视为 OK。
 	if err := adapter.Delete(backupName(9999)); err != nil {
 		t.Errorf("Delete on missing file: got %v, want nil", err)
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Retention (BackupManager.cleanupOldBackups)
-// -----------------------------------------------------------------------------
-
-// TestRetentionKeepZero drops every backup when the cap is 0.  We
-// bypass SetMaxBackups because it refuses non-positive values (a
-// reasonable production guardrail, but exactly the case the test
-// pins).  Test lives in the same package, so we can poke the field.
+// TestRetentionKeepZero 在上限为 0 时删掉所有备份。我们绕过
+// SetMaxBackups，因为它拒绝非正值（生产中合理的护栏，但恰恰是本测试钉住
+// 的情况）。测试与生产代码同包，所以可以直接改字段。
 func TestRetentionKeepZero(t *testing.T) {
 	dir := t.TempDir()
 	m := newManager(t, dir, 5)
-	m.maxBackups = 0 // direct poke — SetMaxBackups would reject 0.
+	m.maxBackups = 0 // 直接改字段 —— SetMaxBackups 会拒绝 0。
 
-	// Plant three backups.
+	// 放三个备份。
 	for _, ts := range []int64{10, 20, 30} {
 		writeBytes(t, filepath.Join(dir, backupName(ts)), []byte("x"))
 	}
@@ -516,8 +452,8 @@ func TestRetentionKeepTwoOfFive(t *testing.T) {
 		t.Fatalf("keepCount=2: expected 2 backups, got %d: %v", len(entries), names)
 	}
 
-	// CleanupOldBackups sorts ascending by timestamp and trims the
-	// head, so the two survivors must be the two newest.
+	// cleanupOldBackups 按时间戳升序排序并从头修剪，所以存活的两个
+	// 必须是最新的两个。
 	gotNames := make(map[string]bool, 2)
 	for _, e := range entries {
 		gotNames[e.Name()] = true
@@ -529,17 +465,16 @@ func TestRetentionKeepTwoOfFive(t *testing.T) {
 	}
 }
 
-// TestRetentionMixedGroupsKeepsNewest mirrors the spec's "presetA has
-// 3, presetB has 5" idea, adapted to the real flat-namespace model:
-// backups live in one dir but cluster around two distinct timestamp
-// ranges.  The cleanup logic is uniform — keep the N newest globally —
-// so the test asserts that behavior rather than inventing a
-// per-preset concept that doesn't exist.
+// TestRetentionMixedGroupsKeepsNewest 对应规范里“presetA 有 3 份、
+// presetB 有 5 份”的想法，适配到真实的扁平命名空间模型：备份在同一个
+// 目录里，但聚成两个明显不同的时间戳区间。清理逻辑是统一的 —— 全局保留
+// 最新 N 份 —— 所以测试断言这一行为，而不是虚构一个不存在的按 preset
+// 分组的机制。
 func TestRetentionMixedGroupsKeepsNewest(t *testing.T) {
 	dir := t.TempDir()
 	m := newManager(t, dir, 3)
 
-	// "Group A": low timestamps; "Group B": high timestamps.
+	// “A 组”：低时间戳；“B 组”：高时间戳。
 	groupA := []int64{100, 200, 300}
 	groupB := []int64{1_000_000, 1_000_100, 1_000_200, 1_000_300, 1_000_400}
 	for _, ts := range append(append([]int64{}, groupA...), groupB...) {
@@ -562,7 +497,7 @@ func TestRetentionMixedGroupsKeepsNewest(t *testing.T) {
 		t.Fatalf("expected 3 backups, got %d: %v", len(entries), names)
 	}
 
-	// Three newest are the three from Group B with the highest ts.
+	// 最新三个是 B 组里 ts 最大的三个。
 	sort.Slice(entries, func(i, j int) bool {
 		ti, _ := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(entries[i].Name(), filenamePrefix), filenameSuffix), 10, 64)
 		tj, _ := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(entries[j].Name(), filenamePrefix), filenameSuffix), 10, 64)
@@ -576,15 +511,14 @@ func TestRetentionMixedGroupsKeepsNewest(t *testing.T) {
 	}
 }
 
-// TestRetentionSkipsCorruptFiles verifies the resilience property the
-// spec called out: corrupt / unparseable entries must not abort the
-// retention pass, and they don't count against the retention cap
-// (since cleanupOldBackups never sees them — List filters them out).
+// TestRetentionSkipsCorruptFiles 验证规范点名的韧性：损坏 / 不可解析的
+// 条目绝不能中断保留流程，也不计入保留上限（cleanupOldBackups 根本看不到
+// 它们 —— List 已过滤）。
 func TestRetentionSkipsCorruptFiles(t *testing.T) {
 	dir := t.TempDir()
 	m := newManager(t, dir, 2)
 
-	// 3 valid backups + 2 with garbage names (timestamp doesn't parse).
+	// 3 个有效备份 + 2 个垃圾名字（时间戳解析不了）。
 	valid := []int64{1000, 2000, 3000}
 	for _, ts := range valid {
 		writeBytes(t, filepath.Join(dir, backupName(ts)), []byte("x"))
@@ -596,10 +530,8 @@ func TestRetentionSkipsCorruptFiles(t *testing.T) {
 		t.Fatalf("cleanupOldBackups: %v", err)
 	}
 
-	// After cleanup we expect exactly 2 surviving files (the two
-	// newest valid backups), and BOTH corrupt files must still be on
-	// disk — they're not part of the parsed set, so cleanup never
-	// touched them.
+	// 清理后应恰好剩 2 个存活文件（两个最新的有效备份），且两个损坏文件
+	// 必须仍在磁盘上 —— 它们不在解析出的集合里，清理从未碰过它们。
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
@@ -612,7 +544,7 @@ func TestRetentionSkipsCorruptFiles(t *testing.T) {
 		t.Fatalf("expected 4 files (2 newest + 2 corrupt), got %d: %v", len(entries), names)
 	}
 
-	// Verify the two newest survived.
+	// 验证两个最新的存活了下来。
 	have := map[string]bool{}
 	for _, e := range entries {
 		have[e.Name()] = true
@@ -628,13 +560,8 @@ func TestRetentionSkipsCorruptFiles(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// CreateBackup integration tests (VACUUM INTO, SHA256, manifest, cleanup)
-// -----------------------------------------------------------------------------
-
-// newRealManager creates a BackupManager backed by a real SqliteManager
-// for tests that exercise VACUUM INTO (which requires a live SQLite
-// connection).
+// newRealManager 创建由真实 SqliteManager 支撑的 BackupManager，
+// 供需要 VACUUM INTO（要求活的 SQLite 连接）的测试使用。
 func newRealManager(t *testing.T) (*BackupManager, string, *storage.SqliteManager) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -650,7 +577,7 @@ func newRealManager(t *testing.T) (*BackupManager, string, *storage.SqliteManage
 		t.Fatalf("sqlite migrate: %v", err)
 	}
 
-	// Insert a row so the backup has real content.
+	// 插入一行，让备份有真实内容。
 	if _, err := sqlite.DB().Exec(`CREATE TABLE IF NOT EXISTS test_items (id INTEGER PRIMARY KEY, val TEXT);`); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
@@ -665,10 +592,9 @@ func newRealManager(t *testing.T) (*BackupManager, string, *storage.SqliteManage
 	return mgr, backupDir, sqlite
 }
 
-// TestCreateBackup_VacuumInto exercises VACUUM INTO by creating a real
-// SQLite database, inserting a row, and calling CreateBackup.  Asserts
-// the backup file exists, the temp file is gone, and manifest.json was
-// written.
+// TestCreateBackup_VacuumInto 走通 VACUUM INTO：建真实 SQLite 数据库、
+// 插一行、调用 CreateBackup。断言备份文件存在、临时文件已消失、
+// manifest.json 已写入。
 func TestCreateBackup_VacuumInto(t *testing.T) {
 	mgr, backupDir, _ := newRealManager(t)
 
@@ -680,13 +606,13 @@ func TestCreateBackup_VacuumInto(t *testing.T) {
 		t.Fatal("CreateBackup returned empty name")
 	}
 
-	// Backup file must exist in backupDir.
+	// 备份文件必须存在于 backupDir。
 	backupPath := filepath.Join(backupDir, name)
 	if _, err := os.Stat(backupPath); err != nil {
 		t.Fatalf("expected backup file at %s: %v", backupPath, err)
 	}
 
-	// Temp file `lt_backup_*.db` must be gone (defer os.Remove).
+	// 临时文件 `lt_backup_*.db` 必须已消失（defer os.Remove）。
 	ltGlob := filepath.Join(filepath.Dir(mgr.dbPath), "lt_backup_*.db")
 	matches, err := filepath.Glob(ltGlob)
 	if err != nil {
@@ -696,15 +622,15 @@ func TestCreateBackup_VacuumInto(t *testing.T) {
 		t.Errorf("temp file(s) still present: %v", matches)
 	}
 
-	// manifest.json must exist in backupDir.
+	// manifest.json 必须存在于 backupDir。
 	manifestPath := filepath.Join(backupDir, "manifest.json")
 	if _, err := os.Stat(manifestPath); err != nil {
 		t.Fatalf("expected manifest.json at %s: %v", manifestPath, err)
 	}
 }
 
-// TestCreateBackup_SHA256Match verifies the SHA-256 in manifest.json
-// matches an independently computed digest of the backup file.
+// TestCreateBackup_SHA256Match 验证 manifest.json 里的 SHA-256 与独立
+// 计算出的备份文件摘要一致。
 func TestCreateBackup_SHA256Match(t *testing.T) {
 	mgr, backupDir, _ := newRealManager(t)
 
@@ -713,7 +639,7 @@ func TestCreateBackup_SHA256Match(t *testing.T) {
 		t.Fatalf("CreateBackup: %v", err)
 	}
 
-	// Read manifest.json and extract the sha256 field.
+	// 读 manifest.json 并取出 sha256 字段。
 	manifestPath := filepath.Join(backupDir, "manifest.json")
 	manifestData, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -733,7 +659,7 @@ func TestCreateBackup_SHA256Match(t *testing.T) {
 		t.Fatalf("unmarshal manifest: %v", err)
 	}
 
-	// Find the entry for our backup name.
+	// 找到我们这个备份名对应的条目。
 	var entrySHA256 string
 	for _, b := range manifest.Backups {
 		if b.Name == name {
@@ -745,7 +671,7 @@ func TestCreateBackup_SHA256Match(t *testing.T) {
 		t.Fatalf("manifest has no entry for backup %q", name)
 	}
 
-	// Independently compute SHA-256 of the backup file.
+	// 独立计算备份文件的 SHA-256。
 	backupPath := filepath.Join(backupDir, name)
 	computed, err := sha256File(backupPath)
 	if err != nil {
@@ -757,12 +683,10 @@ func TestCreateBackup_SHA256Match(t *testing.T) {
 	}
 }
 
-// TestCreateBackup_SingleQuotePath is the regression test for the
-// VACUUM INTO single-quote escaping fix: the temp file lives next to
-// the DB, so a dbPath inside a directory whose name contains a single
-// quote (e.g. `O'Brien`) previously produced broken SQL and a failed
-// backup.  SQLite has no bind-parameter support for VACUUM INTO, so the
-// path must be escaped by doubling the quote.
+// TestCreateBackup_SingleQuotePath 是 VACUUM INTO 单引号转义修复的回归
+// 测试：临时文件与 DB 同目录，所以 dbPath 位于名字含单引号的目录（如
+// `O'Brien`）时，旧代码会产生破碎 SQL 并让备份失败。SQLite 的 VACUUM INTO
+// 不支持绑定参数，路径里的引号必须翻倍转义。
 func TestCreateBackup_SingleQuotePath(t *testing.T) {
 	quoteDir := filepath.Join(t.TempDir(), "O'Brien")
 	if err := os.MkdirAll(quoteDir, 0o700); err != nil {
@@ -799,17 +723,17 @@ func TestCreateBackup_SingleQuotePath(t *testing.T) {
 		t.Fatal("CreateBackup returned empty name")
 	}
 
-	// Backup file must exist in backupDir.
+	// 备份文件必须存在于 backupDir。
 	if _, err := os.Stat(filepath.Join(backupDir, name)); err != nil {
 		t.Fatalf("expected backup file at %s: %v", filepath.Join(backupDir, name), err)
 	}
 
-	// manifest.json must exist in backupDir.
+	// manifest.json 必须存在于 backupDir。
 	if _, err := os.Stat(filepath.Join(backupDir, "manifest.json")); err != nil {
 		t.Fatalf("expected manifest.json at %s: %v", filepath.Join(backupDir, "manifest.json"), err)
 	}
 
-	// Temp file `lt_backup_*.db` must be gone (defer os.Remove).
+	// 临时文件 `lt_backup_*.db` 必须已消失（defer os.Remove）。
 	matches, err := filepath.Glob(filepath.Join(quoteDir, "lt_backup_*.db"))
 	if err != nil {
 		t.Fatalf("glob: %v", err)
@@ -819,8 +743,8 @@ func TestCreateBackup_SingleQuotePath(t *testing.T) {
 	}
 }
 
-// TestCreateBackup_TempCleanup verifies that even when the adapter's
-// Backup() fails, the temp file is cleaned up (defer os.Remove).
+// TestCreateBackup_TempCleanup 验证即使 adapter 的 Backup() 失败，
+// 临时文件也会被清理（defer os.Remove）。
 func TestCreateBackup_TempCleanup(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -851,7 +775,7 @@ func TestCreateBackup_TempCleanup(t *testing.T) {
 		t.Fatal("CreateBackup should fail with injected error")
 	}
 
-	// Temp file `lt_backup_*.db` must be gone (defer os.Remove in CreateBackup).
+	// 临时文件 `lt_backup_*.db` 必须已消失（CreateBackup 里的 defer os.Remove）。
 	ltGlob := filepath.Join(filepath.Dir(dbPath), "lt_backup_*.db")
 	matches, err := filepath.Glob(ltGlob)
 	if err != nil {
@@ -862,8 +786,8 @@ func TestCreateBackup_TempCleanup(t *testing.T) {
 	}
 }
 
-// TestCreateBackup_ManifestWritten verifies the structure of manifest.json
-// after CreateBackup: version, backups array with name/timestamp/sha256/size_bytes.
+// TestCreateBackup_ManifestWritten 验证 CreateBackup 之后 manifest.json
+// 的结构：version、backups 数组含 name/timestamp/sha256/size_bytes。
 func TestCreateBackup_ManifestWritten(t *testing.T) {
 	mgr, backupDir, _ := newRealManager(t)
 
@@ -900,7 +824,7 @@ func TestCreateBackup_ManifestWritten(t *testing.T) {
 		t.Fatal("manifest has no backups")
 	}
 
-	// Find the entry for our backup.
+	// 找到我们这个备份的条目。
 	var found bool
 	for _, b := range manifest.Backups {
 		if b.Name == name {

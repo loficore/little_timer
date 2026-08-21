@@ -12,10 +12,6 @@ import (
 	"little-timer/internal/http/app"
 )
 
-// =============================================================================
-// /api/habit-sets
-// =============================================================================
-
 func TestHandleHabitSetCreate(t *testing.T) {
 	a := newTestApp(t)
 	gin.SetMode(gin.TestMode)
@@ -85,7 +81,6 @@ func TestHandleHabitSetCreate_DefaultColor(t *testing.T) {
 func TestHandleHabitSetList(t *testing.T) {
 	a := newTestApp(t)
 
-	// Seed two habit sets.
 	for _, name := range []string{"A", "B"} {
 		gin.SetMode(gin.TestMode)
 		w := httptest.NewRecorder()
@@ -126,7 +121,6 @@ func TestHandleHabitSetList(t *testing.T) {
 func TestHandleHabitSetUpdate(t *testing.T) {
 	a := newTestApp(t)
 
-	// Create the set first.
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -197,7 +191,6 @@ func TestHandleHabitSetUpdate_MissingName(t *testing.T) {
 func TestHandleHabitSetDelete(t *testing.T) {
 	a := newTestApp(t)
 
-	// Create the set first.
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -242,10 +235,6 @@ func TestHandleHabitSetDelete_InvalidID(t *testing.T) {
 		t.Errorf("code = %d, want 400", w.Code)
 	}
 }
-
-// =============================================================================
-// /api/habits
-// =============================================================================
 
 func newHabitSetID(t *testing.T, a *app.App, name string) int64 {
 	t.Helper()
@@ -503,14 +492,9 @@ func TestHandleHabitUpdate_MissingName(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Dedup Tests
-// =============================================================================
-
 func TestHandleHabitCreate_DuplicateName(t *testing.T) {
 	a := newTestApp(t)
 	setID := newHabitSetID(t, a, "DedupSet")
-	// Create first habit
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/habits",
@@ -520,7 +504,6 @@ func TestHandleHabitCreate_DuplicateName(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("first create: %d", w.Code)
 	}
-	// Try duplicate name in same set
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Request = httptest.NewRequest(http.MethodPost, "/api/habits",
@@ -536,7 +519,6 @@ func TestHandleHabitCreate_DuplicateNameCrossSet(t *testing.T) {
 	a := newTestApp(t)
 	setID1 := newHabitSetID(t, a, "DedupSet1")
 	setID2 := newHabitSetID(t, a, "DedupSet2")
-	// Create habit in set1
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/habits",
@@ -546,7 +528,6 @@ func TestHandleHabitCreate_DuplicateNameCrossSet(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("first create: %d", w.Code)
 	}
-	// Same name in set2 → should succeed
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Request = httptest.NewRequest(http.MethodPost, "/api/habits",
@@ -561,11 +542,9 @@ func TestHandleHabitCreate_DuplicateNameCrossSet(t *testing.T) {
 func TestHandleHabitUpdate_DuplicateName(t *testing.T) {
 	a := newTestApp(t)
 	setID := newHabitSetID(t, a, "UpdDedupSet")
-	// Create two habits
 	habit1ID := newHabitID(t, a, setID, "Book")
 	_ = newHabitID(t, a, setID, "Movie")
 
-	// Update habit1's name to habit2's name
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/habits/"+itoa(habit1ID),
@@ -678,10 +657,6 @@ func TestHandleHabitDetail_NotFound(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// /api/sessions
-// =============================================================================
-
 func TestHandleSessionCreate(t *testing.T) {
 	a := newTestApp(t)
 	setID := newHabitSetID(t, a, "SessCreate")
@@ -728,7 +703,7 @@ func TestHandleSessionCreate_DefaultCount(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
 	}
-	// count default is applied server-side; success is enough here.
+	// count 默认值由服务端应用；这里成功即可。
 }
 
 func TestHandleSessionList_Today(t *testing.T) {
@@ -736,7 +711,6 @@ func TestHandleSessionList_Today(t *testing.T) {
 	setID := newHabitSetID(t, a, "SessList")
 	habitID := newHabitID(t, a, setID, "SessListHabit")
 
-	// Seed a session.
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -745,7 +719,6 @@ func TestHandleSessionList_Today(t *testing.T) {
 	c.Set("app", a)
 	SessionCreate(c)
 
-	// List with no filter → today.
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Request = httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
@@ -798,10 +771,6 @@ func TestHandleSessionList_ByRange(t *testing.T) {
 		t.Errorf("code = %d, want 200", w.Code)
 	}
 }
-
-// =============================================================================
-// /api/timer-sessions
-// =============================================================================
 
 func TestHandleTimerSessionCreate(t *testing.T) {
 	a := newTestApp(t)
@@ -863,7 +832,6 @@ func TestHandleTimerSessionList_NoActive(t *testing.T) {
 func TestHandleTimerSessionList_ByID(t *testing.T) {
 	a := newTestApp(t)
 
-	// Create a session.
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -884,7 +852,6 @@ func TestHandleTimerSessionList_ByID(t *testing.T) {
 	if w2.Code != http.StatusOK {
 		t.Fatalf("code = %d, body = %s", w2.Code, w2.Body.String())
 	}
-	// The response uses uppercase field names ("ID" not "id").
 	var got map[string]any
 	_ = json.Unmarshal(w2.Body.Bytes(), &got)
 	if int64(got["id"].(float64)) != id {
@@ -925,7 +892,6 @@ func TestHandleTimerSessionList_NotFound(t *testing.T) {
 func TestHandleTimerSessionUpdate(t *testing.T) {
 	a := newTestApp(t)
 
-	// Create a session to update.
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -976,7 +942,6 @@ func TestHandleTimerSessionUpdate_InvalidID(t *testing.T) {
 func TestHandleTimerSessionDelete(t *testing.T) {
 	a := newTestApp(t)
 
-	// Create a session to delete.
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1022,10 +987,6 @@ func TestHandleTimerSessionDelete_InvalidID(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
 func itoa(i int64) string {
 	const digits = "0123456789"
 	if i == 0 {
@@ -1049,16 +1010,11 @@ func itoa(i int64) string {
 	return string(buf[pos:])
 }
 
-// =============================================================================
-// /api/sessions DELETE & pagination
-// =============================================================================
-
 func TestHandleSessionDelete(t *testing.T) {
 	a := newTestApp(t)
 	setID := newHabitSetID(t, a, "DelSession")
 	habitID := newHabitID(t, a, setID, "DelHabit")
 
-	// Create session via handler
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1076,7 +1032,6 @@ func TestHandleSessionDelete(t *testing.T) {
 	}
 	sessionID := int64(created["id"].(float64))
 
-	// Delete it
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Request = httptest.NewRequest(http.MethodDelete, "/api/sessions/"+itoa(sessionID), nil)
@@ -1109,7 +1064,6 @@ func TestHandleSessionList_Pagination(t *testing.T) {
 	setID := newHabitSetID(t, a, "SessPag")
 	habitID := newHabitID(t, a, setID, "SessPagHabit")
 
-	// Create 3 sessions
 	for i := 0; i < 3; i++ {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -1122,7 +1076,6 @@ func TestHandleSessionList_Pagination(t *testing.T) {
 		}
 	}
 
-	// List with limit=2
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Request = httptest.NewRequest(http.MethodGet, "/api/sessions?limit=2", nil)
@@ -1141,14 +1094,9 @@ func TestHandleSessionList_Pagination(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Pagination Tests
-// =============================================================================
-
 func TestHandleHabitList_Pagination(t *testing.T) {
 	a := newTestApp(t)
 	setID := newHabitSetID(t, a, "HabPagSet")
-	// Create 3 habits
 	for _, name := range []string{"HabPag1", "HabPag2", "HabPag3"} {
 		gin.SetMode(gin.TestMode)
 		w := httptest.NewRecorder()
@@ -1161,7 +1109,6 @@ func TestHandleHabitList_Pagination(t *testing.T) {
 			t.Fatalf("create habit: %d", w.Code)
 		}
 	}
-	// List with limit=2
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Request = httptest.NewRequest(http.MethodGet, "/api/habits?limit=2", nil)
@@ -1228,7 +1175,6 @@ func TestHandleHabitStats(t *testing.T) {
 	setID := newHabitSetID(t, a, "StatsSet")
 	habitID := newHabitID(t, a, setID, "StatsHabit")
 
-	// Create a session
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1240,7 +1186,6 @@ func TestHandleHabitStats(t *testing.T) {
 		t.Fatalf("create session: %d", w.Code)
 	}
 
-	// Get stats
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Request = httptest.NewRequest(http.MethodGet, "/api/habits/"+itoa(habitID)+"/stats", nil)

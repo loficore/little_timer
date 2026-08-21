@@ -52,27 +52,27 @@ export class TimerPage extends BasePage {
   }
 
   async selectHabit() {
-    // Click the habit picker button to open the modal
+    // 点击习惯选择按钮打开弹窗
     const habitPickerBtn = this.page.locator('[data-testid="timer-habit-picker"]');
     await habitPickerBtn.click();
 
-    // Wait for modal to be fully visible
+    // 等待弹窗完全显示
     await this.page.waitForSelector('.my-surface-modal', { state: 'visible', timeout: 5000 });
 
-    // Click the LAST habit button (most recently created, at the bottom of the list)
-    // This is important for user-journey tests which create a new habit and need to select it
+    // 点击最后一个习惯按钮（最近创建、位于列表底部）
+    // user-journey 测试会新建习惯并需要选中它，因此这一点很重要
     const lastHabit = this.page.locator(`[data-testid^="habit-option-"]`).last();
     await lastHabit.click();
 
-    // Wait for modal to close (assertion-based, fails fast if still open)
+    // 等待弹窗关闭（基于断言，若仍打开会快速失败）
     const modal = this.page.locator('.my-surface-modal');
     try {
       await expect(modal).toBeHidden({ timeout: 5000 });
     } catch {
-      // Force-close: press Escape key
+      // 强制关闭：按 Escape 键
       await this.page.keyboard.press('Escape');
       await this.page.waitForTimeout(300);
-      // Fallback: click the backdrop if visible
+      // 回退：遮罩仍可见时点击遮罩
       const backdrop = this.page.locator('.my-overlay-backdrop');
       if (await backdrop.isVisible()) {
         await backdrop.click({ position: { x: 10, y: 10 } });
@@ -81,7 +81,7 @@ export class TimerPage extends BasePage {
       await expect(modal).toBeHidden({ timeout: 3000 });
     }
 
-    // Small wait for state to settle
+    // 稍等片刻让状态稳定
     await this.page.waitForTimeout(300);
   }
 
@@ -98,8 +98,8 @@ export class TimerPage extends BasePage {
   }
 
   /**
-   * Set work duration for countdown mode via API (more reliable than UI fill in Preact).
-   * @param minutes Work duration in MINUTES (e.g., 5 = 5 minutes = 300 seconds)
+   * 通过 API 设置倒计时模式的工作时长（比在 Preact 中走 UI 填写更可靠）。
+   * @param minutes 工作时长，单位为分钟（如 5 = 5 分钟 = 300 秒）
    */
   async setWorkDuration(minutes: number) {
     await this.page.evaluate(async (mins) => {
@@ -127,8 +127,8 @@ export class TimerPage extends BasePage {
   }
 
   /**
-   * Poll backend state until timer is finished (SSE-independent).
-   * Use this instead of waitForTimerFinish when SSE may be unreliable (e.g., CI headless).
+   * 轮询后端状态直到计时结束（不依赖 SSE）。
+   * 当 SSE 可能不可靠时（如 CI 无头环境）用它替代 waitForTimerFinish。
    */
   async waitForTimerFinishPolling(timeoutMs: number = 30000, intervalMs: number = 500): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;

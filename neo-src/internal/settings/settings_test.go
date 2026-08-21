@@ -1,10 +1,7 @@
-// Package settings — tests for the validator + SettingsManager.
+// Package settings —— validator + SettingsManager 的测试。
 //
-// Validator tests assert every Zig rule verbatim (timezone, language,
-// duration, loop count, loop interval, max-seconds, tick-interval,
-// preset name, preset count, auth token).  Manager tests round-trip
-// through a temporary SQLite DB so we exercise the full Load/Save
-// pathway end-to-end.
+// Validator 测试在边界上断言每条规则；manager 测试经由临时 SQLite DB
+// 做往返，端到端覆盖完整 Load/Save 路径。
 package settings
 
 import (
@@ -18,9 +15,7 @@ import (
 	"little-timer/internal/domain"
 )
 
-// -----------------------------------------------------------------------------
-// Validator — every Zig rule tested at the boundary.
-// -----------------------------------------------------------------------------
+// Validator —— 边界测试。
 
 func TestValidateTimezone(t *testing.T) {
 	v := NewValidator()
@@ -206,9 +201,7 @@ func TestSafeConversions(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// SettingsManager — round-trip + JSON parsing.
-// -----------------------------------------------------------------------------
+// SettingsManager —— 往返 + JSON 解析。
 
 func newTestManager(t *testing.T) *SettingsManager {
 	t.Helper()
@@ -354,20 +347,20 @@ func TestManagerBackupConfigCredentialsEncryptedAtRest(t *testing.T) {
 	defer mgr.Close()
 
 	payload, _ := json.Marshal(map[string]any{
-		"target_type":     "s3",
-		"s3_endpoint":     "https://s3.amazonaws.com",
-		"s3_bucket":       "mybucket",
-		"s3_region":       "us-east-1",
-		"s3_access_key":   "AKIA-PLAINTEXT-CANARY",
-		"s3_secret_key":   "secret-PLAINTEXT-CANARY",
-		"s3_path_prefix":  "lt/",
+		"target_type":    "s3",
+		"s3_endpoint":    "https://s3.amazonaws.com",
+		"s3_bucket":      "mybucket",
+		"s3_region":      "us-east-1",
+		"s3_access_key":  "AKIA-PLAINTEXT-CANARY",
+		"s3_secret_key":  "secret-PLAINTEXT-CANARY",
+		"s3_path_prefix": "lt/",
 	})
 	if err := mgr.UpdateBackupConfigFromJSON(string(payload)); err != nil {
 		t.Fatalf("UpdateBackupConfigFromJSON: %v", err)
 	}
 
-	// Inspect the on-disk SQLite blob — the access key literal must NOT
-	// appear in the encrypted BLOB column.
+	// 检查磁盘上的 SQLite blob —— access key 明文字符串绝不能出现在
+	// 加密 BLOB 列里。
 	data, err := os.ReadFile(dbPath)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
@@ -379,7 +372,7 @@ func TestManagerBackupConfigCredentialsEncryptedAtRest(t *testing.T) {
 		t.Error("secret key plaintext leaked into SQLite file")
 	}
 
-	// Reload and confirm the decryption round-trips.
+	// 重载并确认解密能往返。
 	mgr2, err := New(dbPath)
 	if err != nil {
 		t.Fatalf("New #2: %v", err)
@@ -437,9 +430,7 @@ func TestManagerBuildClockConfig(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// PresetsManager — Zig source makes it a near-no-op; assert that.
-// -----------------------------------------------------------------------------
+// PresetsManager —— 近乎 no-op；断言这一点。
 
 func TestPresetsManagerIsNoop(t *testing.T) {
 	p := NewPresetsManager()

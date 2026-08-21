@@ -55,14 +55,11 @@ describe("WallpaperModal", () => {
       />
     );
 
-    // Switch to Image tab
     fireEvent.click(screen.getByText("Image"));
 
-    // Type a URL
     const input = screen.getByPlaceholderText("Enter URL") as HTMLInputElement;
     fireEvent.input(input, { target: { value: "https://example.com/bg.jpg" } });
 
-    // Click Add
     const addButton = screen.getByText("Add");
     fireEvent.click(addButton);
 
@@ -71,7 +68,6 @@ describe("WallpaperModal", () => {
     });
 
     expect(mockOnChange).toHaveBeenCalledWith("local:123_test.png");
-    // MUST NOT call onChange with raw URL
     expect(mockOnChange).not.toHaveBeenCalledWith("https://example.com/bg.jpg");
   });
 
@@ -98,7 +94,6 @@ describe("WallpaperModal", () => {
       expect(screen.getByText("Fetch failed")).toBeTruthy();
     });
 
-    // onChange must NOT be called with raw URL
     expect(mockOnChange).not.toHaveBeenCalledWith("https://bad.example.com/bg.jpg");
     expect(mockOnChange).not.toHaveBeenCalled();
   });
@@ -118,7 +113,6 @@ describe("WallpaperModal", () => {
     const input = screen.getByPlaceholderText("Enter URL") as HTMLInputElement;
     fireEvent.input(input, { target: { value: "https://example.com/test.jpg" } });
 
-    // onChange should NOT be called just from typing
     expect(mockOnChange).not.toHaveBeenCalled();
   });
 

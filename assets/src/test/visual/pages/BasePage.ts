@@ -28,7 +28,7 @@ export class BasePage {
   async click(selector: string, options?: { timeout?: number }) {
     await this.waitForSelector(selector);
     await this.page.locator(selector).scrollIntoViewIfNeeded({ block: 'center' });
-    // Use JS click to bypass viewport validation
+    // 用 JS click 绕过视口校验
     await this.page.evaluate((sel) => {
       document.querySelector(sel)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     }, selector);

@@ -175,7 +175,6 @@ describe("HabitsPage", () => {
       expect(screen.getByText("Morning")).toBeTruthy();
     });
 
-    // 展开习惯集以渲染习惯卡片
     fireEvent.click(screen.getByText("Morning"));
 
     await waitFor(() => {
@@ -214,10 +213,8 @@ describe("HabitsPage", () => {
       return el as HTMLImageElement;
     });
 
-    // 模拟图片加载失败
     fireEvent.error(img);
 
-    // 回退渐变 div 出现
     await waitFor(() => {
       expect(screen.getByTestId("habit-card-fallback")).toBeTruthy();
     });

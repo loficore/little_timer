@@ -1,15 +1,11 @@
-// Package settings — integration tests.
+// Package settings —— 集成测试。
 //
-// settings_test.go covers the validator + manager unit paths; this
-// file covers the lifecycle paths that need a real SQLite file
-// end-to-end.  Two test cases:
+// settings_test.go 覆盖 validator + manager 的单元路径；本文件覆盖需要
+// 真实 SQLite 文件端到端跑通的生命周期路径。两个用例：
 //
-//   - FullRoundTrip: write → close → reopen → read → confirm the
-//     stored values are identical to what was written.  Mirrors the
-//     Zig test "完整往返持久化" in test_settings.zig.
-//   - ValidatorRejectsInvalid: every public validator rejects the
-//     boundary-out-of-range inputs with the documented sentinel
-//     error.
+//   - FullRoundTrip：写 → 关闭 → 重开 → 读 → 确认存下的值与写入的完全一致。
+//   - ValidatorRejectsInvalid：每个公开 validator 对越界输入都返回文档化的
+//     哨兵错误。
 package settings
 
 import (
@@ -20,17 +16,14 @@ import (
 	"little-timer/internal/domain"
 )
 
-// TestSettings_FullRoundTrip exercises the full Save → Close → Open →
-// Load cycle with non-default values across every persisted column of
-// SettingsConfig + BackupConfig.
+// TestSettings_FullRoundTrip 用非默认值贯穿 SettingsConfig + BackupConfig
+// 的每个持久化列，走完 Save → Close → Open → Load 全循环。
 //
-// Scope note: only fields that have a column in the v8 SQLite schema
-// round-trip cleanly.  Fields without a column (EnableFileLogging,
-// LogDir, MaxFileSize, MaxFileCount, Auth) are populated in-memory by
-// parseSettingsFromJSON but not persisted by SaveSettings, so they're
-// excluded from the comparison below.  The BackupConfig is persisted
-// via a separate saveBackupConfigToDB pathway that DOES cover the full
-// field set.
+// 范围说明：只有在 v8 SQLite schema 中有列的字段才能干净往返。没有列的
+// 字段（EnableFileLogging、LogDir、MaxFileSize、MaxFileCount、Auth）由
+// parseSettingsFromJSON 在内存中填充，但不被 SaveSettings 持久化，因此
+// 不参与下面的比较。BackupConfig 经由独立的 saveBackupConfigToDB 路径
+// 持久化，那条路径确实覆盖完整字段集。
 func TestSettings_FullRoundTrip(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "roundtrip.db")
 
@@ -79,7 +72,6 @@ func TestSettings_FullRoundTrip(t *testing.T) {
 		HasMasterPassword: true,
 	}
 
-	// Phase 1: write.
 	{
 		mgr, err := New(dbPath)
 		if err != nil {
@@ -108,7 +100,7 @@ func TestSettings_FullRoundTrip(t *testing.T) {
 		}
 	}
 
-	// Phase 2: reopen + read.
+	// 重开 + 读取。
 	mgr2, err := New(dbPath)
 	if err != nil {
 		t.Fatalf("New #2: %v", err)
@@ -202,9 +194,8 @@ func TestSettings_FullRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSettings_ValidatorRejectsInvalid hits every public validator
-// method with an out-of-range input and asserts the documented
-// sentinel error type comes back.
+// TestSettings_ValidatorRejectsInvalid 用越界输入打遍每个公开 validator
+// 方法，断言返回的是文档化的哨兵错误类型。
 func TestSettings_ValidatorRejectsInvalid(t *testing.T) {
 	v := NewValidator()
 	mgr := newTestManager(t)

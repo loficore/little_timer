@@ -14,11 +14,11 @@ test('verify selectors', async ({ page }) => {
   const allNavHabits = await page.locator('[data-testid="nav-habits"]').count();
   console.log('all nav-habits count:', allNavHabits);
   
-  // Check visibility
+  // 检查可见性
   const visibleCount = await page.locator('[data-testid="nav-habits"]').filter({ visible: true }).count();
   console.log('visible nav-habits:', visibleCount);
   
-  // Try clicking visible one
+  // 尝试点击可见的那个
   if (visibleCount > 0) {
     await page.locator('[data-testid="nav-habits"]').filter({ visible: true }).first().click({ timeout: 3000 });
     console.log('Click succeeded!');

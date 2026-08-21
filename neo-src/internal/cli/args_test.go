@@ -1,7 +1,5 @@
-// Smoke tests for the CLI.  Goal: prove the Cobra wiring compiles,
-// the platform-aware defaults are correct, and the serve callback
-// path is wired through end-to-end (callback receives the right
-// ServeOptions).
+// CLI 的 smoke test。目标：证明 Cobra 接线可编译、平台默认值正确，
+// 且 serve 回调路径端到端打通（回调收到正确的 ServeOptions）。
 package cli
 
 import (
@@ -10,9 +8,7 @@ import (
 	"testing"
 )
 
-// TestDefaultsLinux confirms the Linux/BSD/macOS default is http-only.
-// Mirrors the Zig `builtin.os.tag == .windows → webview, else http-only`
-// ternary.
+// TestDefaultsLinux 确认 Linux/BSD/macOS 默认是 http-only。
 func TestDefaultsLinux(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skipf("linux test on %s", runtime.GOOS)
@@ -22,9 +18,9 @@ func TestDefaultsLinux(t *testing.T) {
 	}
 }
 
-// TestRunServeCallbackReceivesOptions wires a callback and asserts it
-// sees the right ServeOptions after `root --http-only=false --port 9090`.
-// Exercises the root.RunE → invokeServe → callback path.
+// TestRunServeCallbackReceivesOptions 接上回调，断言
+// `root --http-only=false --port 9090` 之后它看到正确的 ServeOptions。
+// 覆盖 root.RunE → invokeServe → 回调 这条路径。
 func TestRunServeCallbackReceivesOptions(t *testing.T) {
 	var got *ServeOptions
 	root := NewRootCmd(func(opts *ServeOptions) error {
@@ -52,7 +48,7 @@ func TestRunServeCallbackReceivesOptions(t *testing.T) {
 	}
 }
 
-// TestWebviewFlagResolves confirms `--webview` flips HTTPOnly=false.
+// TestWebviewFlagResolves 确认 `--webview` 会把 HTTPOnly 置为 false。
 func TestWebviewFlagResolves(t *testing.T) {
 	var got *ServeOptions
 	root := NewRootCmd(func(opts *ServeOptions) error {
@@ -74,8 +70,8 @@ func TestWebviewFlagResolves(t *testing.T) {
 	}
 }
 
-// TestContradictoryFlagsErrors confirms --http-only + --webview errors
-// instead of silently letting "last flag wins" confuse the user.
+// TestContradictoryFlagsErrors 确认 --http-only + --webview 会报错，
+// 而不是让“后写的 flag 生效”这种静默行为迷惑用户。
 func TestContradictoryFlagsErrors(t *testing.T) {
 	root := NewRootCmd(nil)
 	root.SetArgs([]string{"--http-only", "--webview"})
@@ -87,8 +83,8 @@ func TestContradictoryFlagsErrors(t *testing.T) {
 	}
 }
 
-// TestSubcommandServeWorks confirms `serve --http-only --port 9090`
-// also reaches the callback with the right options (subcommand path).
+// TestSubcommandServeWorks 确认 `serve --http-only --port 9090`
+// 同样带着正确 options 抵达回调（子命令路径）。
 func TestSubcommandServeWorks(t *testing.T) {
 	var got *ServeOptions
 	root := NewRootCmd(func(opts *ServeOptions) error {
@@ -110,8 +106,8 @@ func TestSubcommandServeWorks(t *testing.T) {
 	}
 }
 
-// TestVersionSubcommandJustPrints confirms `version` doesn't invoke
-// the serve callback (catches accidental root.RunE override).
+// TestVersionSubcommandJustPrints 确认 `version` 不会调用 serve 回调
+// （能抓住误覆盖 root.RunE 的情况）。
 func TestVersionSubcommandJustPrints(t *testing.T) {
 	var called bool
 	root := NewRootCmd(func(opts *ServeOptions) error {

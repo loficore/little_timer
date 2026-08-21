@@ -214,10 +214,8 @@ describe("WallpaperSelector", () => {
     const input = screen.getByPlaceholderText("Enter image URL") as HTMLInputElement;
     fireEvent.input(input, { target: { value: "https://example.com/test.jpg" } });
 
-    // typing alone does NOT call onChange
     expect(mockOnChange).not.toHaveBeenCalled();
 
-    // click the Add button
     const addButton = screen.getByText("Add");
     fireEvent.click(addButton);
 
@@ -264,7 +262,6 @@ describe("WallpaperSelector", () => {
       expect(screen.getByText("Upload failed")).toBeTruthy();
     });
 
-    // onChange should NOT be called with the raw URL
     expect(mockOnChange).not.toHaveBeenCalled();
   });
 
@@ -281,7 +278,6 @@ describe("WallpaperSelector", () => {
     const input = screen.getByPlaceholderText("Enter image URL") as HTMLInputElement;
     fireEvent.input(input, { target: { value: "https://example.com/photo.jpg" } });
 
-    // no onChange call at all — decoupled from input
     expect(mockOnChange).not.toHaveBeenCalled();
   });
 
@@ -293,7 +289,6 @@ describe("WallpaperSelector", () => {
       />
     );
 
-    // 初始渲染：显示预览 <img>
     const preview = screen.getByTestId("selector-preview-img") as HTMLImageElement;
     expect(preview).toBeTruthy();
 

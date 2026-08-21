@@ -13,20 +13,17 @@ import (
 	"little-timer/internal/settings"
 )
 
-// newTestApp creates a minimal App for middleware testing.  We hand-build
-// the App struct directly via NewApp rather than constructing a real App
-// the long way — the middleware only touches a.Settings, so everything
-// else stays nil.
+// newTestApp 为中间件测试构造最小 App。我们直接用 NewApp 手搓 App
+// struct，而不是走完整流程构造真 App —— 中间件只碰 a.Settings，
+// 其余字段保持 nil。
 func newTestApp(t *testing.T, sm *settings.SettingsManager) *app.App {
 	t.Helper()
 	return app.NewApp(nil, sm, nil, nil, "")
 }
 
-// runAuth is the test harness for the Auth middleware.  It builds a tiny
-// gin.Engine that runs Auth(a) followed by a single next-handler that
-// toggles `nextCalled` on entry.  Returns the recorder + the nextCalled
-// flag pointer so callers can assert both the response code and whether
-// Auth decided to let the request through.
+// runAuth 是 Auth 中间件的测试框架：搭一个迷你 gin.Engine，先跑 Auth(a)，
+// 再接一个进入时翻转 `nextCalled` 的 next-handler。返回 recorder +
+// nextCalled 标志指针，调用方可以同时断言响应码与 Auth 是否放行。
 func runAuth(t *testing.T, a *app.App, req *http.Request) (*httptest.ResponseRecorder, *bool) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -44,14 +41,14 @@ func runAuth(t *testing.T, a *app.App, req *http.Request) (*httptest.ResponseRec
 	return w, &nextCalled
 }
 
-// setupAuthSettings creates a SettingsManager with auth configured.
+// setupAuthSettings 创建一个配置好 auth 的 SettingsManager。
 func setupAuthSettings(t *testing.T, authEnabled bool, authToken string) *settings.SettingsManager {
 	t.Helper()
 	cfg := domain.NewDefaultSettingsConfig()
 	cfg.Auth.AuthEnabled = authEnabled
 	cfg.Auth.AuthToken = authToken
 
-	// ponytail: each test gets its own DB so settings don't bleed across cases.
+	// 每个测试独占一个 DB，避免 settings 串到其他用例。
 	tmpDB := t.TempDir() + "/test.db"
 	sm, err := settings.New(tmpDB)
 	if err != nil {
@@ -60,10 +57,6 @@ func setupAuthSettings(t *testing.T, authEnabled bool, authToken string) *settin
 	_ = sm.UpdateAuth(cfg.Auth)
 	return sm
 }
-
-// =============================================================================
-// isPublic tests (6 cases)
-// =============================================================================
 
 func TestIsPublic_ExactMatch_Events(t *testing.T) {
 	if !isPublic("/api/events") {
@@ -100,10 +93,6 @@ func TestIsPublic_SubPath_NotPublic(t *testing.T) {
 		t.Error("/api/events/sub should not be public (exact match only)")
 	}
 }
-
-// =============================================================================
-// extractBearer tests (7 cases)
-// =============================================================================
 
 func TestExtractBearer_Empty(t *testing.T) {
 	if got := extractBearer(""); got != "" {
@@ -146,10 +135,6 @@ func TestExtractBearer_FullHeader(t *testing.T) {
 		t.Errorf("extractBearer(\"Authorization: Bearer mytok\") = %q, want \"\"", got)
 	}
 }
-
-// =============================================================================
-// Auth middleware tests (14 branches)
-// =============================================================================
 
 func TestAuth_PublicPath_Events(t *testing.T) {
 	a := newTestApp(t, nil)
@@ -330,9 +315,8 @@ func TestAuth_NoSpaceAfterBearer_Rejects(t *testing.T) {
 }
 
 func TestAuth_TwoSpacesAfterBearer_Allows(t *testing.T) {
-	// ponytail: the configured token is " mytok" (leading space) — extractBearer
-	// returns the literal remainder after "Bearer ", so "Bearer  mytok" yields
-	// " mytok" and matches.
+	// 配置的 token 是 " mytok"（前导空格）—— extractBearer 返回 "Bearer "
+	// 之后按字面剩余的串，所以 "Bearer  mytok" 得到 " mytok" 并匹配。
 	sm := setupAuthSettings(t, true, " mytok")
 	a := newTestApp(t, sm)
 	req := httptest.NewRequest(http.MethodGet, "/api/timer/state", nil)
@@ -375,10 +359,6 @@ func TestAuth_ContextKeySet_OnSuccess(t *testing.T) {
 		t.Error("context key \"app\" should be the App instance")
 	}
 }
-
-// =============================================================================
-// CORS middleware tests (7 cases)
-// =============================================================================
 
 func TestCORS_EmptyOrigin_DefaultsToStar(t *testing.T) {
 	gin.SetMode(gin.TestMode)

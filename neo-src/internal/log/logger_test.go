@@ -18,7 +18,7 @@ func TestFormatLine(t *testing.T) {
 }
 
 func TestOpenLogDirRotation(t *testing.T) {
-	// Fixture (a): reopen-append when file < 10MB.
+	// fixture (a)：文件 < 10MB 时重新打开并追加。
 	t.Run("reopen_append_small_file", func(t *testing.T) {
 		dir := t.TempDir()
 		seedName := time.Now().Format("2006-01-02") + ".log"
@@ -36,12 +36,12 @@ func TestOpenLogDirRotation(t *testing.T) {
 		}
 	})
 
-	// Fixture (b): rotate when file >= 10MB + 1 byte.
+	// fixture (b)：文件 >= 10MB + 1 字节时轮转。
 	t.Run("rotate_large_file", func(t *testing.T) {
 		dir := t.TempDir()
 		seedName := time.Now().Format("2006-01-02") + ".log"
 		seedPath := filepath.Join(dir, seedName)
-		// Create a sparse file at 10MB + 1 byte.
+		// 创建一个 10MB + 1 字节的稀疏文件。
 		sf, err := os.Create(seedPath)
 		if err != nil {
 			t.Fatal(err)
@@ -64,7 +64,7 @@ func TestOpenLogDirRotation(t *testing.T) {
 		if filepath.Base(f.Name()) == seedName {
 			t.Errorf("expected new file, got same seed file %s", f.Name())
 		}
-		// New file should be empty (or near-empty).
+		// 新文件应为空（或接近空）。
 		info, err := f.Stat()
 		if err != nil {
 			t.Fatal(err)
@@ -96,28 +96,28 @@ func TestInitSinkNonAndroid(t *testing.T) {
 
 	handler := initSink(file)
 
-	// Type assertion: must be *textHandler, not bare *slog.TextHandler.
+	// 类型断言：必须是 *textHandler，而非裸的 *slog.TextHandler。
 	th, ok := handler.(*textHandler)
 	if !ok {
 		t.Fatalf("initSink returned %T, expected *textHandler", handler)
 	}
 
-	// Write a record and verify the file output contains the custom format.
+	// 写入一条记录，验证文件输出包含自定义格式。
 	r := slog.NewRecord(time.Date(2026, 8, 2, 15, 4, 5, 0, time.UTC), slog.LevelInfo, "test message", 0)
 	r.Add("key", "value")
 	if err := th.Handle(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
 
-	// Read back the file contents.
+	// 读回文件内容。
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(content)
 
-	// The textHandler.Handle writes attrs first, then formatLine + newline.
-	// Expected: " key=value[2026-08-02T15:04:05Z] [INFO]  test message\n"
+	// textHandler.Handle 先写 attrs，再写 formatLine + 换行。
+	// 期望：" key=value[2026-08-02T15:04:05Z] [INFO]  test message\n"
 	wantSubstr := "[2026-08-02T15:04:05Z] [INFO]  test message"
 	if !contains(got, wantSubstr) {
 		t.Errorf("file content %q does not contain %q", got, wantSubstr)
@@ -140,7 +140,7 @@ func searchString(s, substr string) bool {
 	return false
 }
 
-// --- Daily rotation tests (TDD red phase) ---
+// 每日轮转测试。
 
 func TestOpenLogDirDailyNaming(t *testing.T) {
 	dir := t.TempDir()
@@ -167,11 +167,11 @@ func TestOpenLogDirDailyReopen(t *testing.T) {
 	todayName := today.Format("2006-01-02") + ".log"
 	yesterdayName := yesterday.Format("2006-01-02") + ".log"
 
-	// Seed yesterday's file at 1MB — smaller than today's so old code picks it
+	// 写入昨天的文件 1MB —— 比今天的小，旧代码会选中它
 	if err := os.WriteFile(filepath.Join(dir, yesterdayName), make([]byte, 1024*1024), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Seed today's file at 1MB + 100 bytes — larger so old code prefers yesterday's
+	// 写入今天的文件 1MB + 100 字节 —— 更大，旧代码会偏好昨天的
 	if err := os.WriteFile(filepath.Join(dir, todayName), make([]byte, 1024*1024+100), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestOpenLogDirDailyRotate(t *testing.T) {
 	yesterdayName := yesterday.Format("2006-01-02") + ".log"
 	todayName := today.Format("2006-01-02") + ".log"
 
-	// Seed yesterday's file at 1MB
+	// 写入昨天的文件 1MB
 	if err := os.WriteFile(filepath.Join(dir, yesterdayName), make([]byte, 1024*1024), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestOpenLogDirDailySizeOverflow(t *testing.T) {
 	baseName := prefix + ".log"
 	expectedName := prefix + ".2.log"
 
-	// Create today's base file at 10MB + 1 byte
+	// 创建今天的基础文件，大小 10MB + 1 字节
 	seedPath := filepath.Join(dir, baseName)
 	sf, err := os.Create(seedPath)
 	if err != nil {
@@ -256,7 +256,7 @@ func TestOpenLogDirDailyMultipleOverflow(t *testing.T) {
 	suffix2Name := prefix + ".2.log"
 	expectedName := prefix + ".3.log"
 
-	// Create both base and .2.log at 10MB + 1
+	// 基础文件和 .2.log 都创建为 10MB + 1
 	for _, name := range []string{baseName, suffix2Name} {
 		seedPath := filepath.Join(dir, name)
 		sf, err := os.Create(seedPath)
@@ -293,8 +293,8 @@ func TestOpenLogDirDailyBasePreferred(t *testing.T) {
 	baseName := prefix + ".log"
 	suffix2Name := prefix + ".2.log"
 
-	// Seed both base and .2.log: base at 1MB + 100 bytes (larger), .2.log at 1MB (smaller)
-	// Old code sorts by size descending, picks smallest (.2.log) — wrong behavior.
+	// 同时写入基础文件（1MB + 100 字节，较大）和 .2.log（1MB，较小）。
+	// 旧代码按大小降序排序、选中最小的（.2.log）—— 错误行为。
 	if err := os.WriteFile(filepath.Join(dir, baseName), make([]byte, 1024*1024+100), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -320,24 +320,24 @@ func TestOpenLogDirDailyIgnoresMalformed(t *testing.T) {
 	prefix := today.Format("2006-01-02")
 	baseName := prefix + ".log"
 
-	// Create the valid base file at 1MB
+	// 创建有效的 1MB 基础文件
 	if err := os.WriteFile(filepath.Join(dir, baseName), make([]byte, 1024*1024), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Malformed suffix (non-integer)
+	// 后缀格式非法（非整数）
 	if err := os.WriteFile(filepath.Join(dir, prefix+".abc.log"), make([]byte, 1024), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Wrong extension
+	// 扩展名错误
 	if err := os.WriteFile(filepath.Join(dir, prefix+".txt"), make([]byte, 1024), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Double extension (not .log)
+	// 双重扩展名（非 .log）
 	if err := os.WriteFile(filepath.Join(dir, prefix+".log.bak"), make([]byte, 1024), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Must not panic and must return the valid base file.
+	// 不得 panic，且必须返回有效的基础文件。
 	f, err := openLogDir(dir)
 	if err != nil {
 		t.Fatal(err)

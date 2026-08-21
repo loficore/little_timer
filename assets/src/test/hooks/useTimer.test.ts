@@ -150,7 +150,7 @@ describe("useTimer Hook", () => {
 
       for (let i = 0; i < 3000; i += 16) {
         act(() => vi.advanceTimersByTime(16));
-        // RAF fires once per event loop tick in jsdom
+        // jsdom 中 RAF 每个事件循环 tick 触发一次
       }
 
       await act(async () => {});

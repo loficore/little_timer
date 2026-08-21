@@ -3,7 +3,6 @@ import { describe, it, expect } from 'vitest'
 describe('工具函数测试', () => {
   describe('时间格式化', () => {
     const formatDuration = (totalSeconds: number): string => {
-      // 处理负数：负数返回 00:00:00
       if (totalSeconds < 0) {
         return '00:00:00'
       }
@@ -29,17 +28,13 @@ describe('工具函数测试', () => {
     })
 
     it('应该处理大于 24 小时的时间', () => {
-      expect(formatDuration(86400)).toBe('24:00:00') // 1 天
-      expect(formatDuration(90000)).toBe('25:00:00') // 25 小时
+      expect(formatDuration(86400)).toBe('24:00:00')
+      expect(formatDuration(90000)).toBe('25:00:00')
     })
 
     it('应该处理负数输入', () => {
-      // 负数秒数应该返回 00:00:00（负数处理）
       const result = formatDuration(-100)
-      // -100 秒时：小时 = -100 / 3600 = -1（向下取整）
-      // 这会导致负数，我们验证结果符合格式要求，但实际结果为 '-1:-2:-40'
-      // 更合理的做法是处理负数输入
-      expect(result).toBe('00:00:00') // 负数应该返回零时间
+      expect(result).toBe('00:00:00')
     })
   })
 })

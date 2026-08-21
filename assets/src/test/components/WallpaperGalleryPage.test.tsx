@@ -79,13 +79,11 @@ describe("WallpaperGalleryPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("gallery-item-a.png")).toBeTruthy();
     });
-    // size formatting: (2048/1024).toFixed(0) = 2 KB; (102400/1024).toFixed(0) = 100 KB
+    // 大小换算：(2048/1024).toFixed(0) = 2 KB；(102400/1024).toFixed(0) = 100 KB
     expect(screen.getByText("Size: 2 KB")).toBeTruthy();
     expect(screen.getByText("Size: 100 KB")).toBeTruthy();
-    // refs badge only when refs > 0
     expect(screen.getByTestId("gallery-refs-a.png")).toBeTruthy();
     expect(screen.queryByTestId("gallery-refs-b.jpg")).toBeNull();
-    // thumbnail src
     const img = document.querySelector('img[src="/api/wallpapers/a.png"]') as HTMLImageElement;
     expect(img).toBeTruthy();
   });
@@ -97,7 +95,6 @@ describe("WallpaperGalleryPage", () => {
     });
     fireEvent.click(screen.getByTestId("gallery-delete-a.png"));
     expect(screen.getByText("Delete wallpaper?")).toBeTruthy();
-    // appears both in the grid badge and the confirm dialog
     expect(screen.getAllByText("Used by 1 item(s)").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("References will be unbound automatically.")).toBeTruthy();
   });
@@ -113,7 +110,6 @@ describe("WallpaperGalleryPage", () => {
     await waitFor(() => {
       expect(mockDeleteWallpaper).toHaveBeenCalledWith("a.png");
     });
-    // refresh after delete
     await waitFor(() => {
       expect(mockListWallpapers).toHaveBeenCalledTimes(2);
     });
@@ -130,9 +126,7 @@ describe("WallpaperGalleryPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Operation failed")).toBeTruthy();
     });
-    // item remains in the list
     expect(screen.getByTestId("gallery-item-a.png")).toBeTruthy();
-    // no refresh happened after a failed delete
     expect(mockListWallpapers).toHaveBeenCalledTimes(1);
   });
 

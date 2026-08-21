@@ -12,11 +12,10 @@ import (
 	"little-timer/internal/storage/backup"
 )
 
-// TestRebuildBackupSwitchesTargetType verifies that RebuildBackup
-// reconstructs the BackupManager from the persisted BackupConfig,
-// swapping the active adapter as target_type changes.  The webdav/s3
-// configs are pure constructions — NewWebDAVAdapter / NewS3Adapter do
-// no network I/O — so no httptest server is needed.
+// TestRebuildBackupSwitchesTargetType 验证 RebuildBackup 能从持久化的
+// BackupConfig 重建 BackupManager，并随 target_type 变化换掉活动 adapter。
+// webdav/s3 配置是纯构造 —— NewWebDAVAdapter / NewS3Adapter 不做网络 I/O ——
+// 所以不需要 httptest server。
 func TestRebuildBackupSwitchesTargetType(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	sqlite := storage.NewSqliteManager().Init(dbPath)
@@ -56,20 +55,19 @@ func TestRebuildBackupSwitchesTargetType(t *testing.T) {
 		}
 	}
 
-	// Local — the default target; adapter is rooted in the derived
-	// sibling-of-DB backup dir (LocalPath is empty).
+	// Local —— 默认 target；adapter 根在推导出的“DB 同级”备份目录
+	//（LocalPath 为空）。
 	update(`{"target_type": "local"}`)
 	localMgr := assertTarget(backup.TargetLocal)
 
-	// WebDAV — fake URL/creds are enough; construction does no I/O.
+	// WebDAV —— 假 URL/凭据就够；构造不做 I/O。
 	update(`{"target_type": "webdav", "webdav_url": "https://example.com/dav", "webdav_username": "u", "webdav_password": "p"}`)
 	webdavMgr := assertTarget(backup.TargetWebDAV)
 	if webdavMgr == localMgr {
 		t.Fatal("BackupManager() still references the pre-rebuild manager after webdav switch")
 	}
 
-	// S3 — bucket + region are required by NewS3Adapter; static creds
-	// only, no network.
+	// S3 —— NewS3Adapter 要求 bucket + region；仅静态凭据，不联网。
 	update(`{"target_type": "s3", "s3_endpoint": "https://minio.example:9000", "s3_bucket": "bkt", "s3_region": "us-east-1", "s3_access_key": "ak", "s3_secret_key": "sk"}`)
 	s3Mgr := assertTarget(backup.TargetS3)
 	if s3Mgr == webdavMgr {
@@ -79,8 +77,7 @@ func TestRebuildBackupSwitchesTargetType(t *testing.T) {
 		t.Fatal("BackupManager() still references the original manager after s3 switch")
 	}
 
-	// Switch back to local — rebuild from a cloud target must land back
-	// on the local adapter too.
+	// 切回 local —— 从云端 target 重建后也必须落回 local adapter。
 	update(`{"target_type": "local"}`)
 	backAgain := assertTarget(backup.TargetLocal)
 	if backAgain == s3Mgr {
@@ -88,11 +85,10 @@ func TestRebuildBackupSwitchesTargetType(t *testing.T) {
 	}
 }
 
-// TestRebuildBackupDisablesOnCloudConfigError verifies the cloud-target
-// failure contract: when NewFromConfig fails for a cloud target (here:
-// s3 without bucket/region, which NewS3Adapter rejects), RebuildBackup
-// logs, sets a.Backup to nil, and returns the error — it must NOT fall
-// back to a local adapter, since the settings advertise a cloud target.
+// TestRebuildBackupDisablesOnCloudConfigError 验证云端 target 的失败契约：
+// 当云端 target 的 NewFromConfig 失败时（这里是缺 bucket/region 的 s3，
+// NewS3Adapter 会拒绝），RebuildBackup 记日志、把 a.Backup 置 nil 并返回
+// 错误 —— 绝不能回退到 local adapter，因为设置声明的是云端 target。
 func TestRebuildBackupDisablesOnCloudConfigError(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	sqlite := storage.NewSqliteManager().Init(dbPath)
@@ -121,20 +117,17 @@ func TestRebuildBackupDisablesOnCloudConfigError(t *testing.T) {
 	}
 }
 
-// Note on the local-target fallback path: a lenient-fallback test for
-// local targets is not constructible.  NewFromConfig for a local target
-// can only fail inside NewLocal (os.MkdirAll of the derived backupDir —
-// buildAdapter's local branch never fails), and RebuildBackup retries
-// NewLocal with that same derived dir, so the fallback fails identically
-// and always lands on the disable path below.  The disable contract for
-// local targets is therefore pinned by
-// TestRebuildBackupDisablesOnDoubleFailure.
+// 关于 local-target 回退路径的说明：local 的宽松回退测试构造不出来。
+// local target 的 NewFromConfig 只可能失败在 NewLocal 内部（对推导出的
+// backupDir 做 os.MkdirAll —— buildAdapter 的 local 分支永不失败），而
+// RebuildBackup 会用同一个推导目录重试 NewLocal，回退必然同样失败、总是
+// 落到下方的 disable 路径。因此 local 的 disable 契约由
+// TestRebuildBackupDisablesOnDoubleFailure 钉住。
 
-// TestRebuildBackupDisablesOnDoubleFailure verifies the terminal path:
-// when both NewFromConfig and the NewLocal fallback fail, RebuildBackup
-// sets a.Backup to nil and returns the error.  The backup dir is forced
-// to be uncreatable by placing a plain file where its parent dir would
-// live, so os.MkdirAll fails with ENOTDIR.
+// TestRebuildBackupDisablesOnDoubleFailure 验证终态路径：当 NewFromConfig
+// 与 NewLocal 回退双双失败时，RebuildBackup 把 a.Backup 置 nil 并返回错误。
+// 备份目录通过在其父目录位置放一个普通文件来强制无法创建，让 os.MkdirAll
+// 以 ENOTDIR 失败。
 func TestRebuildBackupDisablesOnDoubleFailure(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	sqlite := storage.NewSqliteManager().Init(dbPath)

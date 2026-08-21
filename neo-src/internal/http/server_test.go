@@ -1,9 +1,8 @@
-// Smoke tests for the HTTP layer.
+// HTTP 层的 smoke 测试。
 //
-// Goal: verify the Gin router registers every Zig-equivalent route and
-// each handler responds (200/401/etc.) without panicking.  Handler-level
-// tests build a real App with a real SQLite + SettingsManager so the
-// dependency-injection paths actually execute.
+// 目标：验证 Gin router 注册了每条路由，且每个 handler 都能响应
+// （200/401 等）而不 panic。handler 级测试用真实 SQLite +
+// SettingsManager 构建真 App，让依赖注入路径真的被执行。
 package http
 
 import (
@@ -26,9 +25,8 @@ import (
 	"little-timer/internal/storage"
 )
 
-// newTestRouter builds a router wired to a stub App whose managers are
-// nil.  Only used for registration + middleware tests — handler-level
-// tests use newRealTestRouter below.
+// newTestRouter 构建接到 stub App 的 router，App 的各 manager 为 nil。
+// 只用于注册 + 中间件测试 —— handler 级测试用下面的 newRealTestRouter。
 func newTestRouter(t *testing.T) (*gin.Engine, *app.App) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -37,9 +35,9 @@ func newTestRouter(t *testing.T) (*gin.Engine, *app.App) {
 
 	a := app.NewApp(
 		domain.NewClockManager(domain.NewDefaultClockTaskConfig()),
-		nil, // settings — nil for registration-only tests
-		nil, // sqlite — nil for registration-only tests
-		nil, // backup — nil for registration-only tests
+		nil, // settings —— 仅测注册的用例传 nil
+		nil, // sqlite —— 仅测注册的用例传 nil
+		nil, // backup —— 仅测注册的用例传 nil
 		dbPath,
 	)
 
@@ -47,9 +45,9 @@ func newTestRouter(t *testing.T) (*gin.Engine, *app.App) {
 	return r, a
 }
 
-// newRealTestRouter builds a router wired to a fully-initialised App:
-// real SqliteManager, real SettingsManager.  Use this for tests that
-// exercise handler logic (e.g. GET /api/state must read the clock).
+// newRealTestRouter 构建接到完整初始化 App 的 router：真实 SqliteManager、
+// 真实 SettingsManager。跑 handler 逻辑的测试用它（例如 GET /api/state
+// 必须能读 clock）。
 func newRealTestRouter(t *testing.T) (*gin.Engine, *app.App) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -77,16 +75,14 @@ func newRealTestRouter(t *testing.T) (*gin.Engine, *app.App) {
 		domain.NewClockManager(domain.NewDefaultClockTaskConfig()),
 		sm,
 		sqlite,
-		nil, // backup — handler returns service-unavailable when nil
+		nil, // backup —— 为 nil 时 handler 返回 service-unavailable
 		dbPath,
 	)
 	return NewRouter(a, "*"), a
 }
 
-// routeExists inspects the Gin router's tree to confirm a method+path
-// is registered.  Gin doesn't expose its router tree directly, so we
-// fire a synthetic OPTIONS request — every registered route answers
-// the CORS middleware's OPTIONS short-circuit.
+// routeExists 检查 Gin router 的树，确认某个 method+path 已注册。Gin 不
+// 直接暴露 router tree，所以我们发一个请求，把任何非 404 响应当作“已注册”。
 func routeExists(r *gin.Engine, method, path string) bool {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, nil)
@@ -94,22 +90,22 @@ func routeExists(r *gin.Engine, method, path string) bool {
 	return w.Code != http.StatusNotFound
 }
 
-// TestAllRoutesRegistered walks the full Zig route table and confirms
-// each path answers (not 404).  This is the smoke gate.
+// TestAllRoutesRegistered 遍历完整路由表，确认每条路径都有应答
+// （不是 404）。这就是 smoke 门。
 //
-// SSE (/api/events) is verified separately via TestEventsRouteExists
-// because its streaming handler would otherwise block the test runner.
+// SSE（/api/events）由 TestEventsRouteExists 单独验证，否则它的流式
+// handler 会阻塞测试运行器。
 func TestAllRoutesRegistered(t *testing.T) {
 	r, _ := newTestRouter(t)
 
 	routes := []struct {
 		method, path string
 	}{
-		// Static + frontend log
+		// 静态页 + 前端日志
 		{http.MethodGet, "/"},
 		{http.MethodPost, "/api/log"},
 
-		// Timer
+		// 计时器
 		{http.MethodGet, "/api/state"},
 		{http.MethodGet, "/api/timer/state"},
 		{http.MethodGet, "/api/timer/progress"},
@@ -123,7 +119,7 @@ func TestAllRoutesRegistered(t *testing.T) {
 		{http.MethodPost, "/api/mode"},
 		{http.MethodPost, "/api/timer/config"},
 
-		// Habits
+		// 习惯
 		{http.MethodGet, "/api/habit-sets"},
 		{http.MethodPost, "/api/habit-sets"},
 		{http.MethodGet, "/api/habits"},
@@ -133,11 +129,11 @@ func TestAllRoutesRegistered(t *testing.T) {
 		{http.MethodGet, "/api/timer-sessions"},
 		{http.MethodPost, "/api/timer-sessions"},
 
-		// Settings
+		// 设置
 		{http.MethodGet, "/api/settings"},
 		{http.MethodPost, "/api/settings"},
 
-		// Backup
+		// 备份
 		{http.MethodGet, "/api/backup/config"},
 		{http.MethodPost, "/api/backup/config"},
 		{http.MethodPost, "/api/backup/create"},
@@ -150,12 +146,12 @@ func TestAllRoutesRegistered(t *testing.T) {
 		{http.MethodGet, "/api/backup/master-password"},
 		{http.MethodPost, "/api/backup/master-password"},
 
-		// Auth
+		// 鉴权
 		{http.MethodGet, "/api/auth/status"},
 		{http.MethodPost, "/api/auth/enable"},
 		{http.MethodPost, "/api/auth/disable"},
 
-		// Wallpapers
+		// 壁纸
 		{http.MethodGet, "/api/wallpapers"},
 		{http.MethodPost, "/api/wallpapers"},
 		{http.MethodPost, "/api/wallpapers/from-url"},
@@ -168,11 +164,10 @@ func TestAllRoutesRegistered(t *testing.T) {
 	}
 }
 
-// TestEventsRouteExists confirms /api/events is registered without
-// actually connecting (the handler streams forever).  The check: a
-// `Connection: close` GET request returns 200 with the SSE headers
-// rather than 404.  We use httptest.NewServer so the connection
-// closes immediately when the test client returns.
+// TestEventsRouteExists 确认 /api/events 已注册而无需真的连上（该 handler
+// 会永远流下去）。检查方式：带 `Connection: close` 的 GET 请求返回 200 +
+// SSE 头而不是 404。我们用 httptest.NewServer，这样测试 client 一返回
+// 连接就立即关闭。
 func TestEventsRouteExists(t *testing.T) {
 	r, _ := newTestRouter(t)
 	srv := httptest.NewServer(r)
@@ -186,8 +181,7 @@ func TestEventsRouteExists(t *testing.T) {
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// Expected: the timeout fires before the server responds.
-		// Anything else is a real failure.
+		// 预期：timeout 在 server 响应之前触发。其他错误才是真正的失败。
 		if strings.Contains(err.Error(), "context deadline exceeded") {
 			return
 		}
@@ -202,8 +196,7 @@ func TestEventsRouteExists(t *testing.T) {
 	}
 }
 
-// TestCORSHeaders confirms the CORS middleware emits the expected
-// headers on a non-preflight request.
+// TestCORSHeaders 确认 CORS 中间件在非预检请求上发出预期的头。
 func TestCORSHeaders(t *testing.T) {
 	r, _ := newTestRouter(t)
 	w := httptest.NewRecorder()
@@ -218,7 +211,7 @@ func TestCORSHeaders(t *testing.T) {
 	}
 }
 
-// TestCORSPreflight confirms OPTIONS short-circuits with 204.
+// TestCORSPreflight 确认 OPTIONS 以 204 短路。
 func TestCORSPreflight(t *testing.T) {
 	r, _ := newTestRouter(t)
 	w := httptest.NewRecorder()
@@ -232,8 +225,8 @@ func TestCORSPreflight(t *testing.T) {
 	}
 }
 
-// TestAuthPublicPath confirms /api/auth/status and /api/events bypass
-// auth even when no SettingsManager is wired in (no auth required).
+// TestAuthPublicPath 确认 /api/auth/status 与 /api/events 即使没接
+// SettingsManager 也绕过鉴权（无需鉴权）。
 func TestAuthPublicPath(t *testing.T) {
 	r, _ := newTestRouter(t)
 
@@ -244,8 +237,8 @@ func TestAuthPublicPath(t *testing.T) {
 	}
 }
 
-// Test404ForUnknownRoute confirms unknown paths return 404 instead of
-// hitting a panic-prone handler.
+// Test404ForUnknownRoute 确认未知路径返回 404，而不是撞进易 panic 的
+// handler。
 func Test404ForUnknownRoute(t *testing.T) {
 	r, _ := newTestRouter(t)
 	w := httptest.NewRecorder()
@@ -255,8 +248,7 @@ func Test404ForUnknownRoute(t *testing.T) {
 	}
 }
 
-// TestTimerStateHandler confirms /api/state returns a JSON body with
-// the same shape the Zig source emits.
+// TestTimerStateHandler 确认 /api/state 返回带预期键的 JSON body。
 func TestTimerStateHandler(t *testing.T) {
 	r, _ := newRealTestRouter(t)
 	w := httptest.NewRecorder()
@@ -279,8 +271,8 @@ func TestTimerStateHandler(t *testing.T) {
 	}
 }
 
-// TestTimerProgressHandler confirms /api/timer/progress returns a JSON
-// body with elapsed/remaining/etc.
+// TestTimerProgressHandler 确认 /api/timer/progress 返回带
+// elapsed/remaining 等的 JSON body。
 func TestTimerProgressHandler(t *testing.T) {
 	r, _ := newRealTestRouter(t)
 	w := httptest.NewRecorder()
@@ -300,8 +292,7 @@ func TestTimerProgressHandler(t *testing.T) {
 	}
 }
 
-// TestTimerModeSwitchEmpty confirms POST /api/mode with empty body
-// returns `{}` (matches Zig's behaviour for unrecognised values).
+// TestTimerModeSwitchEmpty 确认 POST /api/mode 空 body 返回 `{}`。
 func TestTimerModeSwitchEmpty(t *testing.T) {
 	r, _ := newRealTestRouter(t)
 	w := httptest.NewRecorder()
@@ -314,8 +305,8 @@ func TestTimerModeSwitchEmpty(t *testing.T) {
 	}
 }
 
-// TestTimerModeSwitchCountdown confirms POST /api/mode with a valid
-// mode returns the expected JSON.
+// TestTimerModeSwitchCountdown 确认 POST /api/mode 带合法 mode 时返回
+// 预期的 JSON。
 func TestTimerModeSwitchCountdown(t *testing.T) {
 	r, _ := newRealTestRouter(t)
 	w := httptest.NewRecorder()
@@ -336,8 +327,8 @@ func TestTimerModeSwitchCountdown(t *testing.T) {
 	}
 }
 
-// TestFrontendLogEmptyBody confirms POST /api/log with empty body
-// returns 200 + success=false (matches Zig behaviour).
+// TestFrontendLogEmptyBody 确认 POST /api/log 空 body 返回 200 +
+// success=false。
 func TestFrontendLogEmptyBody(t *testing.T) {
 	r, _ := newRealTestRouter(t)
 	w := httptest.NewRecorder()
@@ -350,8 +341,8 @@ func TestFrontendLogEmptyBody(t *testing.T) {
 	}
 }
 
-// TestGenerateTokenIsUnique confirms GenerateToken returns fresh
-// tokens each call (used by the auth-enable handler).
+// TestGenerateTokenIsUnique 确认 GenerateToken 每次调用都返回新 token
+// （auth-enable handler 在用）。
 func TestGenerateTokenIsUnique(t *testing.T) {
 	t1 := app.GenerateToken()
 	t2 := app.GenerateToken()

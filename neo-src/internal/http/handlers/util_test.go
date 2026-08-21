@@ -31,7 +31,7 @@ func TestHandleFrontendLog_ValidEntry(t *testing.T) {
 	if got["success"] != true {
 		t.Errorf("success = %v, want true", got["success"])
 	}
-	// Verify no log text leaked into the response body.
+	// 确认响应 body 没有泄漏日志文本。
 	bodyStr := w.Body.String()
 	if strings.Contains(bodyStr, "test message") {
 		t.Errorf("response body contains log text, want pure JSON: %s", bodyStr)
@@ -106,7 +106,7 @@ func TestHandleFrontendLog_MissingLevel(t *testing.T) {
 	if got["success"] != true {
 		t.Errorf("success = %v, want true", got["success"])
 	}
-	// Verify no log text leaked into the response body.
+	// 确认响应 body 没有泄漏日志文本。
 	bodyStr := w.Body.String()
 	if strings.Contains(bodyStr, "test message") {
 		t.Errorf("response body contains log text, want pure JSON: %s", bodyStr)
@@ -133,7 +133,7 @@ func TestHandleFrontendLog_ErrorLevel(t *testing.T) {
 	if got["success"] != true {
 		t.Errorf("success = %v, want true", got["success"])
 	}
-	// Verify no log text leaked into the response body.
+	// 确认响应 body 没有泄漏日志文本。
 	bodyStr := w.Body.String()
 	if strings.Contains(bodyStr, "error message") {
 		t.Errorf("response body contains log text, want pure JSON: %s", bodyStr)

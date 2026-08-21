@@ -107,7 +107,7 @@ describe("FormGroup 组件", () => {
 
     const label = container.querySelector("label");
     expect(label?.className).toContain("font-medium");
-    expect(label?.className).toContain("text-text-primary-dark");
+    expect(label?.className).toContain("text-[var(--my-on-surface)]");
   });
 
   it("错误信息应该有错误样式", () => {

@@ -1,16 +1,7 @@
 package backup
 
-// Tests for WebDAVAdapter using httptest.NewServer for full round-trip
-// coverage of all adapter methods.
-//
-// Test cases:
-//   1. TestWebDAVBackupRestoreRoundTrip — PUT backup -> GET restore -> byte-identical
-//   2. TestWebDAVTestConnection_WriteProbe — TestConnection does PUT/GET/DELETE probe
-//   3. TestWebDAVTestConnection_AuthFailure — server returns 401; assert ErrAuthenticationFail
-//   4. TestWebDAVTestConnection_PermissionDenied — server returns 403; assert ErrPermissionDenied
-//   5. TestWebDAVList — PROPFIND multistatus XML with 2 backups; assert parsed
-//   6. TestWebDAVDelete — DELETE succeeds; assert server received DELETE
-//   7. TestWebDAVWriteManifest — WriteManifest PUTs manifest.json; assert file exists
+// WebDAVAdapter 的测试，用 httptest.NewServer 对所有 adapter 方法做
+// 完整往返覆盖。
 
 import (
 	"bytes"
@@ -27,26 +18,20 @@ import (
 	"time"
 )
 
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-// newWebDAVTestServer creates a WebDAVAdapter wired to an httptest server
-// that stores PUT bodies in a map.  The caller can use the store map to
-// inspect what the adapter wrote or to seed data for GET requests.
+// newWebDAVTestServer 创建一个接到 httptest server 的 WebDAVAdapter，
+// server 把 PUT body 存进 map。调用方可用 store map 检查 adapter 写了
+// 什么，或为 GET 请求预置数据。
 //
-// The server handles PUT, GET, DELETE, and PROPFIND (empty multistatus).
-// Tests that need custom behavior (auth failures, specific PROPFIND
-// responses) should create their own server inline.
+// server 处理 PUT、GET、DELETE 和 PROPFIND（空 multistatus）。
+// 需要自定义行为（鉴权失败、特定 PROPFIND 响应）的测试应自行内联建 server。
 func newWebDAVTestServer(t *testing.T) (*WebDAVAdapter, *httptest.Server, map[string][]byte) {
 	adapter, srv, store, _ := newWebDAVTestServerWithCL(t)
 	return adapter, srv, store
 }
 
-// newWebDAVTestServerWithCL is newWebDAVTestServer plus a map of the PUT
-// Content-Length values the server saw, keyed by request path.  Tests that
-// assert an explicit Content-Length (rather than chunked transfer encoding)
-// use this variant.
+// newWebDAVTestServerWithCL 在 newWebDAVTestServer 之上附带一个 map：
+// server 所见 PUT Content-Length 值，按请求路径为 key。断言显式
+// Content-Length（而非 chunked 传输编码）的测试用这个变体。
 func newWebDAVTestServerWithCL(t *testing.T) (*WebDAVAdapter, *httptest.Server, map[string][]byte, map[string]int64) {
 	t.Helper()
 	store := make(map[string][]byte)
@@ -91,10 +76,6 @@ func newWebDAVTestServerWithCL(t *testing.T) (*WebDAVAdapter, *httptest.Server, 
 	return adapter, srv, store, putCL
 }
 
-// -----------------------------------------------------------------------------
-// Test 1 — Backup / Restore round-trip
-// -----------------------------------------------------------------------------
-
 func TestWebDAVBackupRestoreRoundTrip(t *testing.T) {
 	adapter, _, store := newWebDAVTestServer(t)
 
@@ -107,13 +88,13 @@ func TestWebDAVBackupRestoreRoundTrip(t *testing.T) {
 		t.Fatalf("Backup: %v", err)
 	}
 
-	// The server must have received the PUT body.
+	// server 必须收到了 PUT body。
 	gotStored := store["/backups/"+name]
 	if string(gotStored) != string(payload) {
 		t.Errorf("stored payload mismatch:\n got: %q\nwant: %q", gotStored, payload)
 	}
 
-	// Restore into a fresh destination and confirm byte-identical copy.
+	// 恢复到全新目的地并确认逐字节一致的拷贝。
 	dst := filepath.Join(t.TempDir(), "restored.db")
 	if err := adapter.Restore(name, dst); err != nil {
 		t.Fatalf("Restore: %v", err)
@@ -123,15 +104,10 @@ func TestWebDAVBackupRestoreRoundTrip(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Test 1b — medium/large file (>= 2 MiB) streaming round-trip
-// -----------------------------------------------------------------------------
-
 func TestWebDAVBackupRestoreRoundTrip_LargeFile(t *testing.T) {
 	adapter, _, store, putCL := newWebDAVTestServerWithCL(t)
 
-	// 2 MiB, deterministically patterned so a shift/truncation in either
-	// direction is caught byte-for-byte on both sides of the round-trip.
+	// 2 MiB、确定性图案 —— 往返两侧的偏移/截断都能逐字节抓到。
 	const size = 2 << 20
 	payload := make([]byte, size)
 	for i := range payload {
@@ -149,9 +125,9 @@ func TestWebDAVBackupRestoreRoundTrip_LargeFile(t *testing.T) {
 	if gotStored := store[key]; !bytes.Equal(gotStored, payload) {
 		t.Fatalf("stored payload mismatch: got %d bytes, want %d", len(gotStored), size)
 	}
-	// The streaming path uses an *os.File request body; the client must set
-	// an explicit Content-Length (chunked transfer is rejected by many
-	// WebDAV servers).  A value of -1 means no Content-Length was sent.
+	// 流式路径以 *os.File 作 request body；客户端必须显式设置
+	// Content-Length（chunked 传输会被许多 WebDAV 服务器拒绝）。
+	// 值为 -1 表示没发 Content-Length。
 	if gotCL := putCL[key]; gotCL != int64(size) {
 		t.Errorf("PUT Content-Length: got %d, want %d", gotCL, size)
 	}
@@ -164,10 +140,6 @@ func TestWebDAVBackupRestoreRoundTrip_LargeFile(t *testing.T) {
 		t.Errorf("restored content mismatch: got %d bytes, want %d", len(got), size)
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Test 2 — TestConnection write-probe (PUT → GET → DELETE)
-// -----------------------------------------------------------------------------
 
 func TestWebDAVTestConnection_WriteProbe(t *testing.T) {
 	var ops []string
@@ -221,13 +193,9 @@ func TestWebDAVTestConnection_WriteProbe(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Test 3 — TestConnection auth failure (401)
-// -----------------------------------------------------------------------------
-
 func TestWebDAVTestConnection_AuthFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 401 on PUT (and any subsequent DELETE from best-effort cleanup).
+		// PUT 返回 401（以及尽力清理里后续的任意 DELETE）。
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer srv.Close()
@@ -247,13 +215,9 @@ func TestWebDAVTestConnection_AuthFailure(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Test 4 — TestConnection permission denied (403)
-// -----------------------------------------------------------------------------
-
 func TestWebDAVTestConnection_PermissionDenied(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 403 on PUT maps to ErrPermissionDenied, matching classifyS3Error.
+		// PUT 返回 403 → ErrPermissionDenied，与 classifyS3Error 对齐。
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer srv.Close()
@@ -273,19 +237,15 @@ func TestWebDAVTestConnection_PermissionDenied(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Test 4b — TestConnection GET probe returns server error (500)
-// -----------------------------------------------------------------------------
-
 func TestWebDAVTestConnection_GETProbeServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPut:
-			// PUT succeeds so the probe reaches the GET step.
+			// PUT 成功，让 probe 走到 GET 这步。
 			w.WriteHeader(http.StatusCreated)
 		case http.MethodGet:
-			// 500 on the GET probe must map to ErrConnectionFailed,
-			// not a misleading "probe content mismatch".
+			// GET probe 的 500 必须映射为 ErrConnectionFailed，
+			// 而不是误导性的 "probe content mismatch"。
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
 			w.WriteHeader(http.StatusNoContent)
@@ -308,15 +268,11 @@ func TestWebDAVTestConnection_GETProbeServerError(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Test 4c — TestConnection GET probe returns permission denied (403)
-// -----------------------------------------------------------------------------
-
 func TestWebDAVTestConnection_GETProbePermissionDenied(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPut:
-			// PUT succeeds so the probe reaches the GET step.
+			// PUT 成功，让 probe 走到 GET 这步。
 			w.WriteHeader(http.StatusCreated)
 		case http.MethodGet:
 			w.WriteHeader(http.StatusForbidden)
@@ -340,10 +296,6 @@ func TestWebDAVTestConnection_GETProbePermissionDenied(t *testing.T) {
 		t.Errorf("error: got %v, want errors.Is ErrPermissionDenied", err)
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Test 4d — TestConnection GET probe returns auth failure (401)
-// -----------------------------------------------------------------------------
 
 func TestWebDAVTestConnection_GETProbeAuthFailure(t *testing.T) {
 	store := make(map[string][]byte)
@@ -382,7 +334,7 @@ func TestWebDAVTestConnection_GETProbeAuthFailure(t *testing.T) {
 	if !errors.Is(err, ErrAuthenticationFail) {
 		t.Errorf("expected ErrAuthenticationFail, got %v", err)
 	}
-	// Verify the error message contains the probe URL and auth status
+	// 验证错误信息包含 probe URL 与鉴权状态
 	errStr := err.Error()
 	if !strings.Contains(errStr, "GET") {
 		t.Errorf("error message should contain GET, got: %s", errStr)
@@ -397,10 +349,6 @@ func TestWebDAVTestConnection_GETProbeAuthFailure(t *testing.T) {
 		t.Errorf("error message should contain probe URL, got: %s", errStr)
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Test 5 — List (PROPFIND multistatus)
-// -----------------------------------------------------------------------------
 
 func TestWebDAVList(t *testing.T) {
 	ts1 := int64(1000)
@@ -474,7 +422,7 @@ func TestWebDAVList(t *testing.T) {
 		t.Fatalf("List len: got %d, want 2 (entries: %+v)", len(got), got)
 	}
 
-	// The directory entry and the wrong-prefix entry must be filtered out.
+	// 目录条目与错误前缀条目必须被过滤掉。
 	byName := map[string]BackupInfo{}
 	for _, info := range got {
 		byName[info.Name] = info
@@ -504,10 +452,6 @@ func TestWebDAVList(t *testing.T) {
 		}
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Test 6 — Delete
-// -----------------------------------------------------------------------------
 
 func TestWebDAVDelete(t *testing.T) {
 	var deletedPath string
@@ -547,10 +491,6 @@ func TestWebDAVDelete(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Test 7 — WriteManifest
-// -----------------------------------------------------------------------------
-
 func TestWebDAVWriteManifest(t *testing.T) {
 	adapter, _, store := newWebDAVTestServer(t)
 
@@ -569,10 +509,6 @@ func TestWebDAVWriteManifest(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Idempotent delete of nonexistent backup (bonus edge case)
-// -----------------------------------------------------------------------------
-
 func TestWebDAVDeleteNonexistentIsIdempotent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
@@ -589,15 +525,11 @@ func TestWebDAVDeleteNonexistentIsIdempotent(t *testing.T) {
 	})
 	adapter.client = srv.Client()
 
-	// Delete of a missing file should succeed (idempotent).
+	// 删除不存在的文件应成功（幂等）。
 	if err := adapter.Delete(backupName(9999)); err != nil {
 		t.Errorf("Delete on missing file: got %v, want nil", err)
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Target discriminator
-// -----------------------------------------------------------------------------
 
 func TestWebDAVTarget(t *testing.T) {
 	adapter, _, _ := newWebDAVTestServer(t)
@@ -605,10 +537,6 @@ func TestWebDAVTarget(t *testing.T) {
 		t.Errorf("Target: got %q, want %q", got, TargetWebDAV)
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Restore of nonexistent backup returns ErrFileNotFound
-// -----------------------------------------------------------------------------
 
 func TestWebDAVRestoreNotFound(t *testing.T) {
 	adapter, _, _ := newWebDAVTestServer(t)
@@ -626,15 +554,10 @@ func TestWebDAVRestoreNotFound(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Regression — default-style BasePath without a leading slash
-// -----------------------------------------------------------------------------
-
-// TestWebDAVBasePathWithSlash locks the URL normalization matrix of
-// basePathWithSlash + joinURL.  The settings default webdav_path_prefix is
-// "little_timer/" (no leading slash); without normalization it gets glued
-// onto the URL's last path segment (".../webdav" + "little_timer/" →
-// ".../webdavlittle_timer/"), breaking every WebDAV operation.
+// TestWebDAVBasePathWithSlash 锁定 basePathWithSlash + joinURL 的 URL
+// 规范化矩阵。设置默认 webdav_path_prefix 是 "little_timer/"（无前导
+// 斜杠）；不规范化就会被黏到 URL 的最后一个 path 段上（".../webdav" +
+// "little_timer/" → ".../webdavlittle_timer/"），让所有 WebDAV 操作失效。
 func TestWebDAVBasePathWithSlash(t *testing.T) {
 	const base = "https://dav.example.test/remote.php/webdav"
 	tests := []struct {
@@ -659,10 +582,6 @@ func TestWebDAVBasePathWithSlash(t *testing.T) {
 		})
 	}
 }
-
-// -----------------------------------------------------------------------------
-// Diagnostics
-// -----------------------------------------------------------------------------
 
 func TestWebDAVDiagnostics(t *testing.T) {
 	t.Run("full config", func(t *testing.T) {
@@ -713,9 +632,9 @@ func TestWebDAVDiagnostics(t *testing.T) {
 	})
 }
 
-// TestWebDAVBackupRoundTrip_DefaultStylePrefix is the end-to-end guard for
-// the P0 bug: with BasePath "little_timer/" (the settings default) the PUT
-// must land at /little_timer/<name> on the server, not glued onto the host.
+// TestWebDAVBackupRoundTrip_DefaultStylePrefix 是该 P0 bug 的端到端
+// 防护：BasePath 为 "little_timer/"（设置默认值）时，PUT 必须落在服务器
+// 的 /little_timer/<name>，而不是黏在 host 上。
 func TestWebDAVBackupRoundTrip_DefaultStylePrefix(t *testing.T) {
 	store := make(map[string][]byte)
 
@@ -745,7 +664,7 @@ func TestWebDAVBackupRoundTrip_DefaultStylePrefix(t *testing.T) {
 
 	adapter := NewWebDAVAdapter(WebDAVConfig{
 		URL:      srv.URL,
-		BasePath: "little_timer/", // settings default webdav_path_prefix
+		BasePath: "little_timer/", // 设置默认 webdav_path_prefix
 	})
 	adapter.client = srv.Client()
 
@@ -758,9 +677,9 @@ func TestWebDAVBackupRoundTrip_DefaultStylePrefix(t *testing.T) {
 		t.Fatalf("Backup: %v", err)
 	}
 
-	// The server must have received the PUT at the normalized path, and the
-	// map store key is r.URL.Path — a glued "davlittle_timer/<name>" path
-	// (or an invalid-port parse failure) fails this assertion.
+	// server 必须在规范化路径上收到 PUT，且 map store 的 key 是
+	// r.URL.Path —— 黏成 "davlittle_timer/<name>" 的路径
+	// （或 invalid-port 解析失败）都会让本断言失败。
 	key := "/little_timer/" + name
 	if got := store[key]; !bytes.Equal(got, payload) {
 		t.Errorf("stored payload at %q: got %q, want %q", key, got, payload)

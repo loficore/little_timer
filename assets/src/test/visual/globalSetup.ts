@@ -112,7 +112,7 @@ async function createTestHabit(): Promise<void> {
   const habitPayload = JSON.stringify({
     set_id: 1,
     name: "Test Habit",
-    goal_seconds: 3600, // 1 hour default
+    goal_seconds: 3600, // 默认 1 小时
     color: "#FF5733",
   });
 

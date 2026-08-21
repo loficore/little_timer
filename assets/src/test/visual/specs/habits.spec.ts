@@ -43,7 +43,6 @@ test.describe("习惯追踪 E2E 测试", () => {
     await habitsPage.goto();
     await page.waitForLoadState("networkidle");
 
-    // 确保有习惯集（无则先创建）
     let setCount = await habitsPage.getHabitSetCount();
     if (setCount === 0) {
       await habitsPage.clickCreateSet();
@@ -54,12 +53,10 @@ test.describe("习惯追踪 E2E 测试", () => {
       }
       expect(setCount).toBeGreaterThan(0);
 
-      // 选择第一个习惯集
       await habitsPage.selectHabitSet(0);
 
       const beforeHabitCount = await habitsPage.getHabitCount();
 
-    // 创建习惯
     await habitsPage.clickCreateHabit();
     await habitsPage.fillHabitForm(`喝水-${Date.now()}`, 60);
     await habitsPage.clickConfirm();
@@ -68,7 +65,6 @@ test.describe("习惯追踪 E2E 测试", () => {
     const afterHabitCount = await habitsPage.getHabitCount();
     expect(afterHabitCount).toBeGreaterThan(beforeHabitCount);
 
-    // 打卡
     await habitsPage.clickCheckIn(0);
     await page.waitForLoadState("networkidle");
 

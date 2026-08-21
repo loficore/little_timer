@@ -1,9 +1,9 @@
 package backup
 
-// Tests for S3Adapter using a mock S3APIClient.
+// S3Adapter 的测试，使用 mock S3APIClient。
 //
-// The mock stores objects in memory and records all API calls, allowing
-// full behavioral testing without a real S3 endpoint or testcontainers.
+// mock 在内存中存对象并记录全部 API 调用，无需真实 S3 端点或
+// testcontainers 即可完成完整的行为测试。
 
 import (
 	"bytes"
@@ -23,35 +23,30 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-// -----------------------------------------------------------------------------
-// mockS3Client
-// -----------------------------------------------------------------------------
-
-// mockS3Client implements S3APIClient in-memory.  Every method records
-// its input in a calls slice and returns values driven by struct fields.
-// When a mockObj field is nil a zero-value output is returned so callers
-// only need to set the fields they care about.
+// mockS3Client 以内存方式实现 S3APIClient。每个方法把入参记录进 calls
+// slice，返回值由 struct 字段驱动。mockObj 字段为 nil 时返回零值 output，
+// 调用方只需设置自己关心的字段。
 type mockS3Client struct {
-	store map[string][]byte // objects stored by key
+	store map[string][]byte // 按 key 存放的对象
 
-	// Recorded calls (appended on every invocation).
+	// 记录调用（每次调用追加）。
 	putCalls        []*s3.PutObjectInput
 	getCalls        []*s3.GetObjectInput
 	deleteCalls     []*s3.DeleteObjectInput
 	headBucketCalls []*s3.HeadBucketInput
 	listCalls       []*s3.ListObjectsV2Input
 
-	// Per-method error overrides (nil = success).
+	// 各方法的错误覆盖（nil = 成功）。
 	headBucketErr    error
 	putObjectErr     error
 	getObjectErr     error
 	deleteObjectErr  error
 	listObjectsV2Err error
 
-	// Override ListObjectsV2 output (nil = empty output).
+	// 覆盖 ListObjectsV2 的 output（nil = 空 output）。
 	listObjectsV2Out *s3.ListObjectsV2Output
 
-	// Override GetObject output (nil = store lookup / empty body).
+	// 覆盖 GetObject 的 output（nil = 查 store / 空 body）。
 	getObjectOut *s3.GetObjectOutput
 }
 
@@ -113,13 +108,8 @@ func (m *mockS3Client) ListObjectsV2(_ context.Context, params *s3.ListObjectsV2
 	return &s3.ListObjectsV2Output{}, nil
 }
 
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-// newS3AdapterWithMock returns an S3Adapter wired to a mock client.
-// The adapter is constructed directly (not via NewS3Adapter) so tests
-// don't need real AWS credentials.
+// newS3AdapterWithMock 返回接到 mock client 的 S3Adapter。adapter 直接
+// 构造（不走 NewS3Adapter），测试因此不需要真实 AWS 凭据。
 func newS3AdapterWithMock(t *testing.T, mock *mockS3Client) *S3Adapter {
 	t.Helper()
 	return &S3Adapter{
@@ -132,8 +122,7 @@ func newS3AdapterWithMock(t *testing.T, mock *mockS3Client) *S3Adapter {
 	}
 }
 
-// writeTempFile creates a temp file with the given content and returns
-// its path.  The caller is responsible for cleanup.
+// writeTempFile 创建带给定内容的临时文件并返回路径。清理由调用方负责。
 func writeTempFile(t *testing.T, content []byte) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -144,7 +133,7 @@ func writeTempFile(t *testing.T, content []byte) string {
 	return path
 }
 
-// readTempFile reads the contents of a file and fails the test on error.
+// readTempFile 读取文件内容；出错则测试失败。
 func readTempFile(t *testing.T, path string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -154,13 +143,8 @@ func readTempFile(t *testing.T, path string) []byte {
 	return b
 }
 
-// -----------------------------------------------------------------------------
-// TestS3BackupRestoreRoundTrip
-// -----------------------------------------------------------------------------
-
-// TestS3BackupRestoreRoundTrip verifies that bytes written via Backup are
-// returned identically by Restore — the mock stores PutObject bytes and
-// returns them from GetObject.
+// TestS3BackupRestoreRoundTrip 验证 Backup 写入的字节被 Restore 原样
+// 取回 —— mock 存储 PutObject 的字节并从 GetObject 返回。
 func TestS3BackupRestoreRoundTrip(t *testing.T) {
 	mock := &mockS3Client{store: make(map[string][]byte)}
 	adapter := newS3AdapterWithMock(t, mock)
@@ -182,12 +166,8 @@ func TestS3BackupRestoreRoundTrip(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3TestConnection_WriteProbe
-// -----------------------------------------------------------------------------
-
-// TestS3TestConnection_WriteProbe verifies that TestConnection invokes
-// HeadBucket, PutObject, GetObject, and DeleteObject with the probe filename.
+// TestS3TestConnection_WriteProbe 验证 TestConnection 依次调用
+// HeadBucket、PutObject、GetObject、DeleteObject，且用的是 probe 文件名。
 func TestS3TestConnection_WriteProbe(t *testing.T) {
 	mock := &mockS3Client{store: make(map[string][]byte)}
 	adapter := newS3AdapterWithMock(t, mock)
@@ -196,12 +176,12 @@ func TestS3TestConnection_WriteProbe(t *testing.T) {
 		t.Fatalf("TestConnection: unexpected error: %v", err)
 	}
 
-	// HeadBucket must be called once.
+	// HeadBucket 必须被调用一次。
 	if n := len(mock.headBucketCalls); n != 1 {
 		t.Fatalf("HeadBucket: want 1 call, got %d", n)
 	}
 
-	// PutObject must be called with a probe key.
+	// PutObject 必须用带 probe 的 key 调用。
 	if n := len(mock.putCalls); n != 1 {
 		t.Fatalf("PutObject: want 1 call, got %d", n)
 	}
@@ -210,7 +190,7 @@ func TestS3TestConnection_WriteProbe(t *testing.T) {
 		t.Fatalf("PutObject key %q does not contain lt_probe_", key)
 	}
 
-	// GetObject must be called with the same key.
+	// GetObject 必须用同一个 key 调用。
 	if n := len(mock.getCalls); n != 1 {
 		t.Fatalf("GetObject: want 1 call, got %d", n)
 	}
@@ -219,7 +199,7 @@ func TestS3TestConnection_WriteProbe(t *testing.T) {
 			aws.ToString(mock.getCalls[0].Key), key)
 	}
 
-	// DeleteObject must be called with the same key.
+	// DeleteObject 必须用同一个 key 调用。
 	if n := len(mock.deleteCalls); n != 1 {
 		t.Fatalf("DeleteObject: want 1 call, got %d", n)
 	}
@@ -229,12 +209,8 @@ func TestS3TestConnection_WriteProbe(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3TestConnection_NoSuchBucket
-// -----------------------------------------------------------------------------
-
-// TestS3TestConnection_NoSuchBucket verifies that a HeadBucket
-// NoSuchBucket error is classified as ErrFileNotFound.
+// TestS3TestConnection_NoSuchBucket 验证 HeadBucket 的 NoSuchBucket 错误
+// 被分类为 ErrFileNotFound。
 func TestS3TestConnection_NoSuchBucket(t *testing.T) {
 	mock := &mockS3Client{
 		store:         make(map[string][]byte),
@@ -248,12 +224,8 @@ func TestS3TestConnection_NoSuchBucket(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3TestConnection_AccessDenied
-// -----------------------------------------------------------------------------
-
-// TestS3TestConnection_AccessDenied verifies that a PutObject
-// AccessDenied error is classified as ErrPermissionDenied.
+// TestS3TestConnection_AccessDenied 验证 PutObject 的 AccessDenied 错误
+// 被分类为 ErrPermissionDenied。
 func TestS3TestConnection_AccessDenied(t *testing.T) {
 	mock := &mockS3Client{
 		store:        make(map[string][]byte),
@@ -267,13 +239,8 @@ func TestS3TestConnection_AccessDenied(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3TestConnection_InvalidAccessKeyId
-// -----------------------------------------------------------------------------
-
-// TestS3TestConnection_InvalidAccessKeyId verifies that a
-// GenericAPIError with code "InvalidAccessKeyId" is classified as
-// ErrAuthenticationFail.
+// TestS3TestConnection_InvalidAccessKeyId 验证 code 为
+// "InvalidAccessKeyId" 的 GenericAPIError 被分类为 ErrAuthenticationFail。
 func TestS3TestConnection_InvalidAccessKeyId(t *testing.T) {
 	mock := &mockS3Client{
 		store: make(map[string][]byte),
@@ -290,13 +257,8 @@ func TestS3TestConnection_InvalidAccessKeyId(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3TestConnection_SignatureDoesNotMatch
-// -----------------------------------------------------------------------------
-
-// TestS3TestConnection_SignatureDoesNotMatch verifies that a
-// GenericAPIError with code "SignatureDoesNotMatch" is classified as
-// ErrAuthenticationFail.
+// TestS3TestConnection_SignatureDoesNotMatch 验证 code 为
+// "SignatureDoesNotMatch" 的 GenericAPIError 被分类为 ErrAuthenticationFail。
 func TestS3TestConnection_SignatureDoesNotMatch(t *testing.T) {
 	mock := &mockS3Client{
 		store: make(map[string][]byte),
@@ -313,12 +275,7 @@ func TestS3TestConnection_SignatureDoesNotMatch(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3TestConnection_NetworkError
-// -----------------------------------------------------------------------------
-
-// TestS3TestConnection_NetworkError verifies that a *url.Error is
-// classified as ErrNetworkError.
+// TestS3TestConnection_NetworkError 验证 *url.Error 被分类为 ErrNetworkError。
 func TestS3TestConnection_NetworkError(t *testing.T) {
 	mock := &mockS3Client{
 		store: make(map[string][]byte),
@@ -336,13 +293,9 @@ func TestS3TestConnection_NetworkError(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3TestConnection_NilBody
-// -----------------------------------------------------------------------------
-
-// TestS3TestConnection_NilBody verifies that a GetObject response with a
-// nil Body does not panic in io.ReadAll: TestConnection must return
-// ErrConnectionFailed and still attempt the DeleteObject probe cleanup.
+// TestS3TestConnection_NilBody 验证 GetObject 返回 nil Body 时不会在
+// io.ReadAll 处 panic：TestConnection 必须返回 ErrConnectionFailed，
+// 并且仍尝试 DeleteObject probe 清理。
 func TestS3TestConnection_NilBody(t *testing.T) {
 	mock := &mockS3Client{
 		store:        make(map[string][]byte),
@@ -365,13 +318,8 @@ func TestS3TestConnection_NilBody(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3Backup_AccessDenied
-// -----------------------------------------------------------------------------
-
-// TestS3Backup_AccessDenied verifies that a PutObject AccessDenied
-// error during Backup is classified as ErrPermissionDenied (not
-// generic ErrBackupFailed).
+// TestS3Backup_AccessDenied 验证 Backup 期间 PutObject 的 AccessDenied
+// 错误被分类为 ErrPermissionDenied（而非笼统的 ErrBackupFailed）。
 func TestS3Backup_AccessDenied(t *testing.T) {
 	mock := &mockS3Client{
 		store:        make(map[string][]byte),
@@ -386,12 +334,8 @@ func TestS3Backup_AccessDenied(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3List
-// -----------------------------------------------------------------------------
-
-// TestS3List verifies that ListObjectsV2 results are parsed into
-// BackupInfo entries with the prefix stripped.
+// TestS3List 验证 ListObjectsV2 的结果被解析为 BackupInfo 条目，
+// 且剥掉了前缀。
 func TestS3List(t *testing.T) {
 	now := time.Now()
 	mock := &mockS3Client{
@@ -433,7 +377,7 @@ func TestS3List(t *testing.T) {
 		t.Fatalf("second size: got %d, want 4096", results[1].SizeBytes)
 	}
 
-	// Verify the ListObjectsV2 call used the correct prefix.
+	// 校验 ListObjectsV2 调用使用了正确的前缀。
 	if n := len(mock.listCalls); n != 1 {
 		t.Fatalf("ListObjectsV2: want 1 call, got %d", n)
 	}
@@ -442,13 +386,8 @@ func TestS3List(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3List_TimestampFromName
-// -----------------------------------------------------------------------------
-
-// TestS3List_TimestampFromName verifies that the backup timestamp is
-// parsed from the key name (matching Local/WebDAV) and that LastModified
-// is ignored when the name parses.
+// TestS3List_TimestampFromName 验证备份时间戳解析自 key 名
+// （与 Local/WebDAV 一致），且名字可解析时忽略 LastModified。
 func TestS3List_TimestampFromName(t *testing.T) {
 	lastModified := time.Unix(1800000000, 0)
 	mock := &mockS3Client{
@@ -478,7 +417,7 @@ func TestS3List_TimestampFromName(t *testing.T) {
 		t.Fatalf("want 2 results, got %d", len(results))
 	}
 
-	// Timestamp must come from the filename, not LastModified.
+	// 时间戳必须取自文件名，而不是 LastModified。
 	if got := results[0].Timestamp; got != 1700000000 {
 		t.Errorf("first timestamp: got %d, want 1700000000 (name-parsed, LastModified=%d)", got, lastModified.Unix())
 	}
@@ -487,12 +426,8 @@ func TestS3List_TimestampFromName(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3Delete
-// -----------------------------------------------------------------------------
-
-// TestS3Delete verifies that Delete calls DeleteObject with the correct
-// key (PathPrefix + "/" + backupName) and returns no error.
+// TestS3Delete 验证 Delete 用正确的 key（PathPrefix + "/" + backupName）
+// 调用 DeleteObject 且不返回错误。
 func TestS3Delete(t *testing.T) {
 	mock := &mockS3Client{store: make(map[string][]byte)}
 	adapter := newS3AdapterWithMock(t, mock)
@@ -509,12 +444,8 @@ func TestS3Delete(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// TestS3WriteManifest
-// -----------------------------------------------------------------------------
-
-// TestS3WriteManifest verifies that WriteManifest calls PutObject with
-// a manifest.json key and the Content-Type header set to application/json.
+// TestS3WriteManifest 验证 WriteManifest 用 manifest.json key 调用
+// PutObject，且 Content-Type 头为 application/json。
 func TestS3WriteManifest(t *testing.T) {
 	mock := &mockS3Client{store: make(map[string][]byte)}
 	adapter := newS3AdapterWithMock(t, mock)
@@ -534,7 +465,7 @@ func TestS3WriteManifest(t *testing.T) {
 		t.Fatalf("ContentType: got %q, want application/json", aws.ToString(call.ContentType))
 	}
 
-	// Verify the body was stored in the mock.
+	// 验证 body 已存进 mock。
 	b, ok := mock.store["little_timer/manifest.json"]
 	if !ok {
 		t.Fatal("manifest.json not stored in mock")

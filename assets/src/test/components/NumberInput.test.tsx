@@ -46,7 +46,6 @@ describe("NumberInput 组件", () => {
     const input = screen.getByDisplayValue("25") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "5" } });
 
-    // 应该用最小值替代
     expect(mockOnChange).toHaveBeenCalledWith(10);
   });
 
@@ -63,7 +62,6 @@ describe("NumberInput 组件", () => {
     const input = screen.getByDisplayValue("25") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "100" } });
 
-    // 应该用最大值替代
     expect(mockOnChange).toHaveBeenCalledWith(50);
   });
 

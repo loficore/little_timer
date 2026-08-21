@@ -22,7 +22,6 @@ export class TestUtils {
       try {
         await fetch("http://127.0.0.1:8080/api/state", { method: "GET" });
       } catch {
-        // ignore errors during reset
       }
     });
     await this.page.waitForTimeout(500);

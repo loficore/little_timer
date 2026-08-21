@@ -1,8 +1,7 @@
-// Package backup — test helpers exported for cross-package test use.
+// Package backup —— 导出给跨包测试使用的测试辅助函数。
 //
-// Export_test.go exports internal types and constructors so that tests
-// in other packages (e.g., handlers) can construct BackupManagers with
-// custom adapters without reaching into unexported fields.
+// 本文件导出内部类型与构造函数，让其他包（如 handlers）的测试能用自定义
+// adapter 构造 BackupManager，而不必伸手碰非导出字段。
 package backup
 
 import (
@@ -11,19 +10,17 @@ import (
 	"little-timer/internal/storage"
 )
 
-// FakeLocalAdapter implements BackupAdapter with configurable behavior
-// for testing.  Every method has an optional error field; when non-nil
-// the method returns that error instead of its normal behavior.
+// FakeLocalAdapter 以可配置行为实现 BackupAdapter，供测试使用。
+// 每个方法都有一个可选的错误字段；非 nil 时方法返回该错误而非正常行为。
 //
-// RestoreData, when non-nil, is written to the destination instead of
-// whatever was recorded during Backup(), allowing tests to simulate
-// SHA-256 mismatches.
+// RestoreData 非 nil 时，Restore 写入它而不是 Backup() 期间记录的内容，
+// 让测试可以模拟 SHA-256 不匹配。
 type FakeLocalAdapter struct {
 	backupDir   string
 	backupData  []byte
 	backupName  string
 	backupErr   error
-	restoreData []byte // if non-nil, Restore writes this instead of backupData
+	restoreData []byte // 非 nil 时 Restore 写这个而不是 backupData
 	restoreErr  error
 
 	manifest     string
@@ -32,26 +29,25 @@ type FakeLocalAdapter struct {
 	deleteErr    error
 }
 
-// NewFakeLocalAdapter returns an adapter whose Backup() records the
-// uploaded bytes and whose Restore() replays them (or restoreData if set).
+// NewFakeLocalAdapter 返回一个 adapter：Backup() 记录上传的字节，
+// Restore() 重放它们（若设置了 restoreData 则用它）。
 func NewFakeLocalAdapter(backupDir string) *FakeLocalAdapter {
 	return &FakeLocalAdapter{backupDir: backupDir}
 }
 
-// SetBackupError configures Backup() to return this error.
+// SetBackupError 让 Backup() 返回指定错误。
 func (f *FakeLocalAdapter) SetBackupError(err error) { f.backupErr = err }
 
-// SetRestoreData configures Restore() to write these bytes instead of
-// what was recorded during Backup().
+// SetRestoreData 让 Restore() 写入这些字节，而不是 Backup() 期间记录的内容。
 func (f *FakeLocalAdapter) SetRestoreData(data []byte) { f.restoreData = data }
 
-// Target implements BackupAdapter.
+// Target 实现 BackupAdapter。
 func (f *FakeLocalAdapter) Target() BackupTarget { return TargetLocal }
 
-// TestConnection implements BackupAdapter.
+// TestConnection 实现 BackupAdapter。
 func (f *FakeLocalAdapter) TestConnection() error { return nil }
 
-// Backup records the contents of srcPath.
+// Backup 记录 srcPath 的内容。
 func (f *FakeLocalAdapter) Backup(srcPath, backupName string) error {
 	if f.backupErr != nil {
 		return f.backupErr
@@ -65,7 +61,7 @@ func (f *FakeLocalAdapter) Backup(srcPath, backupName string) error {
 	return nil
 }
 
-// Restore writes restoreData (if set) or backupData to destPath.
+// Restore 把 restoreData（若设置）或 backupData 写入 destPath。
 func (f *FakeLocalAdapter) Restore(backupName, destPath string) error {
 	if f.restoreErr != nil {
 		return f.restoreErr
@@ -77,10 +73,10 @@ func (f *FakeLocalAdapter) Restore(backupName, destPath string) error {
 	return os.WriteFile(destPath, data, 0o600)
 }
 
-// List implements BackupAdapter.
+// List 实现 BackupAdapter。
 func (f *FakeLocalAdapter) List() ([]BackupInfo, error) { return nil, nil }
 
-// Delete records the deleted name.
+// Delete 记录被删除的名字。
 func (f *FakeLocalAdapter) Delete(backupName string) error {
 	f.deletedNames = append(f.deletedNames, backupName)
 	if f.deleteErr != nil {
@@ -89,7 +85,7 @@ func (f *FakeLocalAdapter) Delete(backupName string) error {
 	return nil
 }
 
-// WriteManifest stores the manifest JSON.
+// WriteManifest 保存 manifest JSON。
 func (f *FakeLocalAdapter) WriteManifest(data string) error {
 	if f.manifestErr != nil {
 		return f.manifestErr
@@ -98,12 +94,11 @@ func (f *FakeLocalAdapter) WriteManifest(data string) error {
 	return nil
 }
 
-// DeletedNames returns the list of names passed to Delete.
+// DeletedNames 返回传给 Delete 的名字列表。
 func (f *FakeLocalAdapter) DeletedNames() []string { return f.deletedNames }
 
-// NewManagerWithAdapter constructs a BackupManager wired to the given
-// sqlite, dbPath, backupDir, and adapter.  Exported so tests in other
-// packages can inject fake adapters.
+// NewManagerWithAdapter 构造接到给定 sqlite、dbPath、backupDir 与
+// adapter 的 BackupManager。导出它是为了让其他包的测试能注入假 adapter。
 func NewManagerWithAdapter(
 	sqlite *storage.SqliteManager,
 	dbPath, backupDir string,

@@ -1,8 +1,4 @@
-// Package handlers — Settings handler tests.
-//
-// Tests for the 2 settings endpoints in settings.go. Each test uses
-// httptest.ResponseRecorder and real gin.Context via gin.CreateTestContext().
-// Mock *app.App with stubbed Clock, Settings, SQLite, Backup, Lock/Unlock.
+// Package handlers —— Settings handler 测试（GET/POST /api/settings）。
 package handlers
 
 import (
@@ -18,28 +14,22 @@ import (
 	"little-timer/internal/http/app"
 )
 
-// setupSettingsRouter builds a gin.Engine with only the settings routes.
+// setupSettingsRouter 构建只注册 settings 路由的 gin.Engine。
 func setupSettingsRouter(t *testing.T, a *app.App) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 
-	// Inject app into context via middleware
 	r.Use(func(c *gin.Context) {
 		c.Set("app", a)
 		c.Next()
 	})
 
-	// Register settings routes
 	r.GET("/api/settings", SettingsGet)
 	r.POST("/api/settings", SettingsUpdate)
 
 	return r
 }
-
-// =============================================================================
-// handleSettingsGet — GET /api/settings
-// =============================================================================
 
 func TestSettings_Get_ReturnsFullConfig(t *testing.T) {
 	a := newTestApp(t)
@@ -58,14 +48,12 @@ func TestSettings_Get_ReturnsFullConfig(t *testing.T) {
 		t.Fatalf("response not JSON: %v", err)
 	}
 
-	// Verify top-level sections present
 	for _, key := range []string{"basic", "clock_defaults", "logging", "auth"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("missing key %q in settings response", key)
 		}
 	}
 
-	// Verify basic section fields
 	basic, ok := got["basic"].(map[string]any)
 	if !ok {
 		t.Fatal("basic field is not an object")
@@ -76,7 +64,6 @@ func TestSettings_Get_ReturnsFullConfig(t *testing.T) {
 		}
 	}
 
-	// Verify clock_defaults section fields
 	clockDefaults, ok := got["clock_defaults"].(map[string]any)
 	if !ok {
 		t.Fatal("clock_defaults field is not an object")
@@ -87,7 +74,6 @@ func TestSettings_Get_ReturnsFullConfig(t *testing.T) {
 		}
 	}
 
-	// Verify logging section fields
 	logging, ok := got["logging"].(map[string]any)
 	if !ok {
 		t.Fatal("logging field is not an object")
@@ -98,7 +84,6 @@ func TestSettings_Get_ReturnsFullConfig(t *testing.T) {
 		}
 	}
 
-	// Verify auth section fields
 	auth, ok := got["auth"].(map[string]any)
 	if !ok {
 		t.Fatal("auth field is not an object")
@@ -126,21 +111,15 @@ func TestSettings_Get_TimezoneValue(t *testing.T) {
 	if tz == nil {
 		t.Fatal("timezone is nil")
 	}
-	// Timezone should be a number (int8 in Go, float64 in JSON)
 	if _, ok := tz.(float64); !ok {
 		t.Errorf("timezone = %T, want number", tz)
 	}
 }
 
-// =============================================================================
-// handleSettingsUpdate — POST /api/settings
-// =============================================================================
-
 func TestSettings_Update_ValidFullUpdate(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Full settings update payload
 	body := bytes.NewBufferString(`{
 		"basic": {
 			"timezone": 9,
@@ -193,7 +172,7 @@ func TestSettings_Update_ValidFullUpdate(t *testing.T) {
 		t.Errorf("status = %v, want settings_updated", got["status"])
 	}
 
-	// Verify the settings were actually updated
+	// 确认 settings 真的持久化了，而不是被原样回显
 	cfg := a.Settings.Config()
 	if cfg.Basic.Timezone != 9 {
 		t.Errorf("timezone = %d, want 9", cfg.Basic.Timezone)
@@ -207,7 +186,6 @@ func TestSettings_Update_EmptyBody(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Empty body — should be handled gracefully
 	body := bytes.NewBufferString(`{}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
@@ -256,7 +234,6 @@ func TestSettings_Update_PartialUpdate(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Partial update — only timezone
 	body := bytes.NewBufferString(`{"basic": {"timezone": -5}}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
@@ -276,7 +253,6 @@ func TestSettings_Update_PartialUpdate(t *testing.T) {
 		t.Errorf("status = %v, want settings_updated", got["status"])
 	}
 
-	// Verify timezone was updated
 	cfg := a.Settings.Config()
 	if cfg.Basic.Timezone != -5 {
 		t.Errorf("timezone = %d, want -5", cfg.Basic.Timezone)
@@ -287,17 +263,14 @@ func TestSettings_Update_InvalidTimezone(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Invalid timezone (out of range)
 	body := bytes.NewBufferString(`{"basic": {"timezone": 99}}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	// ponytail: parseSettingsFromJSON silently drops out-of-range values
-	// rather than returning an error, so the request still succeeds and
-	// the on-disk timezone stays at its prior value.  Assert the value
-	// was rejected (not the HTTP code).
+	// parseSettingsFromJSON 对越界值静默丢弃而不是返回错误，所以请求仍然
+	// 成功、timezone 保持原值。断言的是值，不是 HTTP 码。
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST /api/settings (invalid tz): code = %d, body = %s", w.Code, w.Body.String())
 	}
@@ -311,15 +284,14 @@ func TestSettings_Update_InvalidLanguage(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Invalid language (too long)
 	body := bytes.NewBufferString(`{"basic": {"language": "toolonglanguage"}}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	// ponytail: parseSettingsFromJSON silently drops over-long language
-	// strings; assert the field stayed at its previous value.
+	// parseSettingsFromJSON 静默丢弃超长的 language 字符串；断言字段保持
+	// 原值。
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST /api/settings (invalid lang): code = %d, body = %s", w.Code, w.Body.String())
 	}
@@ -333,7 +305,6 @@ func TestSettings_Update_DefaultMode(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Update default mode to stopwatch
 	body := bytes.NewBufferString(`{"basic": {"default_mode": "stopwatch"}}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
@@ -353,7 +324,6 @@ func TestSettings_Update_DefaultMode(t *testing.T) {
 		t.Errorf("status = %v, want settings_updated", got["status"])
 	}
 
-	// Verify default mode was updated
 	cfg := a.Settings.Config()
 	if cfg.Basic.DefaultMode != domain.DefaultModeStopwatch {
 		t.Errorf("default_mode = %v, want stopwatch", cfg.Basic.DefaultMode)
@@ -477,10 +447,6 @@ func TestSettings_Update_ClockDefaults(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Edge cases and error handling
-// =============================================================================
-
 func TestSettings_Update_NoContentType(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
@@ -488,10 +454,8 @@ func TestSettings_Update_NoContentType(t *testing.T) {
 	body := bytes.NewBufferString(`{"basic": {"timezone": 5}}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
-	// No Content-Type header
 	r.ServeHTTP(w, req)
 
-	// Should still work (gin's ShouldBindJSON is lenient)
 	if w.Code != http.StatusOK {
 		t.Logf("POST /api/settings (no content-type): code = %d (may be acceptable)", w.Code)
 	}
@@ -501,14 +465,12 @@ func TestSettings_Update_MalformedBasic(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Malformed basic object
 	body := bytes.NewBufferString(`{"basic": "not_an_object"}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	// Should handle gracefully (ignore malformed section)
 	if w.Code != http.StatusOK {
 		t.Logf("POST /api/settings (malformed basic): code = %d (acceptable)", w.Code)
 	}
@@ -518,7 +480,6 @@ func TestSettings_Update_NullValues(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Null values should be ignored
 	body := bytes.NewBufferString(`{"basic": {"timezone": null, "language": null}}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
@@ -534,7 +495,6 @@ func TestSettings_Update_ExtraFields(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Extra unknown fields should be ignored
 	body := bytes.NewBufferString(`{"basic": {"timezone": 3, "unknown_field": "ignored"}, "extra_section": {}}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
@@ -555,7 +515,6 @@ func TestSettings_Get_AfterUpdate(t *testing.T) {
 	a := newTestApp(t)
 	r := setupSettingsRouter(t, a)
 
-	// Update first
 	updateBody := bytes.NewBufferString(`{"basic": {"timezone": 12, "language": "ko"}}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/settings", updateBody)
@@ -566,7 +525,6 @@ func TestSettings_Get_AfterUpdate(t *testing.T) {
 		t.Fatalf("POST /api/settings: code = %d", w.Code)
 	}
 
-	// Then get
 	w2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
 	r.ServeHTTP(w2, req2)
@@ -588,10 +546,6 @@ func TestSettings_Get_AfterUpdate(t *testing.T) {
 		t.Errorf("language = %s, want ko", basic["language"])
 	}
 }
-
-// =============================================================================
-// Backup config tests (via settings update)
-// =============================================================================
 
 func TestSettings_Update_BackupConfig(t *testing.T) {
 	a := newTestApp(t)

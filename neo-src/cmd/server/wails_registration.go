@@ -1,20 +1,19 @@
 //go:build bindings
 // +build bindings
 
-// Package main — Wails v3 service bindings registration for bindings codegen.
+// Package main —— 供 bindings 代码生成使用的 Wails v3 service 注册。
 //
-// This file exists ONLY so wails3's static analysis (the `just bindings`
-// step) can find the application.NewService() calls when generating TS
-// bindings WITHOUT the android build tag.  It is gated behind the `bindings`
-// build tag so the normal desktop binary — which never uses Wails at runtime
-// (it serves HTTP + webview_go) — does NOT compile the wails v3 application
-// package, which drags in the gtk4 + webkitgtk-6.0 cgo dependency that is
-// unavailable on EL9 (AlmaLinux 9) and minimal/container builds.
+// 本文件的存在仅仅是：在没有 android build tag 生成 TS bindings 时，让
+// wails3 的静态分析（`just bindings` 步骤）能找到 application.NewService()
+// 调用。它被门控在 `bindings` build tag 之后，这样正常的桌面二进制 ——
+// 运行时从不用 Wails（它用 HTTP + webview_go 提供服务）—— 不会编译
+// wails v3 application 包，那个包会拖进 gtk4 + webkitgtk-6.0 cgo 依赖，
+// 而 EL9（AlmaLinux 9）和最小化/容器构建上没有。
 //
-// The android-specific registration lives in main_android.go (`//go:build
-// android`); android builds register the real services in bootWails() and do
-// not need this file.  `scripts/generate-bindings.sh` passes
-// `-tags=bindings` in desktop mode so the codegen still sees these calls.
+// Android 专属注册在 main_android.go（`//go:build android`）；android
+// 构建在 bootWails() 里注册真实 service，不需要本文件。
+// `scripts/generate-bindings.sh` 在桌面模式下传 `-tags=bindings`，让
+// 代码生成仍然能看到这些调用。
 
 package main
 

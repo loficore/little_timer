@@ -125,7 +125,6 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
         } else if (isColor) {
             return { backgroundColor: wp };
         }
-        // 图片类型（local: 或 http(s)）由 CardBackground 组件以 <img> 渲染
         return {};
     };
 
@@ -136,7 +135,6 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                 showSettings={false}
                 showBack={true}
                 onBackClick={() => {
-                    // 空回调，返回时不执行任何操作
                 }}
                 onStatsClick={onStatsClick}
                 onSettingsClick={onSettingsClick}

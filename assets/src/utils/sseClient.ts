@@ -41,16 +41,15 @@ export class SSEClient {
     }
 
     private createConnection(): void {
-        // SSE bypasses the Vite proxy (EventSource doesn't support upgrade).
-        // In dev mode, VITE_API_URL points directly to the Go backend.
-        // In production (WebView), window.location.origin serves both API and SSE.
+        // SSE 绕过 Vite 代理（EventSource 不支持协议升级）。
+        // 开发模式下 VITE_API_URL 直接指向 Go 后端。
+        // 生产环境（WebView）中 window.location.origin 同时提供 API 和 SSE。
         const sseBase = import.meta.env.VITE_API_URL || this.baseUrl;
         this.eventSource = new EventSource(`${sseBase}/api/events`);
 
         this.eventSource.onopen = () => {
             logInfo('SSE connection opened');
             this.reconnectAttempts = 0;
-            // 连接成功时立即通知
             if (this.onConnect) {
                 this.onConnect();
             }

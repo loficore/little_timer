@@ -1,18 +1,8 @@
-// Package settings — input validation.
+// Package settings —— 输入校验。
 //
-// Port of `src/settings/settings_validator.zig` (little_timer).  Every
-// rule from the Zig source is preserved verbatim — same names, same
-// range bounds, same error semantics.  The functions return a
-// `ValidationError` (a typed sentinel) rather than panicking so the
-// caller can choose how to surface the failure.
-//
-// Mapping notes:
-//
-//   - Zig `ValidationError` error set → Go typed-sentinel `ValidationError`
-//     with `Error()` for use with `errors.Is`/`errors.As`.
-//   - `safeI8FromJson`/`safeU32FromJson`/`safeU64FromJson`/`safeI64FromJson`
-//     become methods on the `Validator` zero-value type so callers can
-//     `validator.SafeI8FromJson(...)` without importing the package twice.
+// 每条规则返回 `ValidationError`（类型化哨兵）而非 panic，让调用方自行
+// 决定如何暴露失败。`SafeXFromJson` 辅助函数是 `Validator` 零值类型的
+// 方法，调用方用 `validator.SafeI8FromJson(...)` 即可，无需二次 import。
 package settings
 
 import (
@@ -21,8 +11,7 @@ import (
 	"little-timer/internal/domain"
 )
 
-// ValidationError 对应 Zig 源码中的 `pub const ValidationError = error{...}`，
-// 是一个类型化哨兵错误，可通过 errors.Is / errors.As 进行匹配。
+// ValidationError 是类型化哨兵错误，可通过 errors.Is / errors.As 进行匹配。
 type ValidationError string
 
 const (
@@ -33,14 +22,14 @@ const (
 	ErrInvalidLoopInterval ValidationError = "invalid loop interval"
 	ErrInvalidMaxSeconds   ValidationError = "invalid max seconds"
 	ErrInvalidTickInterval ValidationError = "invalid tick interval"
-	ErrInvalidPresetName    ValidationError = "invalid preset name"
-	ErrPresetLimitExceeded  ValidationError = "preset limit exceeded"
-	ErrInvalidToken         ValidationError = "invalid auth token"
+	ErrInvalidPresetName   ValidationError = "invalid preset name"
+	ErrPresetLimitExceeded ValidationError = "preset limit exceeded"
+	ErrInvalidToken        ValidationError = "invalid auth token"
 )
 
 func (e ValidationError) Error() string { return string(e) }
 
-// Time / interval bounds — mirror constants from interface.zig.
+// 时间 / 间隔边界。
 const (
 	minTimezone = -12
 	maxTimezone = 14
@@ -55,7 +44,7 @@ const (
 	maxLoopInterval = uint64(3600)
 
 	minMaxSeconds = uint64(1)
-	maxMaxSeconds = domain.Year * 365 // DEFAULT_MAX_YEAR_SECONDS
+	maxMaxSeconds = domain.Year * 365
 
 	minTickIntervalMs = domain.MinTickIntervalMs // 100
 	maxTickIntervalMs = domain.MaxTickIntervalMs // 5000
@@ -75,12 +64,9 @@ type Validator struct{}
 // 保留构造函数便于未来扩展（如可插拔规则）时保持 API 兼容。
 func NewValidator() Validator { return Validator{} }
 
-// -----------------------------------------------------------------------------
-// Range checks.
-// -----------------------------------------------------------------------------
+// 区间检查。
 
-// ValidateTimezone 接受区间 [-12, 14] 的时区偏移。对应 Zig 中的
-// `pub fn validateTimezone`。
+// ValidateTimezone 接受区间 [-12, 14] 的时区偏移。
 func (Validator) ValidateTimezone(tz int8) error {
 	if tz < minTimezone || tz > maxTimezone {
 		return fmt.Errorf("%w: %d not in [%d, %d]",
@@ -89,8 +75,7 @@ func (Validator) ValidateTimezone(tz int8) error {
 	return nil
 }
 
-// ValidateLanguage 接受长度为 1..10 的语言代码。对应 Zig 中的
-// `pub fn validateLanguage`。
+// ValidateLanguage 接受长度为 1..10 的语言代码。
 func (Validator) ValidateLanguage(lang string) error {
 	if len := len(lang); len < minLanguageLen || len > maxLanguageLen {
 		return fmt.Errorf("%w: length %d not in [%d, %d]",
@@ -99,8 +84,7 @@ func (Validator) ValidateLanguage(lang string) error {
 	return nil
 }
 
-// ValidateDuration 接受区间 [1, 86400] 秒的时长。对应 Zig 中的
-// `pub fn validateDuration`。
+// ValidateDuration 接受区间 [1, 86400] 秒的时长。
 func (Validator) ValidateDuration(seconds uint64) error {
 	if seconds < minDurationSec || seconds > maxDurationSec {
 		return fmt.Errorf("%w: %d not in [%d, %d]",
@@ -118,8 +102,7 @@ func (Validator) ValidateLoopCount(count uint32) error {
 	return nil
 }
 
-// ValidateLoopInterval 接受区间 [0, 3600] 秒的循环间隔。对应 Zig 中的
-// `pub fn validateLoopInterval`。
+// ValidateLoopInterval 接受区间 [0, 3600] 秒的循环间隔。
 func (Validator) ValidateLoopInterval(seconds uint64) error {
 	if seconds > maxLoopInterval {
 		return fmt.Errorf("%w: %d > %d",
@@ -128,8 +111,7 @@ func (Validator) ValidateLoopInterval(seconds uint64) error {
 	return nil
 }
 
-// ValidateMaxSeconds 接受区间 (0, 31_536_000] 秒的最大值。对应 Zig 中的
-// `pub fn validateMaxSeconds`。
+// ValidateMaxSeconds 接受区间 (0, 31_536_000] 秒的最大值。
 func (Validator) ValidateMaxSeconds(maxSeconds uint64) error {
 	if maxSeconds < minMaxSeconds || maxSeconds > maxMaxSeconds {
 		return fmt.Errorf("%w: %d not in (%d, %d]",
@@ -174,12 +156,9 @@ func (Validator) ValidateAuthToken(token string) error {
 	return nil
 }
 
-// -----------------------------------------------------------------------------
-// Safe conversions — `safeXFromJson` ports.
-// -----------------------------------------------------------------------------
+// 安全转换 —— 越界时返回 nil 而不是 error。
 
-// SafeI8FromJson 对应 Zig 中的 `pub fn safeI8FromJson`：当 JSON 传入的整数
-// 超出 [min, max] 区间或无法放入 int8 时返回 nil。
+// SafeI8FromJson 当 JSON 传入的整数超出 [min, max] 或无法放入 int8 时返回 nil。
 func (Validator) SafeI8FromJson(jsonInt int64, min, max int8) *int8 {
 	if jsonInt < int64(min) || jsonInt > int64(max) {
 		return nil
@@ -188,8 +167,7 @@ func (Validator) SafeI8FromJson(jsonInt int64, min, max int8) *int8 {
 	return &v
 }
 
-// SafeU32FromJson 对应 Zig 中的 `pub fn safeU32FromJson`：拒绝负数以及
-// 大于 max 的值。
+// SafeU32FromJson 拒绝负数以及大于 max 的值，越界时返回 nil。
 func (Validator) SafeU32FromJson(jsonInt int64, max uint32) *uint32 {
 	if jsonInt < 0 || jsonInt > int64(max) {
 		return nil
@@ -198,7 +176,7 @@ func (Validator) SafeU32FromJson(jsonInt int64, max uint32) *uint32 {
 	return &v
 }
 
-// SafeU64FromJson 对应 Zig 中的 `pub fn safeU64FromJson`。
+// SafeU64FromJson 在 jsonInt 超出 [min, max] 时返回 nil。
 func (Validator) SafeU64FromJson(jsonInt, min, max uint64) *uint64 {
 	if jsonInt < min || jsonInt > max {
 		return nil
@@ -206,7 +184,7 @@ func (Validator) SafeU64FromJson(jsonInt, min, max uint64) *uint64 {
 	return &jsonInt
 }
 
-// SafeI64FromJson 对应 Zig 中的 `pub fn safeI64FromJson`。
+// SafeI64FromJson 在 jsonInt 超出 [min, max] 时返回 nil。
 func (Validator) SafeI64FromJson(jsonInt, min, max int64) *int64 {
 	if jsonInt < min || jsonInt > max {
 		return nil
@@ -214,9 +192,7 @@ func (Validator) SafeI64FromJson(jsonInt, min, max int64) *int64 {
 	return &jsonInt
 }
 
-// -----------------------------------------------------------------------------
-// Package-level convenience — so callers don't have to allocate a Validator.
-// -----------------------------------------------------------------------------
+// 包级便捷函数 —— 调用方无需自己分配 Validator。
 
 var defaultValidator = NewValidator()
 
@@ -233,7 +209,9 @@ func ValidateDuration(seconds uint64) error { return defaultValidator.ValidateDu
 func ValidateLoopCount(count uint32) error { return defaultValidator.ValidateLoopCount(count) }
 
 // ValidateLoopInterval 包级便捷函数，内部转发到默认 Validator 实例。
-func ValidateLoopInterval(seconds uint64) error { return defaultValidator.ValidateLoopInterval(seconds) }
+func ValidateLoopInterval(seconds uint64) error {
+	return defaultValidator.ValidateLoopInterval(seconds)
+}
 
 // ValidateMaxSeconds 包级便捷函数，内部转发到默认 Validator 实例。
 func ValidateMaxSeconds(maxSeconds uint64) error {

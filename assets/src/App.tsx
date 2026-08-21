@@ -4,16 +4,15 @@ import { TimerPage } from "./TimerPage";
 import { HabitsPage } from "./HabitsPage";
 import { SettingsPage } from "./Settings.tsx";
 import { StatsPage } from "./Stats.tsx";
-import { WallpaperGalleryPage } from "./WallpaperGalleryPage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastContainer, showToast } from "./components/common/Toast";
 import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, logLifecycle, logPerf } from "./utils/logger";
 import { useAppSettings, logWallpaperDebug } from "./hooks/useAppSettings";
 import { resolveWallpaperUrl, WALLPAPER_FALLBACK_GRADIENT } from "./utils/constants";
 import { t } from "./utils/i18n";
-import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, PhotoIconComponent } from "./utils/icons";
+import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon } from "./utils/icons";
 
-type Page = "timer" | "habits" | "stats" | "settings" | "gallery";
+type Page = "timer" | "habits" | "stats" | "settings";
 
 const formatUnknownError = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -47,7 +46,6 @@ export const App = () => {
 
   const globalWallpaper = settings.wallpaper;
 
-  // 全局错误捕获
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -101,14 +99,12 @@ export const App = () => {
       return;
     }
 
-    // 渐变 / 纯色壁纸：直接应用（行为保持不变）
     if (wp.startsWith("linear") || wp.startsWith("#")) {
       html.style.backgroundImage = "";
       html.style.background = wp;
       try {
         localStorage.setItem("global_wallpaper", wp);
       } catch {
-        // ignore
       }
       return;
     }
@@ -140,7 +136,6 @@ export const App = () => {
       try {
         localStorage.setItem("global_wallpaper", wp);
       } catch {
-        // ignore
       }
       return;
     }
@@ -153,7 +148,6 @@ export const App = () => {
       try {
         localStorage.setItem("global_wallpaper", wp);
       } catch {
-        // ignore
       }
     };
     probe.onerror = () => {
@@ -163,7 +157,6 @@ export const App = () => {
       try {
         localStorage.setItem("global_wallpaper", wp);
       } catch {
-        // ignore
       }
     };
     probe.src = imgUrl;
@@ -236,7 +229,6 @@ export const App = () => {
                 onWallpaperChange={handleWallpaperChange}
               />
             )}
-            {page === "gallery" && <WallpaperGalleryPage />}
           </ErrorBoundary>
         </main>
       </div>
@@ -283,15 +275,6 @@ export const App = () => {
         >
           <SettingsIcon className="h-5 w-5" />
           <span className="btm-nav-label">{t("nav.settings")}</span>
-        </button>
-        <button
-          type="button"
-          data-testid="nav-gallery"
-          className={`my-bottom-nav-item ${page === "gallery" ? "active" : ""}`}
-          onClick={() => navigateTo("gallery")}
-        >
-          <PhotoIconComponent className="h-5 w-5" />
-          <span className="btm-nav-label">{t("nav.gallery")}</span>
         </button>
       </nav>
     </>

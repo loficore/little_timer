@@ -1,18 +1,16 @@
-// Command little-timer-migrate — DB migration verification CLI.
+// Command little-timer-migrate —— DB 迁移验证 CLI。
 //
-// Port of the (informal) Zig-side migration checker.  This tool does NOT
-// modify the SQLite file; it only inspects an existing database and
-// reports whether the schema is compatible with the Go build, needs a
-// migration ladder run, or is so different from the Go schema that no
-// migration is possible (corruption / wrong app / hand-edited DB).
+// 本工具不修改 SQLite 文件；它只检查既有数据库，报告 schema 与 Go 构建
+// 是否兼容、是否需要跑迁移阶梯，或与 Go schema 差异大到无法迁移
+// （损坏 / 拿错 app 的库 / 手改过的库）。
 //
-// Exit codes (matches the CLI contract):
+// 退出码（与 CLI 契约一致）：
 //
-//	0 — Schema compatible (v8, all required tables + columns present).
-//	1 — Schema mismatch / unknown schema / read error.
-//	2 — Schema migration required (v0–v7, can be brought up to v8).
+//	0 —— schema 兼容（v8，全部必需表 + 列都在）。
+//	1 —— schema 不匹配 / 未知 schema / 读错误。
+//	2 —— 需要 schema 迁移（v0–v7，可升级到 v8）。
 //
-// Usage:
+// 用法：
 //
 //	$ little-timer-migrate --db-path /var/lib/little_timer.db
 //	$ little-timer-migrate --db-path /tmp/missing.db
@@ -33,24 +31,20 @@ import (
 	"little-timer/internal/storage"
 )
 
-// Exit codes — surfaced as `os.Exit(...)` from main; tests assert them
-// via `os.Exit` interception or subprocess invocations.
+// 退出码 —— 由 main 以 `os.Exit(...)` 暴露；测试通过拦截 `os.Exit` 或
+// 子进程调用来断言。
 const (
 	ExitCompatible    = 0
 	ExitMismatch      = 1
 	ExitMigrationReqd = 2
 )
 
-// expectedSchema describes the v8 schema shape the Go build understands.
-// Sourced from `internal/storage/migration.go` (kept in sync with the
-// Zig `src/storage/storage_migration.zig` source).  Order of columns is
-// not significant for the diff; we sort both sides before comparing.
+// expectedSchema 描述 Go 构建理解的 v8 schema 形状。取自
+// `internal/storage/migration.go`。列顺序对 diff 不重要；比较前两边都排序。
 //
-// ponytail: this duplicate definition is intentional — the migrate tool
-// should be runnable on a DB the current app build can't open (e.g. a
-// pre-migration DB), so it cannot depend on internal/storage's runtime
-// state.  The schema shape is the spec; if migration.go drifts from
-// this list, both must be updated together.
+// 这份重复定义是故意的 —— migrate 工具必须能跑在当前 app 构建打不开的
+// 库上（如迁移前的 DB），所以不能依赖 internal/storage 的运行时状态。
+// schema 形状即规范；migration.go 若与本列表漂移，两边必须一起更新。
 var expectedSchema = map[string][]string{
 	"health_check": {"id", "last_check", "status", "checksum", "record_count"},
 	"habit_sets":   {"id", "name", "description", "color", "wallpaper", "created_at"},
@@ -82,10 +76,9 @@ var expectedSchema = map[string][]string{
 	},
 }
 
-// expectedRequiredTables is the subset of tables the Go runtime needs to
-// boot without errors.  `schema_version` is intentionally excluded —
-// its absence is itself a strong "old schema" signal that we want to
-// report as exit 2, not exit 1.
+// expectedRequiredTables 是 Go 运行时正常启动所需的表子集。
+// `schema_version` 有意排除 —— 它缺失本身就是强烈的“旧 schema”信号，
+// 我们想报成 exit 2 而不是 exit 1。
 var expectedRequiredTables = []string{
 	"health_check",
 	"habit_sets",
@@ -96,19 +89,18 @@ var expectedRequiredTables = []string{
 	"backup_config",
 }
 
-// inspectResult is the structured outcome of a single verification run.
-// Encapsulating the result makes the function unit-testable without
-// reaching for `os.Exit`.
+// inspectResult 是单次验证运行的结构化结果。把结果封装起来，函数就能
+// 单元测试而不用碰 `os.Exit`。
 type inspectResult struct {
-	DetectedVersion int      // 0 if no schema_version table present
-	FoundTables     []string // every sqlite_master type='table' row
-	MissingTables   []string // v8-required tables that are absent
-	ExtraTables     []string // tables present but not in expectedSchema
-	MissingColumns  []string // per-table: "table.col" not found
-	SchemaErr       error    // I/O / parse failure, if any
+	DetectedVersion int      // schema_version 表不存在时为 0
+	FoundTables     []string // 全部 sqlite_master type='table' 行
+	MissingTables   []string // v8 必需但缺失的表
+	ExtraTables     []string // 存在但不在 expectedSchema 里的表
+	MissingColumns  []string // 逐表："table.col" 未找到
+	SchemaErr       error    // I/O / 解析错误（若有）
 }
 
-// Compatible reports whether the result represents a clean v8 schema.
+// Compatible 报告结果是否代表干净的 v8 schema。
 func (r *inspectResult) Compatible() bool {
 	if r.SchemaErr != nil {
 		return false
@@ -122,20 +114,16 @@ func (r *inspectResult) Compatible() bool {
 	return true
 }
 
-// MigrationRequired reports whether the schema is older than v8 but
-// not so badly malformed that it can't be brought forward.
+// MigrationRequired 报告 schema 是否比 v8 旧、但坏到还能向前迁移。
 //
-// Classification rules:
+// 分类规则：
 //
-//   - detected version > 0 AND < v8 → migration required (clear case).
-//   - detected version == 0 (no schema_version row) AND at least one
-//     v8-shaped table present → migration required (pre-v3 DB that
-//     was created before schema_version existed).
-//   - detected version == 0 AND no tables at all → migration
-//     required (fresh DB, needs initial schema).
-//   - detected version == 0 AND tables present but NONE of them are
-//     v8-shaped → NOT migration required; that's an unknown / wrong
-//     app's DB and should be reported as a mismatch (exit 1) instead.
+//   - 检出版本 > 0 且 < v8 → 需要迁移（明确情况）。
+//   - 检出版本 == 0（无 schema_version 行）且至少存在一张 v8 形状的表
+//     → 需要迁移（早于 schema_version 机制建立的 v3 之前的库）。
+//   - 检出版本 == 0 且一张表都没有 → 需要迁移（全新库，需要初始 schema）。
+//   - 检出版本 == 0、有表但没有一张是 v8 形状 → 不需要迁移；那是未知 /
+//     拿错 app 的库，应报不匹配（exit 1）。
 func (r *inspectResult) MigrationRequired() bool {
 	if r.SchemaErr != nil {
 		return false
@@ -144,11 +132,11 @@ func (r *inspectResult) MigrationRequired() bool {
 		return true
 	}
 	if r.DetectedVersion == 0 && len(r.FoundTables) == 0 {
-		// Empty DB (or freshly-touched file): needs initial schema.
+		// 空库（或刚 touch 的文件）：需要初始 schema。
 		return true
 	}
 	if r.DetectedVersion == 0 && len(r.FoundTables) > 0 {
-		// Any v8-shaped table means we recognise the schema lineage.
+		// 任一 v8 形状的表都说明我们认得这条 schema 血脉。
 		for _, t := range r.FoundTables {
 			if _, ok := expectedSchema[t]; ok {
 				return true
@@ -158,15 +146,10 @@ func (r *inspectResult) MigrationRequired() bool {
 	return false
 }
 
-// inspect opens the SQLite DB read-only and computes the schema
-// inspection result.  The DB doesn't have to be openable in write mode
-// (e.g. permission errors mid-test) — read-only is enough to introspect
-// the schema.
+// inspect 以只读方式打开 SQLite DB 并计算 schema 检查结果。DB 不必能以
+// 写模式打开（例如测试中途的权限错误）—— 只读就够 introspect schema 了。
 func inspect(dbPath string) (*inspectResult, error) {
-	// _query_only=1 forces the connection to refuse writes.  We don't
-	// pass file:<path>?mode=ro because mattn/go-sqlite3 only supports
-	// mode=ro via the URL-form DSN which has its own quirks; the
-	// _query_only pragma is the more portable knob.
+	// _query_only=1 是双保险：即使 mode=ro 未被遵守，也强制连接拒写。
 	dsn := fmt.Sprintf("file:%s?mode=ro&_query_only=1", filepath.Clean(dbPath))
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
@@ -180,7 +163,6 @@ func inspect(dbPath string) (*inspectResult, error) {
 
 	res := &inspectResult{}
 
-	// 1. Read schema_version if present.
 	if _, err := db.Exec(`SELECT 1 FROM schema_version LIMIT 1;`); err == nil {
 		var v sql.NullInt64
 		if scanErr := db.QueryRow(`SELECT MAX(version) FROM schema_version;`).Scan(&v); scanErr != nil {
@@ -191,7 +173,6 @@ func inspect(dbPath string) (*inspectResult, error) {
 		}
 	}
 
-	// 2. List every table in the DB.
 	rows, err := db.Query(
 		`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';`,
 	)
@@ -211,7 +192,6 @@ func inspect(dbPath string) (*inspectResult, error) {
 	}
 	sort.Strings(res.FoundTables)
 
-	// 3. Diff against expected schema.
 	foundSet := make(map[string]bool, len(res.FoundTables))
 	for _, t := range res.FoundTables {
 		foundSet[t] = true
@@ -223,13 +203,11 @@ func inspect(dbPath string) (*inspectResult, error) {
 	}
 	for _, t := range res.FoundTables {
 		if _, ok := expectedSchema[t]; !ok {
-			// Either an unexpected / app-private table; flag but don't
-			// treat as fatal.
+			// 要么是没见过的 / app 私有的表；标记但不视为致命。
 			res.ExtraTables = append(res.ExtraTables, t)
 		}
 	}
 
-	// 4. Per-table column diff.
 	for table, wantCols := range expectedSchema {
 		if !foundSet[table] {
 			continue // missing-table diff is captured above.
@@ -252,13 +230,11 @@ func inspect(dbPath string) (*inspectResult, error) {
 	return res, nil
 }
 
-// readColumns queries `PRAGMA table_info(<table>)` and returns the
-// column names in declaration order.
+// readColumns 按声明顺序返回 table 的列名。
 func readColumns(db *sql.DB, table string) ([]string, error) {
-	// PRAGMA can't be parameterised via `?`, so we build the statement
-	// with fmt.Sprintf.  `table` comes from our own list of v8 names
-	// or from sqlite_master, both of which we already trust; an
-	// injection here would require the DB to already be compromised.
+	// PRAGMA 不能用 `?` 参数化，所以用 fmt.Sprintf 拼语句。`table` 来自
+	// 我们自己的 v8 名字列表或 sqlite_master，两者都已可信；想在这里注入
+	// 得先让 DB 本身被攻破。
 	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info("%s");`, table))
 	if err != nil {
 		return nil, err
@@ -282,11 +258,9 @@ func readColumns(db *sql.DB, table string) ([]string, error) {
 	return out, rows.Err()
 }
 
-// -----------------------------------------------------------------------------
-// Reporting helpers.
-// -----------------------------------------------------------------------------
+// 报告辅助函数。
 
-// formatDiff prints a human-readable schema diff to stderr.
+// formatDiff 向 stderr 打印人可读的 schema diff。
 func formatDiff(res *inspectResult) string {
 	var b strings.Builder
 	if len(res.MissingTables) > 0 {
@@ -301,17 +275,15 @@ func formatDiff(res *inspectResult) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// run is the testable inner loop.  Returns the chosen exit code so the
-// tests can assert it without spawning a subprocess.
+// run 是可测试的内部主循环。返回选定的退出码，测试无需起子进程即可断言。
 func run(dbPath string) (int, error) {
 	if dbPath == "" {
 		return ExitMismatch, errors.New("--db-path is required")
 	}
 	if _, err := os.Stat(dbPath); err != nil {
 		if os.IsNotExist(err) {
-			// A missing file is the "fresh start" case from the spec;
-			// treat it as "needs migration" so the operator knows to
-			// run the app once to initialise the schema.
+			// 文件缺失是规范里的“全新启动”场景；按“需要迁移”处理，
+			// 让运维知道跑一次 app 即可初始化 schema。
 			fmt.Fprintf(os.Stderr, "Schema migration required: v0 -> v8 (file %s does not exist)\n", dbPath)
 			return ExitMigrationReqd, nil
 		}
@@ -337,9 +309,8 @@ func run(dbPath string) (int, error) {
 		return ExitMigrationReqd, nil
 
 	default:
-		// Detected version is > v8, or version is v8 but columns/tables
-		// don't match.  Either way, the schema is too different for a
-		// forward migration to apply cleanly.
+		// 检出版本 > v8，或版本是 v8 但列/表对不上。无论哪种，schema
+		// 差异都大到无法干净地向前迁移。
 		fmt.Fprintf(os.Stderr, "Schema mismatch: detected v%d, app supports v%d\n",
 			res.DetectedVersion, storage.CurrentSchemaVersion)
 		if diff := formatDiff(res); diff != "" {

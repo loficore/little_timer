@@ -2,12 +2,12 @@
  * API 客户端单例
  * 统一管理 API 实例，避免重复创建
  *
- * Android detection: Wails v3 sets window.wails on Android.
- * When detected, we return WailsAPIClient which calls Go bindings
- * directly via JNI — no HTTP server needed.
+ * Android 检测：Wails v3 在 Android 上会设置 window.wails。
+ * 检测到时返回 WailsAPIClient，它通过 JNI 直接调用 Go 绑定，
+ * 无需 HTTP 服务器。
  *
- * Rollup dynamic import: WailsAPIClient is only imported when isAndroid === true,
- * Desktop builds never resolve ../bindings/... paths.
+ * Rollup 动态导入：仅在 isAndroid === true 时才导入 WailsAPIClient，
+ * 桌面构建永远不会解析 ../bindings/... 路径。
  */
 
 import { APIClient } from "./apiClient";

@@ -1,6 +1,6 @@
 package handlers
 
-// handlerError is a tiny error type used by the pathID helpers.
+// handlerError 是 pathID 辅助函数使用的小型错误类型。
 type handlerError struct {
 	message string
 }

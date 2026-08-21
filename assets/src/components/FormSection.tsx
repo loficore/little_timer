@@ -33,11 +33,11 @@ export const FormSection: FunctionalComponent<FormSectionProps> = ({
     <div className={`mb-6 sm:mb-8 md:mb-10 animate-slideUp ${className}`}>
       {title && (
         <div className="mb-3 sm:mb-4">
-          <h3 className="text-sm sm:text-base font-semibold text-text-primary-dark">
+          <h3 className="text-sm sm:text-base font-semibold text-[var(--my-on-surface)]">
             {title}
           </h3>
           {description && (
-            <p className="text-xs sm:text-sm text-text-secondary-dark italic mt-1">
+            <p className="text-xs sm:text-sm text-[var(--my-on-surface-variant)] italic mt-1">
               {description}
             </p>
           )}

@@ -181,7 +181,6 @@ export const useAppSettings = (): UseAppSettingsReturn => {
       try {
         localStorage.setItem(THEME_MODE_STORAGE_KEY, serverThemeMode);
       } catch {
-        // 忽略 localStorage 不可用场景
       }
 
       const localLayoutDensity = localStorage.getItem(STORAGE_KEYS.LAYOUT_DENSITY) || "normal";
@@ -223,7 +222,6 @@ export const useAppSettings = (): UseAppSettingsReturn => {
       try {
         localStorage.setItem(THEME_MODE_STORAGE_KEY, settings.theme_mode);
       } catch {
-        // 忽略
       }
     }
   }, [settings.theme_mode]);
@@ -282,7 +280,6 @@ export const saveAppSettings = (settings: Partial<AppSettings>) => {
       }
     }
   } catch {
-    // 忽略 localStorage 不可用场景
   }
 };
 

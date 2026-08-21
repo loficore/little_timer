@@ -1,13 +1,10 @@
-// Package http — Gin router.
+// Package http — Gin 路由。
 //
-// File `router.go` registers every endpoint the Zig std_server.zig
-// exposed, grouped under `/api/<area>`.  Routes are intentionally
-// 1:1 with the Zig path table — same method, same shape, same JSON
-// field names — so the existing Preact frontend works unchanged.
+// 所有 endpoint 统一挂在 `/api/<area>` 下。
 //
-// Middleware order: CORS (outermost) → recovery (Gin default) → auth.
-// The auth middleware sets the per-request "app" key so handlers can
-// fetch the App bundle via `c.MustGet("app")`.
+// 中间件顺序: CORS（最外层）→ recovery（Gin 默认）→ auth。
+// auth 中间件设置每请求 "app" 键，
+// 处理器可通过 `c.MustGet("app")` 获取 App 束。
 package http
 
 import (
@@ -21,8 +18,8 @@ import (
 )
 
 // NewRouter 创建并注册全部 HTTP 路由的 Gin 引擎。
-// `corsOrigin` controls the Access-Control-Allow-Origin header; pass
-// "*" for development, the concrete origin in production.
+// `corsOrigin` 控制 Access-Control-Allow-Origin 响应头；
+// 开发环境传 "*"，生产环境传具体 origin。
 func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -41,9 +38,7 @@ func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	return r
 }
 
-// -----------------------------------------------------------------------------
-// GET /  (SPA fallback — same shape as Zig `handleRoot`).
-// -----------------------------------------------------------------------------
+// GET /（SPA 兜底页）。
 
 func registerRoot(r *gin.Engine) {
 	r.GET("/", func(c *gin.Context) {
@@ -52,9 +47,7 @@ func registerRoot(r *gin.Engine) {
 	})
 }
 
-// -----------------------------------------------------------------------------
-// Timer routes.
-// -----------------------------------------------------------------------------
+// 计时器路由。
 
 func registerTimer(r *gin.Engine) {
 	g := r.Group("/api")
@@ -72,9 +65,7 @@ func registerTimer(r *gin.Engine) {
 	g.POST("/timer/config", handlers.TimerUpdateConfig)
 }
 
-// -----------------------------------------------------------------------------
-// Habit routes.
-// -----------------------------------------------------------------------------
+// 习惯路由。
 
 func registerHabits(r *gin.Engine) {
 	g := r.Group("/api")
@@ -100,9 +91,7 @@ func registerHabits(r *gin.Engine) {
 	g.DELETE("/timer-sessions/:id", handlers.TimerSessionDelete)
 }
 
-// -----------------------------------------------------------------------------
-// Settings routes.
-// -----------------------------------------------------------------------------
+// 设置路由。
 
 func registerSettings(r *gin.Engine) {
 	g := r.Group("/api")
@@ -110,9 +99,7 @@ func registerSettings(r *gin.Engine) {
 	g.POST("/settings", handlers.SettingsUpdate)
 }
 
-// -----------------------------------------------------------------------------
-// Backup routes.
-// -----------------------------------------------------------------------------
+// 备份路由。
 
 func registerBackup(r *gin.Engine) {
 	g := r.Group("/api")
@@ -136,9 +123,7 @@ func registerBackup(r *gin.Engine) {
 	g.POST("/auth/disable", handlers.AuthDisable)
 }
 
-// -----------------------------------------------------------------------------
-// Wallpaper routes.
-// -----------------------------------------------------------------------------
+// 壁纸路由。
 
 func registerWallpapers(r *gin.Engine) {
 	g := r.Group("/api/wallpapers")
@@ -149,9 +134,7 @@ func registerWallpapers(r *gin.Engine) {
 	g.DELETE("/:id", handlers.WallpaperDelete)
 }
 
-// -----------------------------------------------------------------------------
-// SSE + frontend-log routes.
-// -----------------------------------------------------------------------------
+// SSE + 前端日志路由。
 
 func registerEvents(r *gin.Engine) {
 	r.GET("/api/events", handlers.Events)

@@ -1,22 +1,8 @@
-// Package middleware — Bearer token auth.
+// Package middleware —— Bearer token 鉴权。
 //
-// File `auth.go` ports the Zig `validateAuth` function (std_server.zig).
-// The Zig code:
-//
-//  1. Checks if auth is enabled at all (`auth_enabled` bool from settings);
-//     if disabled, accepts every request.
-//  2. If `auth_token` is empty, accepts every request (matches the Zig
-//     "no token configured → no auth required" branch).
-//  3. Reads `Authorization: Bearer <token>` first, then falls back to
-//     `?auth_token=<token>` (legacy form).
-//  4. Sends a 401 with `{"err":"Unauthorized: Invalid or missing token"}`
-//     on failure.
-//
-// The Go port exposes the same behaviour via `Auth(app)` and uses a
-// per-handler opt-out (`Public()`) for endpoints that should never be
-// gated, even when auth is enabled.  The Zig source has an explicit
-// `public_paths` list — we keep it inline below so future maintainers
-// can see them all in one place.
+// 通过 `Auth(app)` 暴露鉴权检查，并用 per-handler 豁免（`Public()`）让
+// 某些 endpoint 即使在鉴权开启时也永不设卡。公开路径直接列在下方，
+// 方便后来的维护者一眼看全。
 package middleware
 
 import (
@@ -24,40 +10,32 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"little-timer/internal/http/app"
 	"crypto/subtle"
+	"little-timer/internal/http/app"
 )
 
-// Public path prefixes / exact matches that bypass auth regardless of
-// `auth_enabled`.  Mirrors the Zig `public_paths = [_][]const u8{ "/",
-// "/api/log", "/api/events" }` list (note: the Zig list also includes
-// "/" but we treat that as handled separately by the SPA fallback in
-// the router; "/" is therefore not enforced here).
+// 无论 `auth_enabled` 与否都绕过鉴权的路径前缀 / 精确匹配。
 var publicPathSet = map[string]bool{
 	"/api/events":      true,
 	"/api/auth/status": true,
 }
 
-// isPublic reports whether the request path bypasses auth.  Exact-match
-// only — Zig's list was also exact-match.
+// isPublic 报告请求路径是否绕过鉴权（精确匹配）。
 func isPublic(path string) bool {
 	return publicPathSet[path]
 }
 
-// Auth returns a Gin middleware that enforces Bearer-token auth against
-// the auth block on the supplied App's SettingsManager.  Reads:
+// Auth 返回一个 Gin 中间件：针对所给 App 的 SettingsManager 的 auth 块
+// 执行 Bearer-token 鉴权。读取：
 //
-//   - Header: `Authorization: Bearer <token>` (preferred)
-//   - Query:  `?auth_token=<token>`           (legacy fallback)
+//   - Header: `Authorization: Bearer <token>`（优先）
+//   - Query:  `?auth_token=<token>`（旧版回退）
 //
-// On failure responds with 401 + `{"err":"Unauthorized: Invalid or missing token"}`
-// matching the Zig error shape exactly.  On success sets the "app"
-// context key (so downstream handlers can pull `c.MustGet("app")`).
+// 失败时响应 401 + `{"err":"Unauthorized: Invalid or missing token"}`。
+// 成功时设置 "app" 上下文键（下游 handler 即可取 `c.MustGet("app")`）。
 //
-// Nil-Settings behaviour: when a.Settings is nil (only in smoke tests
-// where the storage stack isn't wired up) the middleware lets every
-// request through.  This matches what would happen in production when
-// auth_enabled is false — i.e. auth is opt-in, not enforced.
+// Settings 为 nil 的行为：当 a.Settings 为 nil（仅出现在没接存储栈的
+// smoke 测试里）时，中间件放行一切请求 —— 鉴权是选择性启用，不是强制。
 func Auth(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set("app", a)
@@ -82,8 +60,7 @@ func Auth(a *app.App) gin.HandlerFunc {
 			return
 		}
 
-		// Header takes priority — Zig checks the header first, then
-		// the URL query param.
+		// Header 优先于 URL query 参数。
 		provided := extractBearer(c.GetHeader("Authorization"))
 		if provided == "" {
 			provided = c.Query("auth_token")
@@ -99,9 +76,8 @@ func Auth(a *app.App) gin.HandlerFunc {
 	}
 }
 
-// extractBearer strips the "Bearer " prefix from a header value.
-// Returns "" if the header is missing or doesn't follow the
-// `Bearer <token>` shape.
+// extractBearer 从 header 值中剥掉 "Bearer " 前缀。header 缺失或不符合
+// `Bearer <token>` 形状时返回 ""。
 func extractBearer(header string) string {
 	const prefix = "Bearer "
 	if len(header) <= len(prefix) {

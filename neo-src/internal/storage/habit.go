@@ -1,17 +1,11 @@
-// Package storage — habit / session / timer-session CRUD.
+// Package storage —— habit / session / timer-session CRUD。
 //
-// Port of `src/storage/habit_crud.zig` (little_timer).  The Zig file exposes
-// a single HabitCrudManager that owns every habit-related operation; this Go
-// port splits them into three separate types so each table has a focused API
-// surface and tests can target them in isolation:
+// habit 相关操作拆成三个类型，每张表各有一个聚焦的 API 面，
+// 测试也能各自独立针对它们：
 //
-//   - HabitSetCrud      — operates on `habit_sets`
-//   - HabitCrud         — operates on `habits`
-//   - TimerSessionCrud  — operates on `sessions` + `timer_sessions`
-//
-// Memory ownership: Zig uses an allocator for returned strings; Go strings
-// are immutable, so there's no equivalent of freeHabitSets / freeHabits —
-// callers just let GC reclaim them.
+//   - HabitSetCrud      —— 操作 `habit_sets`
+//   - HabitCrud         —— 操作 `habits`
+//   - TimerSessionCrud  —— 操作 `sessions` + `timer_sessions`
 package storage
 
 import (
@@ -23,7 +17,7 @@ import (
 	"little-timer/internal/domain"
 )
 
-// HabitError mirrors `pub const HabitError = error{...}` in habit_crud.zig.
+// HabitError 是 habit CRUD 失败的类型化哨兵错误。
 type HabitError string
 
 const (
@@ -36,11 +30,9 @@ const (
 
 func (e HabitError) Error() string { return string(e) }
 
-// -----------------------------------------------------------------------------
-// Row types — Go ports of HabitSetRow / HabitRow / SessionRow / TimerSessionRow.
-// -----------------------------------------------------------------------------
+// 行类型。
 
-// HabitSetRow mirrors `pub const HabitSetRow = struct {...}`.
+// HabitSetRow 是一行 `habit_sets`。
 type HabitSetRow struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
@@ -49,9 +41,8 @@ type HabitSetRow struct {
 	Wallpaper   string `json:"wallpaper"`
 }
 
-// HabitRow mirrors `pub const HabitRow = struct {...}`.  Wallpaper is
-// dereferenced via COALESCE in queries so an empty string is returned for
-// NULL.
+// HabitRow 是一行 `habits`。查询里 wallpaper 经 COALESCE 解引用，
+// NULL 会返回空字符串。
 type HabitRow struct {
 	ID          int64     `json:"id"`
 	SetID       int64     `json:"set_id"`
@@ -62,7 +53,7 @@ type HabitRow struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// SessionRow mirrors `pub const SessionRow = struct {...}`.
+// SessionRow 是一行 `sessions`。
 type SessionRow struct {
 	ID              int64  `json:"id"`
 	HabitID         int64  `json:"habit_id"`
@@ -72,9 +63,8 @@ type SessionRow struct {
 	Date            string `json:"date"`
 }
 
-// TimerSessionRow mirrors `pub const TimerSessionRow = struct {...}`.  The
-// nullable columns map to `*int64` in Go (sql.NullInt64 is fine but pointer
-// scans stay closer to the Zig `?i64` shape).
+// TimerSessionRow 是一行 `timer_sessions`。可空列映射为 `*int64`；
+// 指针 scan 比 sql.NullInt64 让 scan 处更简洁。
 type TimerSessionRow struct {
 	ID                 int64  `json:"id"`
 	HabitID            *int64 `json:"habit_id"`
@@ -96,24 +86,20 @@ type TimerSessionRow struct {
 	InRest             bool   `json:"in_rest"`
 }
 
-// -----------------------------------------------------------------------------
-// HabitSetCrud — `habit_sets` table.
-// -----------------------------------------------------------------------------
+// HabitSetCrud —— `habit_sets` 表。
 
-// HabitSetCrud is the Go split of HabitCrudManager's habit-set methods.
+// HabitSetCrud 是 HabitCrudManager 中 habit-set 方法的 Go 拆分。
 type HabitSetCrud struct {
 	db *sql.DB
 }
 
-// NewHabitSetCrud returns an empty HabitSetCrud.  Mirrors
-// `HabitCrudManager.init(allocator, null)` (one manager to rule them all).
+// NewHabitSetCrud 返回空的 HabitSetCrud。
 func NewHabitSetCrud() *HabitSetCrud { return &HabitSetCrud{} }
 
-// SetDB attaches the *sql.DB.  Mirrors `habit_manager.db = self.db`.
+// SetDB 接入 *sql.DB。
 func (h *HabitSetCrud) SetDB(db *sql.DB) { h.db = db }
 
-// Create inserts a new habit_set and returns its rowid.  Mirrors the Zig
-// `pub fn createHabitSet(name, description, color)`.
+// Create 插入新 habit_set 并返回其 rowid。
 func (h *HabitSetCrud) Create(name, description, color string) (int64, error) {
 	if h.db == nil {
 		return 0, ErrHabitQueryFailed
@@ -128,8 +114,7 @@ func (h *HabitSetCrud) Create(name, description, color string) (int64, error) {
 	return res.LastInsertId()
 }
 
-// List returns every habit_set ordered by created_at DESC.  Mirrors the
-// Zig `pub fn getAllHabitSets`.
+// List 返回所有 habit_set，按 created_at DESC 排序。
 func (h *HabitSetCrud) List(limit, offset int) ([]HabitSetRow, error) {
 	if h.db == nil {
 		return nil, ErrHabitQueryFailed
@@ -154,7 +139,7 @@ func (h *HabitSetCrud) List(limit, offset int) ([]HabitSetRow, error) {
 	return out, rows.Err()
 }
 
-// Update overwrites the editable columns for a habit_set.
+// Update 覆写 habit_set 的可编辑列。
 func (h *HabitSetCrud) Update(id int64, name, description, color, wallpaper string) error {
 	if h.db == nil {
 		return ErrHabitQueryFailed
@@ -169,7 +154,7 @@ func (h *HabitSetCrud) Update(id int64, name, description, color, wallpaper stri
 	return nil
 }
 
-// Delete removes a habit_set (cascading to habits + sessions per FK).
+// Delete 删除一个 habit_set（按外键级联到 habits + sessions）。
 func (h *HabitSetCrud) Delete(id int64) error {
 	if h.db == nil {
 		return ErrHabitQueryFailed
@@ -181,22 +166,20 @@ func (h *HabitSetCrud) Delete(id int64) error {
 	return nil
 }
 
-// -----------------------------------------------------------------------------
-// HabitCrud — `habits` table.
-// -----------------------------------------------------------------------------
+// HabitCrud —— `habits` 表。
 
-// HabitCrud is the Go split of HabitCrudManager's habit methods.
+// HabitCrud 是 HabitCrudManager 中 habit 方法的 Go 拆分。
 type HabitCrud struct {
 	db *sql.DB
 }
 
-// NewHabitCrud returns an empty HabitCrud.
+// NewHabitCrud 返回空的 HabitCrud。
 func NewHabitCrud() *HabitCrud { return &HabitCrud{} }
 
-// SetDB attaches the *sql.DB.
+// SetDB 接入 *sql.DB。
 func (h *HabitCrud) SetDB(db *sql.DB) { h.db = db }
 
-// Create inserts a new habit and returns its rowid.
+// Create 插入新 habit 并返回其 rowid。
 func (h *HabitCrud) Create(setID int64, name string, goalSeconds int64, color string) (int64, error) {
 	if h.db == nil {
 		return 0, ErrHabitQueryFailed
@@ -211,8 +194,8 @@ func (h *HabitCrud) Create(setID int64, name string, goalSeconds int64, color st
 	return res.LastInsertId()
 }
 
-// NameExistsInSet reports whether a habit name is already used in a set.
-// excludeID is omitted by passing 0 because habit IDs start at 1.
+// NameExistsInSet 报告 set 内是否已占用该 habit 名。
+// excludeID 传 0 表示不排除，因为 habit ID 从 1 开始。
 func (h *HabitCrud) NameExistsInSet(setID int64, name string, excludeID *int64) (bool, error) {
 	if h.db == nil {
 		return false, ErrHabitQueryFailed
@@ -234,8 +217,7 @@ func (h *HabitCrud) NameExistsInSet(setID int64, name string, excludeID *int64) 
 	return count > 0, nil
 }
 
-// List returns every habit ordered by created_at DESC.  Mirrors Zig
-// `getAllHabits`.
+// List 返回所有 habit，按 created_at DESC 排序。
 func (h *HabitCrud) List(limit, offset int) ([]HabitRow, error) {
 	if h.db == nil {
 		return nil, ErrHabitQueryFailed
@@ -260,7 +242,7 @@ func (h *HabitCrud) List(limit, offset int) ([]HabitRow, error) {
 	return out, rows.Err()
 }
 
-// ListBySet returns habits scoped to a single set.  Mirrors `getHabitsBySet`.
+// ListBySet 返回限定在单个 set 内的 habit。
 func (h *HabitCrud) ListBySet(setID int64, limit, offset int) ([]HabitRow, error) {
 	if h.db == nil {
 		return nil, ErrHabitQueryFailed
@@ -285,7 +267,7 @@ func (h *HabitCrud) ListBySet(setID int64, limit, offset int) ([]HabitRow, error
 	return out, rows.Err()
 }
 
-// GetByID returns a single habit, or ErrHabitNotFound when no row matches.
+// GetByID 返回单个 habit；无匹配行时返回 ErrHabitNotFound。
 func (h *HabitCrud) GetByID(id int64) (HabitRow, error) {
 	if h.db == nil {
 		return HabitRow{}, ErrHabitQueryFailed
@@ -304,7 +286,7 @@ func (h *HabitCrud) GetByID(id int64) (HabitRow, error) {
 	return r, nil
 }
 
-// Update overwrites the editable columns for a habit.
+// Update 覆写 habit 的可编辑列。
 func (h *HabitCrud) Update(id int64, name string, goalSeconds int64, color, wallpaper string) error {
 	if h.db == nil {
 		return ErrHabitQueryFailed
@@ -319,7 +301,7 @@ func (h *HabitCrud) Update(id int64, name string, goalSeconds int64, color, wall
 	return nil
 }
 
-// Delete removes a habit (cascading to its sessions).
+// Delete 删除一个 habit（级联删除其 sessions）。
 func (h *HabitCrud) Delete(id int64) error {
 	if h.db == nil {
 		return ErrHabitQueryFailed
@@ -331,24 +313,21 @@ func (h *HabitCrud) Delete(id int64) error {
 	return nil
 }
 
-// -----------------------------------------------------------------------------
-// TimerSessionCrud — `sessions` + `timer_sessions` tables.
-// -----------------------------------------------------------------------------
+// TimerSessionCrud —— `sessions` + `timer_sessions` 表。
 
-// TimerSessionCrud owns both the focus-session table (`sessions`) and the
-// live timer-state table (`timer_sessions`).
+// TimerSessionCrud 同时管理专注 session 表（`sessions`）和实时计时状态表
+// （`timer_sessions`）。
 type TimerSessionCrud struct {
 	db *sql.DB
 }
 
-// NewTimerSessionCrud returns an empty TimerSessionCrud.
+// NewTimerSessionCrud 返回空的 TimerSessionCrud。
 func NewTimerSessionCrud() *TimerSessionCrud { return &TimerSessionCrud{} }
 
-// SetDB attaches the *sql.DB.
+// SetDB 接入 *sql.DB。
 func (t *TimerSessionCrud) SetDB(db *sql.DB) { t.db = db }
 
-// CreateSession inserts a focus-session row and returns its rowid.  Mirrors
-// the Zig `pub fn createSession`.
+// CreateSession 插入一行专注 session 并返回其 rowid。
 func (t *TimerSessionCrud) CreateSession(habitID, durationSeconds, count int64, date string) (int64, error) {
 	if t.db == nil {
 		return 0, ErrHabitQueryFailed
@@ -363,8 +342,7 @@ func (t *TimerSessionCrud) CreateSession(habitID, durationSeconds, count int64, 
 	return res.LastInsertId()
 }
 
-// ListSessionsByDate returns sessions for a single date, ordered by
-// started_at DESC.  Mirrors `getSessionsByDate`.
+// ListSessionsByDate 返回单日的 sessions，按 started_at DESC 排序。
 func (t *TimerSessionCrud) ListSessionsByDate(date string, limit, offset int) ([]SessionRow, error) {
 	if t.db == nil {
 		return nil, ErrHabitQueryFailed
@@ -389,8 +367,7 @@ func (t *TimerSessionCrud) ListSessionsByDate(date string, limit, offset int) ([
 	return out, rows.Err()
 }
 
-// ListSessionsByDateRange returns sessions in a half-open date window.
-// Mirrors `getSessionsByDateRange`.
+// ListSessionsByDateRange 返回闭区间日期窗口内的 sessions。
 func (t *TimerSessionCrud) ListSessionsByDateRange(start, end string, limit, offset int) ([]SessionRow, error) {
 	if t.db == nil {
 		return nil, ErrHabitQueryFailed
@@ -415,8 +392,7 @@ func (t *TimerSessionCrud) ListSessionsByDateRange(start, end string, limit, off
 	return out, rows.Err()
 }
 
-// TodaySecondsForHabit sums duration_seconds for one habit on one date.
-// Mirrors `getHabitTodaySeconds`.
+// TodaySecondsForHabit 汇总单个 habit 在单日的 duration_seconds。
 func (t *TimerSessionCrud) TodaySecondsForHabit(habitID int64, date string) (int64, error) {
 	if t.db == nil {
 		return 0, ErrHabitQueryFailed
@@ -434,11 +410,8 @@ func (t *TimerSessionCrud) TodaySecondsForHabit(habitID int64, date string) (int
 	return total.Int64, nil
 }
 
-// CreateTimerSession inserts a new timer_sessions row and returns its rowid.
-//
-// Mirrors the Zig `pub fn createTimerSession(habit_id, mode, work_duration,
-// rest_duration, loop_count)`.  The Zig code uses `std.time.timestamp()` to
-// stamp started_at / updated_at; Go uses time.Now().Unix().
+// CreateTimerSession 插入新 timer_sessions 行并返回其 rowid。
+// started_at / updated_at 用 time.Now().Unix() 打时间戳。
 func (t *TimerSessionCrud) CreateTimerSession(habitID *int64, mode string, workDuration, restDuration, loopCount int64) (int64, error) {
 	if t.db == nil {
 		return 0, ErrHabitQueryFailed
@@ -459,8 +432,7 @@ func (t *TimerSessionCrud) CreateTimerSession(habitID *int64, mode string, workD
 	return res.LastInsertId()
 }
 
-// UpdateTimerSession patches the live state of a timer_sessions row.
-// Mirrors the Zig `pub fn updateTimerSession`.
+// UpdateTimerSession 修补 timer_sessions 行的实时状态。
 func (t *TimerSessionCrud) UpdateTimerSession(
 	sessionID int64,
 	elapsedSeconds int64,
@@ -494,9 +466,8 @@ func (t *TimerSessionCrud) UpdateTimerSession(
 	return nil
 }
 
-// GetActiveTimerSession returns the most-recently-updated non-finished
-// timer_session, or ErrHabitNotFound when none exists.  Mirrors
-// `getActiveTimerSession`.
+// GetActiveTimerSession 返回最近更新且未结束的 timer_session；
+// 不存在时返回 ErrHabitNotFound。
 func (t *TimerSessionCrud) GetActiveTimerSession() (TimerSessionRow, error) {
 	return t.getTimerSession(`
 		WHERE is_finished = 0
@@ -504,13 +475,12 @@ func (t *TimerSessionCrud) GetActiveTimerSession() (TimerSessionRow, error) {
 		LIMIT 1;`, nil)
 }
 
-// GetTimerSessionByID returns a single row by id.  Mirrors
-// `getTimerSessionById`.
+// GetTimerSessionByID 按 id 返回单行。
 func (t *TimerSessionCrud) GetTimerSessionByID(sessionID int64) (TimerSessionRow, error) {
 	return t.getTimerSession(`WHERE id = ? LIMIT 1;`, &sessionID)
 }
 
-// getTimerSession is the shared SELECT + scan used by GetActive/GetByID.
+// getTimerSession 是 GetActive/GetByID 共享的 SELECT + scan。
 func (t *TimerSessionCrud) getTimerSession(whereClause string, arg any) (TimerSessionRow, error) {
 	if t.db == nil {
 		return TimerSessionRow{}, ErrHabitQueryFailed
@@ -568,7 +538,7 @@ func (t *TimerSessionCrud) getTimerSession(whereClause string, arg any) (TimerSe
 	return row, nil
 }
 
-// DeleteTimerSession removes a timer_session row.
+// DeleteTimerSession 删除一行 timer_session。
 func (t *TimerSessionCrud) DeleteTimerSession(sessionID int64) error {
 	if t.db == nil {
 		return ErrHabitQueryFailed
@@ -580,7 +550,7 @@ func (t *TimerSessionCrud) DeleteTimerSession(sessionID int64) error {
 	return nil
 }
 
-// DeleteSession removes a session row.
+// DeleteSession 删除一行 session。
 func (t *TimerSessionCrud) DeleteSession(sessionID int64) error {
 	if t.db == nil {
 		return ErrHabitQueryFailed
@@ -596,7 +566,7 @@ func (t *TimerSessionCrud) DeleteSession(sessionID int64) error {
 	return nil
 }
 
-// FinishTimerSession marks a timer_session as finished and stopped.
+// FinishTimerSession 把 timer_session 标记为已结束并已停止。
 func (t *TimerSessionCrud) FinishTimerSession(sessionID int64) error {
 	if t.db == nil {
 		return ErrHabitQueryFailed
@@ -613,7 +583,7 @@ func (t *TimerSessionCrud) FinishTimerSession(sessionID int64) error {
 	return nil
 }
 
-// GetHabitStats returns aggregated stats for a habit over the current week.
+// GetHabitStats 返回 habit 在当前周的聚合统计。
 func (t *TimerSessionCrud) GetHabitStats(habitID int64) (map[string]interface{}, error) {
 	now := time.Now()
 	weekday := int(now.Weekday())
@@ -623,7 +593,6 @@ func (t *TimerSessionCrud) GetHabitStats(habitID int64) (map[string]interface{},
 	weekStart := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, time.UTC)
 	weekStartStr := weekStart.Format("2006-01-02")
 
-	// Query sessions for this habit since week start
 	rows, err := t.db.Query(`
 		SELECT date, SUM(duration_seconds)
 		FROM sessions
@@ -636,7 +605,6 @@ func (t *TimerSessionCrud) GetHabitStats(habitID int64) (map[string]interface{},
 	}
 	defer rows.Close()
 
-	// Calculate totals and build weekly breakdown
 	totalSeconds := int64(0)
 	totalSessions := 0
 	weeklyBreakdown := make(map[string]int64)
@@ -650,7 +618,6 @@ func (t *TimerSessionCrud) GetHabitStats(habitID int64) (map[string]interface{},
 		}
 		totalSeconds += seconds
 		totalSessions++
-		// Parse date to get day of week
 		if t, err := time.Parse("2006-01-02", date); err == nil {
 			dow := int(t.Weekday())
 			if dow == 0 {

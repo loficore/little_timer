@@ -1,6 +1,6 @@
 #!/bin/bash
-# Generate and fix Wails bindings for Android compatibility
-# ponytail: run this after updating wails_bindings.go to regenerate bindings
+# 生成并修复 Wails 绑定以兼容 Android
+# 更新 wails_bindings.go 后运行本脚本重新生成绑定
 
 set -e
 
@@ -14,7 +14,7 @@ for arg in "$@"; do
     esac
 done
 
-# Install Go if not present (needed for docker exec containers)
+# 若缺少 Go 则安装（docker exec 容器场景需要）
 if ! hash go 2>/dev/null; then
     echo "=== Go not found, installing Go 1.23.0 ==="
     GO_INSTALL_DIR="/tmp/go-install"
@@ -38,12 +38,11 @@ if ! hash go 2>/dev/null; then
     echo "Using Go from ${GOROOT}"
 fi
 
-# Generate wails3 bindings
 echo "=== Generating Wails bindings ==="
 cd "$PROJECT_ROOT/neo-src"
 
 if [ "$ANDROID_MODE" = "true" ]; then
-    # Android mode: generate bindings with -tags=android
+    # Android 模式：使用 -tags=android 生成绑定
     go run github.com/wailsapp/wails/v3/cmd/wails3@${BINDINGS_VERSION} generate bindings \
         -ts -clean \
         -f '-tags=android' \
@@ -51,9 +50,9 @@ if [ "$ANDROID_MODE" = "true" ]; then
         ./cmd/server
     BINDINGS_DIR="/tmp/wails-bindings"
 else
-    # Desktop mode: standard bindings.  Pass -tags=bindings so the codegen
-    # sees wails_registration.go (gated behind //go:build bindings), without
-    # forcing the wails gtk4/webkitgtk-6.0 cgo dep into the normal build.
+    # 桌面模式：标准绑定。传 -tags=bindings 使代码生成
+    # 能看到 wails_registration.go（受 //go:build bindings 门控），
+    # 同时不把 wails gtk4/webkitgtk-6.0 cgo 依赖强加进普通构建。
     go run github.com/wailsapp/wails/v3/cmd/wails3@${BINDINGS_VERSION} generate bindings \
         -ts -clean \
         -f '-tags=bindings' \
@@ -62,7 +61,6 @@ else
     BINDINGS_DIR="/tmp/wails-bindings"
 fi
 
-# Store Go environment for docker exec containers
 export GODEBUG=netdns=go
 
 echo "=== Copying and fixing bindings ==="
@@ -70,7 +68,6 @@ BINDINGS_SRC="/tmp/wails-bindings/little-timer/internal/http/app"
 mkdir -p "$PROJECT_ROOT/assets/src/bindings/little-timer/internal/app"
 mkdir -p "$PROJECT_ROOT/neo-src/cmd/server/assets/bindings/little-timer/internal/app"
 
-# Copy fresh bindings
 if [ "$ANDROID_MODE" = "true" ]; then
     cp "$BINDINGS_DIR/little-timer/internal/http/app"/*.ts "$PROJECT_ROOT/assets/src/bindings/little-timer/internal/app/" 2>/dev/null || true
     cp "$BINDINGS_DIR/little-timer/internal/http/app"/*.ts "$PROJECT_ROOT/neo-src/cmd/server/assets/bindings/little-timer/internal/app/" 2>/dev/null || true
@@ -79,7 +76,7 @@ else
     cp "$BINDINGS_DIR/little-timer/internal/http/app"/*.ts "$PROJECT_ROOT/neo-src/cmd/server/assets/bindings/little-timer/internal/app/" 2>/dev/null || true
 fi
 
-# Validate bindings were generated
+# 校验绑定已生成
 BINDINGS_SRC="$BINDINGS_DIR/little-timer/internal/http/app"
 if [ ! -d "$BINDINGS_SRC" ] || [ "$(ls -1 "$BINDINGS_SRC"/*.ts 2>/dev/null | wc -l)" -lt 5 ]; then
     echo "ERROR: No bindings generated (found $(ls -1 "$BINDINGS_SRC"/*.ts 2>/dev/null | wc -l) .ts files, expected ≥5)"
@@ -89,7 +86,6 @@ if [ ! -d "$BINDINGS_SRC" ] || [ "$(ls -1 "$BINDINGS_SRC"/*.ts 2>/dev/null | wc 
 fi
 echo "Bindings validation passed: $(ls -1 "$BINDINGS_SRC"/*.ts 2>/dev/null | wc -l) files found"
 
-# Fix @wailsio/runtime import paths
 find "$PROJECT_ROOT/assets/src/bindings" -name "*.ts" -exec sed -i 's|@wailsio/runtime|/wails/runtime.js|g' {} \;
 find "$PROJECT_ROOT/neo-src/cmd/server/assets/bindings" -name "*.ts" -exec sed -i 's|@wailsio/runtime|/wails/runtime.js|g' {} \;
 

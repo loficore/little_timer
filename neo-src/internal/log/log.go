@@ -1,4 +1,2 @@
-// Package log wraps structured logging for little-timer.
-//
-// Stub: real slog wiring arrives in wave 2.
+// Package log 封装 little-timer 的结构化日志。
 package log

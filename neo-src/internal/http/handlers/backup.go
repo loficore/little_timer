@@ -1,26 +1,4 @@
-// Package handlers — Backup + master-password + auth endpoints.
-//
-// File `backup.go` ports the backup, master-password, and auth
-// handlers from std_server.zig.  Routes (paths match Zig exactly):
-//
-//	GET  /api/backup/config
-//	POST /api/backup/config
-//	POST /api/backup/create
-//	POST /api/backup/restore
-//	POST /api/backup/restore/:name
-//	GET  /api/backup/list
-//	GET  /api/backup/info
-//	DELETE /api/backup/delete/:name
-//	DELETE /api/backup/:id
-//	POST /api/backup/verify
-//	POST /api/backup/unlock
-//	POST /api/backup/lock
-//	GET  /api/backup/master-password
-//	POST /api/backup/master-password
-//
-//	GET  /api/auth/status
-//	POST /api/auth/enable
-//	POST /api/auth/disable
+// Package handlers —— Backup + 主口令 + 鉴权 endpoint。
 package handlers
 
 import (
@@ -34,12 +12,10 @@ import (
 	"little-timer/internal/log"
 )
 
-// -----------------------------------------------------------------------------
 // /api/backup/config
-// -----------------------------------------------------------------------------
 
-// handleBackupConfigGet mirrors `handleGetBackupConfig`.  Returns the
-// persisted BackupConfig with secrets masked (`"******"`).
+// handleBackupConfigGet 返回持久化的 BackupConfig，secret 已打码
+// （`"******"`）。
 func BackupConfigGet(c *gin.Context) {
 	a := appFromCtx(c)
 	cfg := a.Settings.BackupConfig()
@@ -63,9 +39,8 @@ func BackupConfigGet(c *gin.Context) {
 	})
 }
 
-// handleBackupConfigUpdate mirrors `handleUpdateBackupConfig`.  When
-// switching to a cloud target the handler enforces the master-password
-// + unlock checks before persisting the change.
+// handleBackupConfigUpdate。切换到云端 target 时，handler 会在持久化变更
+// 之前强制主口令 + 解锁检查。
 func BackupConfigUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	raw, err := c.GetRawData()
@@ -74,7 +49,7 @@ func BackupConfigUpdate(c *gin.Context) {
 		return
 	}
 
-	// Credential gate — only enforced when switching to a cloud target.
+	// 凭据闸门 —— 仅在切换到云端 target 时强制。
 	var probe struct {
 		TargetType string `json:"target_type"`
 	}
@@ -123,22 +98,18 @@ func BackupConfigUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return
 	}
-	// Config is persisted; rebuild the manager from it.  A rebuild
-	// failure must not fail the request — the config is saved, the
-	// manager will be rebuilt on the next config change or boot.
+	// 配置已持久化；据此重建 manager。重建失败绝不能让请求失败 ——
+	// 配置已存下，manager 会在下次配置变更或启动时重建。
 	if err := a.RebuildBackup(c.Request.Context()); err != nil {
 		log.Error("BackupConfigUpdate: rebuild failed", "error", err.Error())
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// -----------------------------------------------------------------------------
 // /api/backup/create
-// -----------------------------------------------------------------------------
 
-// handleBackupCreate mirrors `handleBackupCreate`.  Delegates to the
-// BackupManager when one is wired into the App; otherwise responds
-// with a 503-ish error.
+// handleBackupCreate。App 里接了 BackupManager 就委托给它；否则返回
+// 类 503 错误。
 func BackupCreate(c *gin.Context) {
 	a := appFromCtx(c)
 	bm := a.BackupManager()
@@ -181,11 +152,9 @@ func BackupCreate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "backup_path": name})
 }
 
-// -----------------------------------------------------------------------------
 // /api/backup/restore
-// -----------------------------------------------------------------------------
 
-// handleBackupRestore mirrors `handleBackupRestore`.  Body: {name}.
+// handleBackupRestore。Body：{name}。
 func BackupRestore(c *gin.Context) {
 	a := appFromCtx(c)
 	bm := a.BackupManager()
@@ -229,8 +198,6 @@ func BackupRestore(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// handleBackupRestoreByName mirrors `handleBackupRestoreByName` —
-// `POST /api/backup/restore/:name`.
 func BackupRestoreByName(c *gin.Context) {
 	a := appFromCtx(c)
 	bm := a.BackupManager()
@@ -250,11 +217,8 @@ func BackupRestoreByName(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// -----------------------------------------------------------------------------
 // /api/backup/list
-// -----------------------------------------------------------------------------
 
-// handleBackupList mirrors `handleBackupList`.
 func BackupList(c *gin.Context) {
 	a := appFromCtx(c)
 	bm := a.BackupManager()
@@ -270,11 +234,8 @@ func BackupList(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "backups": items})
 }
 
-// -----------------------------------------------------------------------------
 // /api/backup/info
-// -----------------------------------------------------------------------------
 
-// handleBackupInfo mirrors `handleBackupInfo`.
 func BackupInfo(c *gin.Context) {
 	a := appFromCtx(c)
 	bm := a.BackupManager()
@@ -301,11 +262,8 @@ func BackupInfo(c *gin.Context) {
 	})
 }
 
-// -----------------------------------------------------------------------------
 // DELETE /api/backup/delete/:name  /  DELETE /api/backup/:id
-// -----------------------------------------------------------------------------
 
-// handleBackupDeleteByName mirrors `handleBackupDeleteByName`.
 func BackupDeleteByName(c *gin.Context) {
 	a := appFromCtx(c)
 	bm := a.BackupManager()
@@ -325,9 +283,8 @@ func BackupDeleteByName(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// handleBackupDelete mirrors `handleBackupDelete` — generic
-// `DELETE /api/backup/:id` form (where :id is interpreted as the
-// backup name when there's no `/delete/` segment).
+// BackupDelete 处理通用的 `DELETE /api/backup/:id` 形式（没有 `/delete/`
+// 段时，:id 按备份名解释）。
 func BackupDelete(c *gin.Context) {
 	a := appFromCtx(c)
 	bm := a.BackupManager()
@@ -347,13 +304,10 @@ func BackupDelete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// -----------------------------------------------------------------------------
 // /api/backup/verify
-// -----------------------------------------------------------------------------
 
-// handleBackupVerify mirrors `handleBackupVerify`.  Calls TestConnection
-// on the configured adapter (or, for the local adapter, simply
-// verifies the target dir is reachable).
+// BackupVerify 对配置的 adapter 调用 TestConnection；local adapter 只检查
+// 目标目录可达。
 func BackupVerify(c *gin.Context) {
 	a := appFromCtx(c)
 	bm := a.BackupManager()
@@ -372,11 +326,8 @@ func BackupVerify(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// -----------------------------------------------------------------------------
 // /api/backup/unlock  /  /api/backup/lock
-// -----------------------------------------------------------------------------
 
-// handleBackupUnlock mirrors `handleBackupUnlock`.  Body: {password}.
 func BackupUnlock(c *gin.Context) {
 	a := appFromCtx(c)
 	var req struct {
@@ -393,25 +344,20 @@ func BackupUnlock(c *gin.Context) {
 	})
 }
 
-// handleBackupLock mirrors `handleBackupLock`.
 func BackupLock(c *gin.Context) {
 	a := appFromCtx(c)
 	a.LockCredentials()
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// -----------------------------------------------------------------------------
 // /api/backup/master-password
-// -----------------------------------------------------------------------------
 
-// handleMasterPasswordGet mirrors `handleGetMasterPasswordStatus`.
 func MasterPasswordGet(c *gin.Context) {
 	a := appFromCtx(c)
 	c.JSON(http.StatusOK, a.GetMasterPasswordStatus())
 }
 
-// handleMasterPasswordSet mirrors `handleSetMasterPassword`.  Body:
-// {password}.  Minimum 4 characters (matches the Zig validator).
+// MasterPasswordSet 要求口令至少 4 个字符。
 func MasterPasswordSet(c *gin.Context) {
 	a := appFromCtx(c)
 	var req struct {
@@ -432,12 +378,9 @@ func MasterPasswordSet(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// -----------------------------------------------------------------------------
 // /api/auth/*
-// -----------------------------------------------------------------------------
 
-// handleAuthStatus mirrors `handleAuthStatus`.  Public route — the auth
-// middleware lets it through without a token.
+// 公开路由 —— auth 中间件无 token 也放行。
 func AuthStatus(c *gin.Context) {
 	a := appFromCtx(c)
 	cfg := a.Settings.Config().Auth
@@ -447,9 +390,8 @@ func AuthStatus(c *gin.Context) {
 	})
 }
 
-// handleAuthEnable mirrors `handleAuthEnable`.  Generates a fresh token,
-// persists it via SettingsManager.UpdateAuth, and returns it in the
-// response so the client can save it.
+// AuthEnable 生成新 token，经 SettingsManager.UpdateAuth 持久化，并返回
+// 给客户端保存。
 func AuthEnable(c *gin.Context) {
 	a := appFromCtx(c)
 	token := app.GenerateToken()
@@ -463,7 +405,6 @@ func AuthEnable(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "token": token})
 }
 
-// handleAuthDisable mirrors `handleAuthDisable`.
 func AuthDisable(c *gin.Context) {
 	a := appFromCtx(c)
 	newAuth := a.Settings.Config().Auth
@@ -475,12 +416,9 @@ func AuthDisable(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// -----------------------------------------------------------------------------
-// Internals.
-// -----------------------------------------------------------------------------
+// 内部实现。
 
-// mask returns "******" for non-empty secrets, "" otherwise.  Matches
-// the Zig source's password-masking branch.
+// mask 对非空 secret 返回 "******"，否则返回 ""。
 func mask(s string) string {
 	if s == "" {
 		return ""
@@ -488,9 +426,8 @@ func mask(s string) string {
 	return "******"
 }
 
-// masterPasswordError builds the standard "needs master password" JSON
-// response used by `handleBackupCreate`, `handleBackupRestore`, etc.
-// Mirrors `createMasterPasswordError` in std_server.zig.
+// masterPasswordError 构造 backup handler 使用的标准“需要主口令” JSON
+// 响应。
 func masterPasswordError(code, message, actionMode string) gin.H {
 	action := gin.H{
 		"type":   "show_modal",

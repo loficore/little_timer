@@ -1,24 +1,18 @@
-// Package cli builds the Cobra command tree for little-timer.
+// Package cli 构建 little-timer 的 Cobra 命令树。
 //
-// Two ways to invoke serve:
+// 两种调用 serve 的方式：
 //
-//	$ little-timer serve --http-only --port 9090   # explicit subcommand
-//	$ little-timer --http-only --port 9090         # implicit (no subcommand)
+//	$ little-timer serve --http-only --port 9090   # 显式子命令
+//	$ little-timer --http-only --port 9090         # 隐式（无子命令）
 //
-// Both work because the serve flags are PersistentFlags on the root
-// command — the root's RunE dispatches to a caller-supplied serve
-// callback when no subcommand is selected.  This matches the Zig
-// source which had no subcommand layer at all (`parseArgs` in
-// `src/main_entry.zig:31-45` only knew about `--http-only` and
-// `--webview`).
+// 两者都可行，是因为 serve 的 flag 是根命令上的 PersistentFlags —— 未选择
+// 子命令时，根命令的 RunE 会分发给调用方提供的 serve 回调。
 //
-// Defaults are platform-aware: Linux/macOS boot into `--http-only`
-// (matches the Zig build), Windows boots into webview mode.
+// 默认值区分平台：Linux/macOS 默认 `--http-only`，Windows 默认 webview 模式。
 //
-// Layering: this package knows nothing about storage, settings, or
-// HTTP — it parses flags and calls the supplied ServeFunc.  Keeping
-// the dependency one-way (cli → caller) means tests can exercise
-// the CLI without touching SQLite.
+// 分层：本包对存储、设置、HTTP 一无所知 —— 它只解析 flag 并调用传入的
+// ServeFunc。保持单向依赖（cli → 调用方）意味着测试无需接触 SQLite
+// 就能验证 CLI。
 package cli
 
 import (
@@ -32,10 +26,9 @@ import (
 	"little-timer/internal/app"
 )
 
-// ServeOptions is the parsed-result struct that the main entrypoint
-// (cmd/server/main.go) consumes.  Populated from the root's
-// PersistentFlags whenever serve is invoked (explicit subcommand or
-// implicit root RunE).
+// ServeOptions 是供主入口（cmd/server/main.go）消费的解析结果 struct。
+// 每当 serve 被调用（显式子命令或隐式根 RunE）时由根命令的
+// PersistentFlags 填充。
 type ServeOptions struct {
 	HTTPOnly   bool
 	Port       int
@@ -43,13 +36,12 @@ type ServeOptions struct {
 	CORSOrigin string
 }
 
-// ServeFunc is the callback the CLI invokes when the user wants to
-// start the server.  The CLI knows nothing about storage or HTTP —
-// it just parses flags and calls this.  main.go supplies the real
-// implementation; tests can pass a stub that records the options.
+// ServeFunc 是用户要启动 server 时 CLI 调用的回调。CLI 对存储和 HTTP
+// 一无所知 —— 只负责解析 flag 并调用它。main.go 提供真实实现；测试可传入
+// 记录 options 的桩。
 type ServeFunc func(*ServeOptions) error
 
-// DefaultPort is the Zig `port 8080` constant.
+// DefaultPort 是默认的 HTTP 监听端口。
 const DefaultPort = 8080
 
 func defaultDBPath() string {
@@ -68,17 +60,15 @@ func defaultDBPath() string {
 	return filepath.Join(full, "little_timer.db")
 }
 
-// defaultHTTPOnly reports the platform default for `--http-only`.
-// Mirrors the Zig `builtin.os.tag` ternary: Windows → webview, every
-// other OS → http-only (Linux / macOS / BSD / …).
+// defaultHTTPOnly 返回 `--http-only` 的平台默认值：
+// Windows → webview，其他所有系统 → http-only（Linux / macOS / BSD / …）。
 func defaultHTTPOnly() bool {
 	return runtime.GOOS != "windows"
 }
 
-// NewRootCmd builds the full command tree and wires the serve flags
-// as PersistentFlags on root.  `serveFn` is called whenever the user
-// invokes serve (explicit subcommand or implicit root RunE).  Pass
-// nil during tests if you only care about parsing.
+// NewRootCmd 构建完整命令树，并把 serve flags 注册为根命令的
+// PersistentFlags。用户调用 serve 时（显式子命令或隐式根 RunE）都会执行
+// `serveFn`。只关心解析的测试可传 nil。
 func NewRootCmd(serveFn ServeFunc) *cobra.Command {
 	opts := &ServeOptions{
 		HTTPOnly:   defaultHTTPOnly(),
@@ -96,14 +86,12 @@ func NewRootCmd(serveFn ServeFunc) *cobra.Command {
 
 	addServeFlags(root, opts)
 
-	// MarkFlagsMutuallyExclusive must run on the command that OWNS the
-	// flags (root, where addServeFlags attached them).  Calling it on
-	// the serve subcommand panics — PersistentFlags propagate down
-	// but flag-group metadata is parent-local.
+	// MarkFlagsMutuallyExclusive 必须在拥有这些 flag 的命令（root，
+	// addServeFlags 挂载处）上调用。在 serve 子命令上调用会 panic ——
+	// PersistentFlags 会向下传播，但 flag-group 元数据只属于父命令。
 	root.MarkFlagsMutuallyExclusive("http-only", "webview")
 
-	// Root RunE: if no subcommand was chosen, invoke the serve
-	// callback with the current flag values.
+	// 根 RunE：未选择子命令时，用当前 flag 值调用 serve 回调。
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if err := resolveHTTPOnly(cmd, opts); err != nil {
 			return err
@@ -118,11 +106,10 @@ func NewRootCmd(serveFn ServeFunc) *cobra.Command {
 	return root
 }
 
-// addServeFlags wires the four serve flags onto the given command.
-// Both root and the `serve` subcommand share the same ServeOptions
-// instance via root's PersistentFlags (which propagate down).  Only
-// the root needs to call this — calling it on a subcommand would
-// re-bind the variables to a different persistence context.
+// addServeFlags 把四个 serve flag 挂到给定命令上。root 和 `serve`
+// 子命令通过根命令的 PersistentFlags（向下传播）共享同一个 ServeOptions
+// 实例。只有 root 需要调用 —— 在子命令上调用会把变量重新绑定到另一个
+// persistence 上下文。
 func addServeFlags(cmd *cobra.Command, opts *ServeOptions) {
 	cmd.PersistentFlags().BoolVar(&opts.HTTPOnly, "http-only", opts.HTTPOnly,
 		"Run HTTP server only (skip webview window)")
@@ -136,11 +123,10 @@ func addServeFlags(cmd *cobra.Command, opts *ServeOptions) {
 		"Access-Control-Allow-Origin value")
 }
 
-// resolveHTTPOnly collapses the mutually-exclusive --http-only /
-// --webview flags into the single bool opts.HTTPOnly.  The two flags
-// share the same target so callers can use whichever feels natural
-// (`--http-only` vs `--webview`); we resolve here so the rest of the
-// code only ever reads opts.HTTPOnly.
+// resolveHTTPOnly 把互斥的 --http-only / --webview flag 折叠为单个
+// bool opts.HTTPOnly。两个 flag 指向同一目标，调用方可用更顺手的写法
+// （`--http-only` 或 `--webview`）；在这里统一解析后，其余代码只读
+// opts.HTTPOnly。
 func resolveHTTPOnly(cmd *cobra.Command, opts *ServeOptions) error {
 	webviewFlag, _ := cmd.Flags().GetBool("webview")
 	httpOnlySet := cmd.Flags().Changed("http-only")
@@ -154,10 +140,8 @@ func resolveHTTPOnly(cmd *cobra.Command, opts *ServeOptions) error {
 	return nil
 }
 
-// invokeServe prints a one-line summary (useful for `--dry-run`
-// style scripts and as a smoke-test target) then hands off to the
-// caller-supplied callback.  When the callback is nil (test mode),
-// we just print the summary and exit cleanly.
+// invokeServe 打印一行摘要（便于 `--dry-run` 风格脚本和 smoke-test），
+// 然后交给调用方提供的回调。回调为 nil（测试模式）时只打印摘要并干净退出。
 func invokeServe(fn ServeFunc, cmd *cobra.Command, opts *ServeOptions) error {
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"serve: http-only=%v port=%d db-path=%q cors-origin=%q\n",
@@ -169,14 +153,11 @@ func invokeServe(fn ServeFunc, cmd *cobra.Command, opts *ServeOptions) error {
 	return fn(opts)
 }
 
-// -----------------------------------------------------------------------------
-// serve — explicit subcommand alias.
+// serve —— 显式子命令别名。
 //
-// Inherits all serve flags from root via PersistentFlags.  Exists so
-// `little-timer serve --http-only` reads naturally in shell history
-// and CI scripts.  The actual work is delegated to invokeServe so the
-// behaviour is identical whether the user typed `serve` or not.
-// -----------------------------------------------------------------------------
+// 通过 PersistentFlags 从根命令继承全部 serve flag。存在它是为了让
+// `little-timer serve --http-only` 在 shell 历史和 CI 脚本中读起来更自然。
+// 实际工作委托给 invokeServe，因此用户是否输入 `serve` 行为完全一致。
 
 func newServeCmd(opts *ServeOptions, fn ServeFunc) *cobra.Command {
 	cmd := &cobra.Command{
@@ -199,9 +180,7 @@ func newServeCmd(opts *ServeOptions, fn ServeFunc) *cobra.Command {
 	return cmd
 }
 
-// -----------------------------------------------------------------------------
-// version — prints Version, BuildTime, GitCommit.
-// -----------------------------------------------------------------------------
+// version —— 打印 Version、BuildTime、GitCommit。
 
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
@@ -216,14 +195,11 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// backup — sub-subcommands: create / restore / list.
+// backup —— 子命令：create / restore / list。
 //
-// The actual backup work is owned by `internal/storage/backup`.  These
-// commands are wiring-only for now: the storage layer will fill in the
-// real call sites in a later wave.  Until then they print "not yet
-// implemented" and exit non-zero.
-// -----------------------------------------------------------------------------
+// 实际备份工作归属 `internal/storage/backup`。这些命令目前只做接线：
+// 存储层会在后续阶段填入真实调用点。在那之前它们打印
+// "not yet implemented" 并以非零码退出。
 
 func newBackupCmd() *cobra.Command {
 	cmd := &cobra.Command{

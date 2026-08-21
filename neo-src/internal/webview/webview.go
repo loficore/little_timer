@@ -1,81 +1,60 @@
-// Package webview wraps github.com/webview/webview_go to host the
-// Little Timer UI in a native window.
+// Package webview 封装 github.com/webview/webview_go，把
+// Little Timer UI 承载在原生窗口中。
 //
-// Architecture:
+// 架构：
 //
 //	┌──────────────┐     Run()     ┌─────────────┐
 //	│  cmd/server  │ ────────────► │  webview.Run│
-//	│  (Cobra)     │               │  (blocks)   │
+//	│  (Cobra)     │               │   （阻塞）  │
 //	└──────────────┘               └─────────────┘
 //	                                       │
 //	                                       ▼
 //	                       webview_go → libwebview → GTK/WKWebView/Edge
 //
-// The HTTP server is already running in a background goroutine
-// (started by cmd/server) — this package only owns the window.  When
-// the user closes the window, Run() returns and main.go stops the
-// HTTP server.
+// HTTP server 已在后台 goroutine 中运行（由 cmd/server 启动）—— 本包
+// 只负责窗口。用户关闭窗口时 Run() 返回，main.go 随即停止 HTTP server。
 //
-// GTK detection (the equivalent of `build.zig:17-97`): the Go binding
-// surfaces a runtime error from `webview.New()` when GTK/webkit is
-// missing on Linux.  We wrap that error with a helpful install hint
-// so the user gets the same message the Zig build would print, but
-// without us shelling out to `pkg-config` at startup — pkg-config
-// errors would slow down every boot for the 99% of users who DO have
-// the deps installed.
+// GTK 检测：Linux 上缺少 GTK/webkit 时，Go 绑定会让 `webview.New()`
+// 抛出运行时错误。我们用它包装出带安装提示的错误，而不是在启动时调用
+// `pkg-config` —— 对 99% 已装好依赖的用户来说，pkg-config 探测会拖慢
+// 每次启动。
 //
-// Build tags:
+// Build tags：
 //
-//   - `webview` — enables the native webview_go implementation
-//     (`native.go`).  Without this tag, `Run()` returns a friendly
-//     error and the binary still boots (HTTP server keeps serving).
-//     This matches the Go ecosystem's "CGO is opt-in" convention and
-//     means CI / release builds on machines without GTK can still
-//     produce a working binary.
-//   - `embed_ui` — switches the window's target URL from the Vite
-//     dev server (:5173) to the embedded HTTP server (:8080).
-//     Defined in `url_embed.go`.  Only meaningful when the `webview`
-//     tag is also set.
+//   - `webview` —— 启用原生 webview_go 实现（`native.go`）。没有此 tag
+//     时 `Run()` 返回友好错误，二进制仍能启动（HTTP server 继续服务）。
+//     这符合 Go 生态“CGO 显式启用”的惯例，也让没有 GTK 的 CI / 发布
+//     机器仍能产出可用的二进制。
+//   - `embed_ui` —— 把窗口目标 URL 从 Vite 开发服务器（:5173）切换到
+//     内嵌 HTTP server（:8080）。定义在 `url_embed.go`，仅当 `webview`
+//     tag 同时设置时才有意义。
 package webview
 
 import (
 	"runtime"
 )
 
-// Title is the window title shown in the OS chrome.  Matches the
-// Zig `win.setTitle("Little Timer")` call.
+// Title 是操作系统窗口栏显示的标题。
 const Title = "Little Timer"
 
-// DefaultSize is the initial window size in CSS pixels.  Matches the
-// spec's "800x600 HintNone" — note this is a deliberate shrink from
-// the Zig original (1200x780) to keep the new Go-native window
-// snug on a 13" laptop.
+// DefaultSize 是初始窗口尺寸（CSS 像素）—— 特意设得紧凑
+// （800x600），保证在 13 寸笔记本上可用。
 const (
 	DefaultWidth  = 800
 	DefaultHeight = 600
 )
 
-// Run opens a webview window, navigates to appURL, and blocks until
-// the user closes the window.  Returns any error from the underlying
-// implementation — most commonly:
+// Run 打开 webview 窗口，导航到 appURL，并阻塞直到用户关闭窗口。
+// 返回底层实现的错误 —— 最常见的是：
 //
-//   - "webview support not compiled in" — built without `-tags webview`
-//   - "missing GTK/webkit" — built with the tag but the OS lacks the
-//     CGO dependencies (mirrors the Zig `@panic("missing Linux webview
-//     dependencies")` path)
-//
-// Mirrors `webview.Window.openDefault` + `win.run()` in the Zig
-// source (`src/core/webview_c.zig:84-93` and `src/main_entry.zig:138-165`).
+//   - "webview support not compiled in" —— 构建时未加 `-tags webview`
+//   - "missing GTK/webkit" —— 加了 tag 但系统缺少 CGO 依赖
 func Run() error { return run() }
 
-// CheckLinuxDeps is a best-effort pre-flight for Linux.  On non-Linux
-// platforms it returns (true, "").  We don't shell out to pkg-config
-// at boot (the runtime error from webview.New() is enough for the
-// common case); but a separate `little-timer doctor` style subcommand
-// can call this to surface install hints proactively.
-//
-// The Zig build's `linkWebviewDesktopDeps` does the same check
-// (build.zig:17-97) — we mirror the candidate set here.
+// CheckLinuxDeps 是 Linux 上的尽力而为的预检查。非 Linux 平台返回
+// (true, "")。我们不在启动时调用 pkg-config（webview.New() 的运行时
+// 错误对常见场景已经足够）；但独立的 `little-timer doctor` 风格
+// 子命令可以调用它，主动给出安装提示。
 func CheckLinuxDeps() (bool, string) {
 	if runtime.GOOS != "linux" {
 		return true, ""
@@ -83,8 +62,7 @@ func CheckLinuxDeps() (bool, string) {
 	return false, missingDepsHint()
 }
 
-// missingDepsHint returns the install hint shown when webview.New()
-// fails on Linux.  Identical wording to the Zig `@panic` message.
+// missingDepsHint 返回 Linux 上 webview.New() 失败时显示的安装提示。
 func missingDepsHint() string {
 	return "❌ 未检测到可用 GTK/WebKit 组合。请安装任一组合：\n" +
 		"  1) gtk4 + webkitgtk-6.0\n" +

@@ -1,31 +1,27 @@
 //go:build android
 // +build android
 
-// Android entrypoint for little-timer.
+// little-timer 的 Android 入口。
 //
-// Replaces the desktop main.go on Android builds (e.g.
-// `GOOS=android GOARCH=arm64 go build -tags android`).  We do not
-// own the Go runloop on Android — main.go's `func main()` still
-// links in (so the package compiles for Android), but the Wails
-// Android host drives the lifecycle:
+// Android 构建时取代桌面版 main.go（例如
+// `GOOS=android GOARCH=arm64 go build -tags android`）。在 Android 上
+// Go runloop 不归我们所有 —— main.go 的 `func main()` 依然参与链接
+// （保证包能为 Android 编译），但生命周期由 Wails Android 宿主驱动：
 //
-//   - The Kotlin/Java Activity creates a `WailsBridge` instance.
-//   - The bridge's `nativeInit` JNI entrypoint stores the JavaVM +
-//     bridge global reference, then invokes the function we register
-//     here via `application.RegisterAndroidMain` in a goroutine
-//     (`pkg/application/application_android.go`).
-//   - Subsequent bridge callbacks (`nativeOnStart`, `nativeOnResume`,
-//     `nativeOnPause`, `nativeHandleRuntimeCall`, ...) dispatch to
-//     the Wails message processor and into our services.
+//   - Kotlin/Java Activity 创建 `WailsBridge` 实例。
+//   - bridge 的 `nativeInit` JNI 入口保存 JavaVM + bridge 全局引用，
+//     然后在一个 goroutine 里调用我们在此通过 `application.RegisterAndroidMain`
+//     注册的函数（`pkg/application/application_android.go`）。
+//   - 之后的 bridge 回调（`nativeOnStart`、`nativeOnResume`、
+//     `nativeOnPause`、`nativeHandleRuntimeCall` 等）分发给 Wails 消息
+//     处理器并进入我们的 service。
 //
-// Because the host owns the runloop, we deliberately do NOT call
-// `wailsApp.Run()` — it would block here forever and never return.
+// 因为 runloop 归宿主所有，我们刻意不调用 `wailsApp.Run()` —— 它会在
+// 这里永远阻塞、永不返回。
 //
-// Why no `func main()`?  The package already has `main()` in
-// main.go; adding a second one for Android would conflict.  Instead
-// we install the Wails setup as an `init()`-registered callback —
-// the same trick gomobile-based libraries use to defer startup to
-// the host.
+// 为什么不写 `func main()`？包里已有 main.go 的 `main()`；再为 Android
+// 加第二个会冲突。所以我们把 Wails 安装做成 `init()` 注册的回调 ——
+// 与 gomobile 系库把启动延迟给宿主的套路相同。
 package main
 
 import (
@@ -45,20 +41,18 @@ import (
 //go:embed all:assets
 var assets embed.FS
 
-// wailsApp is the *application.App the Android JNI bridge hands
-// incoming runtime calls to.  Built once by bootWails; read by the
-// Wails message processor when the WebView posts a runtime call
-// (see `handleRuntimeCallForAndroid` in `application_android.go`).
+// wailsApp 是 Android JNI bridge 用来转交传入 runtime 调用的
+// *application.App。由 bootWails 构建一次；WebView 发出 runtime 调用时，
+// Wails 消息处理器读取它（见 `application_android.go` 的
+// `handleRuntimeCallForAndroid`）。
 var wailsApp *application.App
 
-// bootWails builds the Wails App + service wrappers.  Invoked by
-// the Android JNI bridge after `nativeInit` stores the bridge
-// global ref — see `Java_com_wails_app_WailsBridge_nativeInit`.
-//
-// ponytail: the service registration list mirrors `bindings/.../
-// wailsbindings.ts` exactly — every method the Wails client calls
-// must have a corresponding exported method on one of these types.
-// Add new methods to `wails_services.go`, not here.
+// bootWails 构建 Wails App + service 包装器。由 Android JNI bridge 在
+// `nativeInit` 保存 bridge 全局引用之后调用 —— 见
+// `Java_com_wails_app_WailsBridge_nativeInit`。service 注册列表与
+// `bindings/.../wailsbindings.ts` 严格对应 —— Wails 客户端调用的每个方法
+// 都必须能在这些类型上找到对应的导出方法。新增方法请加到
+// `wails_services.go`，不要加在这里。
 func bootWails() {
 	storagePath := application.Android.StoragePath()
 
@@ -95,8 +89,8 @@ func bootWails() {
 	clk := domain.NewClockManager(sm.BuildClockConfig())
 	log.Debug("[bootWails] clock created")
 
-	// RebuildBackup derives the backup dir from dbPath (`<storage>/backups`)
-	// and honours the persisted BackupConfig, falling back to local on failure.
+	// RebuildBackup 从 dbPath 推导备份目录（`<storage>/backups`）并遵循
+	// 持久化的 BackupConfig，失败时回退到 local。
 	a := httpapp.NewApp(clk, sm, sqlite, nil, dbPath)
 	if err := a.RebuildBackup(context.Background()); err != nil {
 		log.Info(fmt.Sprintf("[bootWails] backup disabled: %v", err))
@@ -128,12 +122,9 @@ func bootWails() {
 	log.Info("[bootWails] done, goroutine started")
 }
 
-// init wires
-
-// init wires `bootWails` into the Wails Android lifecycle before
-// any other code runs.  The host calls our registered func in a
-// goroutine after `nativeInit`; we don't need to do anything else
-// from Go's perspective.
+// init 在其他任何代码运行之前把 `bootWails` 接入 Wails Android 生命周期。
+// 宿主在 `nativeInit` 之后于一个 goroutine 里调用我们注册的函数；从 Go 的
+// 角度看不需要再做别的。
 func init() {
 	application.RegisterAndroidMain(bootWails)
 }

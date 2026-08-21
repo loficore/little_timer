@@ -1,13 +1,13 @@
 /**
- * Platform-aware API client for Little Timer.
+ * Little Timer 的平台感知 API 客户端。
  *
- * On Android (detected via window.wails): uses Wails v3 JS↔Go bindings
- * via JNI — no HTTP fetch needed.
+ * 在 Android（通过 window.wails 检测）：使用 Wails v3 的 JS↔Go 绑定，
+ * 经由 JNI —— 无需 HTTP fetch。
  *
- * On desktop: uses the existing fetch()-based APIClient.
+ * 在桌面端：使用现有的基于 fetch() 的 APIClient。
  *
- * This allows the same frontend code to work on both platforms
- * without changing call sites — they keep using getAPIClient().
+ * 这样同一套前端代码可在两个平台运行，
+ * 调用处无需改动 —— 始终使用 getAPIClient()。
  */
 
 import type {
@@ -34,10 +34,10 @@ import type {
 } from "../types/api";
 
 /* eslint-disable @typescript-eslint/require-await */
-// Detect Android: Wails v3 sets window.wails on Android
+// 检测 Android：Wails v3 在 Android 上会设置 window.wails
 const isAndroid = typeof window !== "undefined" && !!(window as any).wails;
 
-// ponytail: lazy-load Wails bindings only on Android at runtime
+// 仅在 Android 运行时懒加载 Wails 绑定。
 let _bindings: {
   TimerService: any;
   SettingsService: any;
@@ -47,8 +47,8 @@ let _bindings: {
 
 async function _loadBindings() {
   if (_bindings) return _bindings;
-  // Use string-based dynamic import to prevent Rollup from resolving at build time.
-  // These files are Wails-generated (Android only) and don't exist in the desktop build.
+  // 使用基于字符串的动态导入，防止 Rollup 在构建期解析。
+  // 这些文件由 Wails 生成（仅 Android），在桌面构建中不存在。
   const [ts, ss, hs, bs] = await Promise.all([
     import(/* @vite-ignore */ "../bindings/little-timer/internal/app/timerservice.ts"),
     import(/* @vite-ignore */ "../bindings/little-timer/internal/app/settingsservice.ts"),
@@ -67,7 +67,7 @@ async function _loadBindings() {
  * Wails API 客户端 — 封装所有与后端通信的 Wails Go 绑定方法
  */
 export class WailsAPIClient {
-  // Exposed for useSSE which accesses apiClient.baseUrl — SSE is not used on Android
+  // 暴露给 useSSE（其访问 apiClient.baseUrl）—— Android 上不启用 SSE
   baseUrl = "";
 
   private async _b(name: 'TimerService' | 'SettingsService' | 'HabitService' | 'BackupService') {
@@ -150,8 +150,8 @@ export class WailsAPIClient {
    * 切换计时模式（仅桌面端，Android 无效）
    */
   async changeMode(_mode: "countdown" | "stopwatch"): Promise<void> {
-    // Wails bindings don't expose changeMode — this is a no-op on Android
-    // since mode is set via StartTimer options
+    // Wails 绑定未暴露 changeMode —— 在 Android 上是空操作，
+    // 模式由 StartTimer 参数指定
     return Promise.resolve();
   }
 
@@ -386,8 +386,7 @@ export class WailsAPIClient {
    * @param _file - 壁纸文件
    */
   async uploadWallpaper(_file: File): Promise<WallpaperUploadResult> {
-    // Wallpaper upload is not available on Android (no HTTP server)
-    // Return a dummy response so the UI doesn't break
+    // Android 上壁纸上传不可用（无 HTTP 服务器）；返回空响应以免 UI 出错。
     return { filename: "" };
   }
 
@@ -415,5 +414,4 @@ export class WailsAPIClient {
   }
 }
 
-// Re-export the type guard
 export { isAndroid };

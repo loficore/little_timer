@@ -1,25 +1,17 @@
-// Package crypto — secret storage with master-password protection.
+// Package crypto —— 带主口令保护的 secret 存储。
 //
-// Port of `src/core/utils/secret_storage.zig` (little_timer).
+// 不集成系统 keychain：secret 放在内存 map 中（用主口令派生的密钥做
+// 静态加密），并持久化到磁盘上的单个加密文件。文件路径由调用方提供，
+// 由调用方决定 secret blob 存放位置（通常是
+// `os.UserConfigDir()/little_timer/secrets.enc`）。
 //
-// The Zig source ships three backends (Linux secret-service, macOS
-// Keychain, Windows Credential Manager) but only the in-memory
-// "SoftwareSecretImpl" is actually wired up; the OS-keychain helpers are
-// stubs (`SecretError.NotImplemented`).  This Go port mirrors that:
-// there is no real OS-keychain integration in W4 — secrets live in an
-// in-memory map (encrypted-at-rest with a master-password-derived key)
-// and are persisted to a single encrypted file on disk.  The file path
-// is supplied by the caller so the caller controls where the secret blob
-// lives (typically `os.UserConfigDir()/little_timer/secrets.enc`).
+// 磁盘 blob 的 wire format：
 //
-// Wire format of the on-disk blob:
-//
-//	magic (8 bytes: "LTMSECv1") || salt (16) || nonce (12) ||
+//	magic (8 字节："LTMSECv1") || salt (16) || nonce (12) ||
 //	  gcm_sealed( JSON(map[string][]byte) )
 //
-// JSON inside the GCM seal is `{"key": base64(value), …}`.  This is the
-// encrypted-file fallback the spec asks for when the OS keychain is
-// unavailable.
+// GCM 密封内的 JSON 为 `{"key": base64(value), …}`。这是规范要求的
+// OS keychain 不可用时的加密文件回退方案。
 package crypto
 
 import (
@@ -34,7 +26,7 @@ import (
 	"little-timer/internal/log"
 )
 
-// SecretError mirrors `pub const SecretError = error{...}` in secret_storage.zig.
+// SecretError 枚举 secret 存储的各类失败模式。
 type SecretError string
 
 const (
@@ -51,45 +43,42 @@ const (
 
 func (e SecretError) Error() string { return string(e) }
 
-// Magic prefix for the encrypted blob file.  Lets us distinguish our own
-// file from accidental garbage on disk and gives us a clear upgrade path
-// (bump to v2, handle v1 by migration in `loadFromFile`).
+// 加密 blob 文件的 magic 前缀。用来把自己的文件和磁盘上的意外垃圾
+// 区分开，并预留清晰的升级路径（升到 v2，在 `loadFromFile` 里迁移 v1）。
 var secretMagic = []byte("LTMSECv1")
 
-// Lockout constants — match Zig settings_manager.zig (5 attempts → 300s).
+// 锁定：5 次失败尝试 → 锁定 300 秒。
 const (
 	MaxUnlockAttempts      = 5
 	LockoutDurationSeconds = 300
 )
 
-// SecretStorage is the encrypted-file fallback for storing credentials.
-// One instance per process; all methods are goroutine-safe.
+// SecretStorage 是凭据存储的加密文件回退方案。
+// 每进程一个实例；所有方法都是 goroutine 安全的。
 type SecretStorage struct {
 	mu sync.Mutex
 
-	// filePath is where the encrypted blob lives on disk.  Empty means
-	// "no persistence — secrets vanish when the process exits".
+	// filePath 是加密 blob 在磁盘上的位置。为空表示
+	// “不持久化 —— 进程退出后 secret 即消失”。
 	filePath string
 
-	// masterPassword is the user-supplied password kept in memory after
-	// SetMasterPassword / Unlock.  We need it because the on-disk blob
-	// uses password → PBKDF2 → AES-GCM, and re-deriving the AES key
-	// without the password would require storing the key on disk (which
-	// defeats the encryption).  Mirrors the Zig `SoftwareSecretImpl`'s
-	// `master_password` field.  Zeroed on Lock().
+	// masterPassword 是 SetMasterPassword / Unlock 之后保留在内存中的
+	// 用户口令。保留它是因为磁盘 blob 走的是 password → PBKDF2 →
+	// AES-GCM；若无口令重新派生 AES 密钥就得把密钥存盘（这会摧毁加密的
+	// 意义）。Lock() 时清零。
 	masterPassword []byte
 
-	// secrets is the in-memory cache.  Keys are arbitrary user-supplied
-	// byte slices; we serialise them as-is inside the JSON map.
+	// secrets 是内存 cache。key 是用户提供的任意字节切片；在 JSON map
+	// 内按原样序列化。
 	secrets map[string][]byte
 
-	// lockout bookkeeping (matches settings_manager.zig).
+	// 锁定计数。
 	failedAttempts  uint32
 	lockedUntilUnix int64
 }
 
-// New returns an empty, locked SecretStorage that will persist to filePath.
-// If filePath is "" the store is in-memory only.
+// New 返回一个空的、处于锁定状态的 SecretStorage，持久化到 filePath。
+// filePath 为 "" 时存储只在内存中。
 func New(filePath string) *SecretStorage {
 	return &SecretStorage{
 		filePath: filePath,
@@ -97,13 +86,10 @@ func New(filePath string) *SecretStorage {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Master password lifecycle.
-// -----------------------------------------------------------------------------
+// 主口令生命周期。
 
-// SetMasterPassword installs (or replaces) the master password.  Calling
-// this on an existing store re-encrypts the on-disk blob with the new
-// password.  Matches the Zig `setMasterPassword` semantics.
+// SetMasterPassword 设置（或替换）主口令。对已有存储调用时，会用新口令
+// 重新加密磁盘 blob。
 func (s *SecretStorage) SetMasterPassword(password []byte) error {
 	log.Info("SetMasterPassword: success")
 	s.mu.Lock()
@@ -117,9 +103,8 @@ func (s *SecretStorage) SetMasterPassword(password []byte) error {
 	return s.persistLocked()
 }
 
-// Unlock validates password against the on-disk blob (if any) and populates
-// the in-memory cache.  Implements the 5-attempt lockout from
-// settings_manager.zig.
+// Unlock 用 password 校验磁盘 blob（若存在）并填充内存 cache。
+// 失败尝试会触发锁定（见常量）。
 func (s *SecretStorage) Unlock(password []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,8 +130,7 @@ func (s *SecretStorage) Unlock(password []byte) error {
 	return nil
 }
 
-// HasMasterPassword reports whether the on-disk blob exists.  Does not
-// touch the in-memory state.
+// HasMasterPassword 报告磁盘 blob 是否存在。不触碰内存状态。
 func (s *SecretStorage) HasMasterPassword() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,34 +141,30 @@ func (s *SecretStorage) HasMasterPassword() bool {
 	return err == nil
 }
 
-// IsLocked reports whether the store is currently locked (either because
-// no Unlock was called or because of an active lockout).
+// IsLocked 报告存储当前是否锁定（未调用过 Unlock，或处于锁定期）。
 func (s *SecretStorage) IsLocked() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.masterPassword == nil
 }
 
-// Lock drops the master password + decrypted cache.  The on-disk blob
-// is untouched — the next Unlock will reload it.
+// Lock 丢弃主口令 + 解密后的 cache。磁盘 blob 不动 —— 下次 Unlock 会
+// 重新加载。
 func (s *SecretStorage) Lock() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	zeroBytes(s.masterPassword)
 	s.masterPassword = nil
-	// Clear plaintext cache so we don't leave decrypted secrets in memory.
+	// 清空 plaintext cache，避免解密后的 secret 留在内存里。
 	for k := range s.secrets {
 		zeroBytes(s.secrets[k])
 		delete(s.secrets, k)
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Secret operations (require unlocked state).
-// -----------------------------------------------------------------------------
+// Secret 操作（要求处于解锁状态）。
 
-// Store inserts or replaces a key/value pair.  The plaintext value is
-// wiped from memory after encryption.
+// Store 插入或替换一对 key/value。加密完成后明文字节会从内存中抹掉。
 func (s *SecretStorage) Store(key, value []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -197,8 +177,7 @@ func (s *SecretStorage) Store(key, value []byte) error {
 	return s.persistLocked()
 }
 
-// Retrieve returns the plaintext value for key.  The returned slice is a
-// copy; the caller may wipe it when done.
+// Retrieve 返回 key 对应的明文值。返回的是副本；调用方用完可自行擦除。
 func (s *SecretStorage) Retrieve(key []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -213,7 +192,7 @@ func (s *SecretStorage) Retrieve(key []byte) ([]byte, error) {
 	return append([]byte(nil), v...), nil
 }
 
-// Delete removes a key.  Deleting a non-existent key is a no-op.
+// Delete 删除一个 key。删除不存在的 key 是 no-op。
 func (s *SecretStorage) Delete(key []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -228,7 +207,7 @@ func (s *SecretStorage) Delete(key []byte) error {
 	return s.persistLocked()
 }
 
-// Clear wipes every secret.  Useful for "reset credentials" flows.
+// Clear 擦除所有 secret。适用于“重置凭据”流程。
 func (s *SecretStorage) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -243,17 +222,14 @@ func (s *SecretStorage) Clear() error {
 	return s.persistLocked()
 }
 
-// LockoutUntil returns the unix timestamp when the current lockout
-// expires, or 0 if not locked out.
+// LockoutUntil 返回当前锁定结束的 unix 时间戳；未锁定时返回 0。
 func (s *SecretStorage) LockoutUntil() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lockedUntilUnix
 }
 
-// -----------------------------------------------------------------------------
-// Internals — caller MUST hold s.mu.
-// -----------------------------------------------------------------------------
+// 内部实现 —— 调用方必须持有 s.mu。
 
 func (s *SecretStorage) requireUnlocked() error {
 	if s.masterPassword == nil {
@@ -265,18 +241,15 @@ func (s *SecretStorage) requireUnlocked() error {
 	return nil
 }
 
-// persistLocked serialises s.secrets to JSON, encrypts with masterKey via
-// EncryptWithPassword (using the masterKey's bytes directly as the password
-// input), and writes the magic-prefixed blob to disk.  If no filePath was
-// configured this is a no-op.
+// persistLocked 把 s.secrets 序列化为 JSON，用 masterKey 通过
+// EncryptWithPassword 加密（直接把 masterKey 的字节当作 password 输入），
+// 再把带 magic 前缀的 blob 写盘。未配置 filePath 时是 no-op。
 //
-// We re-derive a fresh salt per write rather than persisting one; the salt
-// is needed only for PBKDF2 which we run to keep the cipher format
-// consistent with DecryptWithPassword.  Equivalently we could call
-// Encrypt/Decrypt directly with the masterKey, but routing through
-// EncryptWithPassword means the on-disk blob can also be opened by
-// DecryptWithPassword if someone recovers the master password — useful
-// for manual recovery tools.
+// 每次写入都重新派生一个新 salt，而不是持久化一个；salt 只是 PBKDF2
+// 需要，这样密码格式能与 DecryptWithPassword 保持一致。等价做法是直接用
+// masterKey 调 Encrypt/Decrypt，但绕道 EncryptWithPassword 意味着磁盘
+// blob 也能被 DecryptWithPassword 打开 —— 只要有人恢复了主口令就行，
+// 对手工恢复工具有用。
 func (s *SecretStorage) persistLocked() error {
 	if s.filePath == "" {
 		return nil
@@ -310,8 +283,8 @@ func (s *SecretStorage) persistLocked() error {
 	return nil
 }
 
-// loadFromFileLocked reads the on-disk blob, derives a key from password,
-// and populates s.secrets.  On failure leaves the in-memory state untouched.
+// loadFromFileLocked 读取磁盘 blob，从 password 派生密钥，填充 s.secrets。
+// 失败时保持内存状态不变。
 func (s *SecretStorage) loadFromFileLocked(password []byte) error {
 	if s.filePath == "" {
 		return ErrSecretNotFound
@@ -346,15 +319,14 @@ func (s *SecretStorage) loadFromFileLocked(password []byte) error {
 		}
 		secrets[k] = raw
 	}
-	// Promote to live state only after all parsing succeeds.
+	// 全部解析成功后才提升为活动状态。
 	s.masterPassword = append([]byte(nil), password...)
 	s.secrets = secrets
 	return nil
 }
 
-// zeroBytes wipes a byte slice in place.  Best-effort defence against
-// heap dumps; Go's GC may have copied the data, so this is not a
-// guarantee, just a hygiene step that mirrors Zig's `@memset(buf, 0)`.
+// zeroBytes 就地擦除一个 byte slice。针对 heap dump 的尽力防御；
+// Go 的 GC 可能已复制过数据，所以这是卫生习惯，不是保证。
 func zeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0

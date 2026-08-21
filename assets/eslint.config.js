@@ -65,6 +65,8 @@ export default tseslint.config(
        '@typescript-eslint/no-redundant-type-constituents': 'off',
        '@typescript-eslint/restrict-template-expressions': 'off',
       '@typescript-eslint/consistent-generic-constructors': 'off',
+      // 空 catch 块是项目里有意为之的静默失败 (localStorage / 音频 / PerformanceObserver 等非关键路径)。
+      'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },
 
@@ -98,6 +100,7 @@ export default tseslint.config(
       }],
       'jsdoc/require-description': 'off',
       'jsdoc/check-tag-names': ['warn', { definedTags: ['category'] }],
+      'no-empty': ['error', { allowEmptyCatch: true }],
     },
   }
 )

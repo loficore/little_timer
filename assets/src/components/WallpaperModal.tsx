@@ -8,6 +8,7 @@ import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
 import { getAPIClient } from "../utils/apiClientSingleton";
 import { WALLPAPER_FALLBACK_GRADIENT, WALLPAPER_LOCAL_PREFIX, resolveWallpaperUrl } from "../utils/constants";
+import { CloseIcon } from "../utils/icons";
 
 interface WallpaperModalProps {
   /** 是否显示弹窗 */
@@ -157,87 +158,35 @@ export const WallpaperModal: FunctionalComponent<WallpaperModalProps> = ({
   const hasBackdropImage = backdropImageUrl.length > 0;
   const hasWallpaper = value.length > 0;
 
-  const backdropStyle: Record<string, string> = {
-    position: "fixed",
-    top: "0",
-    left: "0",
-    right: "0",
-    bottom: "0",
-    zIndex: "40",
-    overflow: "hidden",
-  };
-
-  const imgStyle: Record<string, string> = {
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-    filter: "blur(34px) saturate(145%)",
-    transform: "scale(1.1)",
-    WebkitFilter: "blur(34px) saturate(145%)",
-  };
-
-  const overlayStyle: Record<string, string> = {
-    position: "fixed",
-    top: "0",
-    left: "0",
-    right: "0",
-    bottom: "0",
-    zIndex: "41",
-    backgroundColor: "rgba(0,0,0,0.5)",
-  };
-
-  const backdropNode = hasBackdropImage ? (
-    <div style={backdropStyle}>
-      <img src={backdropImageUrl} alt="" style={imgStyle} />
+  const backdropNode = (
+    <div className="my-overlay-backdrop fixed inset-0 z-40 overflow-hidden">
+      {hasBackdropImage && (
+        <img
+          src={backdropImageUrl}
+          alt=""
+          className="w-full h-full object-cover blur-[34px] saturate-[145%] scale-110 [-webkit-filter:blur(34px)_saturate(145%)]"
+        />
+      )}
+      {!hasBackdropImage && hasWallpaper && (
+        <div
+          className="absolute inset-0"
+          style={isColor ? { backgroundColor: value } : { background: value }}
+        />
+      )}
     </div>
-  ) : hasWallpaper ? (
-    <div style={{ ...backdropStyle, ...(isColor ? { backgroundColor: value } : { background: value }) }} />
-  ) : (
-    <div style={backdropStyle} />
   );
 
-  const containerStyle: Record<string, string> = {
-    position: "fixed",
-    top: "0",
-    left: "0",
-    right: "0",
-    bottom: "0",
-    zIndex: "100",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "transparent",
-  };
-
-  const panelStyle: Record<string, string | number> = {
-    border: "1px solid rgba(255,255,255,0.1)",
-    borderRadius: "1rem",
-    background: "linear-gradient(160deg, rgba(30,30,40,0.96) 0%, rgba(40,40,55,0.99) 100%)",
-    boxShadow: "0 16px 32px rgba(0,0,0,0.18)",
-    backdropFilter: "blur(36px) saturate(142%)",
-    width: "100%",
-    maxWidth: "32rem",
-    marginLeft: "1rem",
-    marginRight: "1rem",
-    maxHeight: "80vh",
-    overflow: "hidden",
-    display: "flex",
-    flexDirection: "column" as const,
-  };
-
   const modalContent = (
-    <div style={containerStyle}>
-      <div style={panelStyle}>
-        <div style={{ padding: "1rem", borderBottom: "1px solid rgba(255,255,255,0.1)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ fontSize: "1.125rem", fontWeight: "bold" }}>{t("modal.select_wallpaper")}</h3>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent">
+      <div className="my-surface-modal w-full max-w-lg mx-4 max-h-[80vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-4 border-b border-[var(--my-outline)]">
+          <h3 className="text-lg font-bold">{t("modal.select_wallpaper")}</h3>
           <button
             type="button"
-            style={{ padding: "0.25rem", borderRadius: "9999px", background: "transparent", border: "none", cursor: "pointer" }}
+            className="p-1 rounded-full bg-transparent border-none cursor-pointer"
             onClick={onClose}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <CloseIcon className="h-5 w-5" />
           </button>
         </div>
 
@@ -401,7 +350,6 @@ export const WallpaperModal: FunctionalComponent<WallpaperModalProps> = ({
   return (
     <>
       {backdropNode}
-      <div style={overlayStyle} />
       {modalContent}
     </>
   );

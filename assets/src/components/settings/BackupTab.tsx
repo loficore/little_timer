@@ -332,7 +332,6 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
                 className="btn btn-sm btn-ghost"
                 onClick={() => {
                   if (masterPasswordStatus.unlocked) {
-                    // Already unlocked: lock credentials directly (no password needed)
                     void (async () => {
                       try {
                         const result = await apiClient.lockCredentials();
@@ -345,7 +344,6 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
                       }
                     })();
                   } else {
-                    // Locked: open unlock modal to enter password
                     setMasterPasswordModalMode("unlock");
                     setMasterPasswordModalOpen(true);
                   }

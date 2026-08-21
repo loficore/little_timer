@@ -1,7 +1,7 @@
-// Package handlers — wallpaper image processing (UUID naming + compression).
+// Package handlers —— 壁纸图片处理（UUID 命名 + 压缩）。
 //
-// This file provides the UUID filename generator and the image decode/scale/encode
-// pipeline used by both WallpaperUpload and WallpaperFromURL.
+// 本文件提供 UUID 文件名生成器，以及 WallpaperUpload 与 WallpaperFromURL
+// 共用的 image decode/scale/encode 流水线。
 package handlers
 
 import (
@@ -21,16 +21,15 @@ import (
 )
 
 var (
-	// ErrWallpaperDimensionsTooLarge is returned when either dimension exceeds 12000px.
+	// 任一维度超过 12000px 时返回 ErrWallpaperDimensionsTooLarge。
 	ErrWallpaperDimensionsTooLarge = errors.New("wallpaper dimensions exceed 12000px")
-	// ErrWallpaperDecodeFailed is returned when the image cannot be decoded.
+	// 图片无法解码时返回 ErrWallpaperDecodeFailed。
 	ErrWallpaperDecodeFailed = errors.New("failed to decode wallpaper image")
-	// ErrWallpaperUnsupportedFormat is returned for unrecognised image formats.
+	// 无法识别的图片格式返回 ErrWallpaperUnsupportedFormat。
 	ErrWallpaperUnsupportedFormat = errors.New("unsupported wallpaper format")
 )
 
-// newUUIDHex returns a 32-character lowercase hex string from crypto/rand.
-// No third-party UUID library is used.
+// newUUIDHex 用 crypto/rand 返回 32 位小写 hex 字符串。不使用第三方 UUID 库。
 func newUUIDHex() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -39,14 +38,13 @@ func newUUIDHex() string {
 	return hex.EncodeToString(b)
 }
 
-// processWallpaperImage reads raw image bytes, optionally decodes and scales
-// them, then re-encodes to the output format.  Returns the encoded bytes, the
-// output file extension, and any error.
+// processWallpaperImage 读取原始图片字节，按需解码并缩放，再重新编码为
+// 输出格式。返回编码后的字节、输出文件扩展名以及错误。
 //
-// Behaviour by input extension:
+// 按输入扩展名的行为：
 //
-//	.jpg / .jpeg / .png / .webp → decode, scale if long edge >2560, re-encode
-//	.gif / .svg / .bmp            → passthrough (return original bytes unchanged)
+//	.jpg / .jpeg / .png / .webp → 解码，长边 >2560 则缩放，再编码
+//	.gif / .svg / .bmp            → 直通（原样返回原始字节）
 func processWallpaperImage(src io.Reader, ext string) ([]byte, string, error) {
 	data, err := io.ReadAll(src)
 	if err != nil {
@@ -68,10 +66,10 @@ func processWallpaperImage(src io.Reader, ext string) ([]byte, string, error) {
 	}
 }
 
-// processDecodeEncode handles the decode → scale → encode pipeline for
-// formats that need re-compression.
+// processDecodeEncode 负责需要重新压缩的格式的
+// decode → scale → encode 流水线。
 func processDecodeEncode(data []byte, ext string) ([]byte, string, error) {
-	// 1. DecodeConfig — check dimensions before decoding the full image.
+	// 1. DecodeConfig —— 先查尺寸，再决定是否解码整图。
 	cfg, err := decodeConfig(bytes.NewReader(data), ext)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %v", ErrWallpaperDecodeFailed, err)
@@ -80,13 +78,13 @@ func processDecodeEncode(data []byte, ext string) ([]byte, string, error) {
 		return nil, "", ErrWallpaperDimensionsTooLarge
 	}
 
-	// 2. Decode the full image.
+	// 2. 解码整图。
 	img, err := decodeFull(bytes.NewReader(data), ext)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %v", ErrWallpaperDecodeFailed, err)
 	}
 
-	// 3. Scale down if the long edge exceeds 2560px (preserving aspect ratio).
+	// 3. 长边超过 2560px 则缩小（保持宽高比）。
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
 	longEdge := w
@@ -108,18 +106,18 @@ func processDecodeEncode(data []byte, ext string) ([]byte, string, error) {
 		img = scaled
 	}
 
-	// 4. Encode to the appropriate output format.
+	// 4. 编码为对应的输出格式。
 	var buf bytes.Buffer
 	var outExt string
 	switch ext {
 	case ".jpg", ".jpeg", ".webp":
-		// JPEG output for all three — webp source is transcoded.
+		// 三者都输出 JPEG —— webp 源会被转码。
 		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
 			return nil, "", fmt.Errorf("encoding jpeg: %w", err)
 		}
 		outExt = ".jpg"
 	case ".png":
-		// PNG output preserves alpha.
+		// PNG 输出保留 alpha 通道。
 		if err := png.Encode(&buf, img); err != nil {
 			return nil, "", fmt.Errorf("encoding png: %w", err)
 		}
@@ -131,8 +129,8 @@ func processDecodeEncode(data []byte, ext string) ([]byte, string, error) {
 	return buf.Bytes(), outExt, nil
 }
 
-// decodeConfig reads image dimensions.  Uses the webp package directly for
-// .webp since it is not registered with the standard image package.
+// decodeConfig 读取图片尺寸。.webp 直接用 webp 包，因为它没有注册进
+// 标准 image 包。
 func decodeConfig(r io.Reader, ext string) (image.Config, error) {
 	switch ext {
 	case ".webp":
@@ -143,7 +141,7 @@ func decodeConfig(r io.Reader, ext string) (image.Config, error) {
 	}
 }
 
-// decodeFull decodes the full image.  Uses the webp package directly for .webp.
+// decodeFull 解码整图。.webp 直接用 webp 包。
 func decodeFull(r io.Reader, ext string) (image.Image, error) {
 	switch ext {
 	case ".webp":

@@ -19,19 +19,18 @@ done
 
 echo "=== Building Android APK ==="
 
-# Step 1: Generate Wails bindings
 if [ "$PACKAGE_ONLY" = "false" ]; then
     echo "--- Generate bindings ---"
     bash "$SCRIPT_DIR/generate-bindings.sh" --android
 
-    # Step 2: Frontend build (Vite will inline bindings into dist/index.html)
+    # Vite 会把绑定内联进 dist/index.html
     echo "--- Frontend ---"
     cd assets
     pnpm install
     pnpm run build
     cd ..
 
-    # Step 3: 同步到 Go embed 路径
+    # 同步到 Go embed 路径
     cp assets/dist/index.html neo-src/cmd/server/assets/index.html
 
     # 确保 runtime.js 注入存在 (幂等: 只加一次)
@@ -41,7 +40,7 @@ if [ "$PACKAGE_ONLY" = "false" ]; then
     fi
 fi
 
-# Step 2: Copy runtime.js to Android assets (Wails runtime needed)
+# 复制 runtime.js 到 Android assets（需要 Wails 运行时）
 mkdir -p android/app/src/main/assets/wails
 WAILS_MOD_DIR="$(cd "$PROJECT_ROOT/neo-src" && go list -m -f '{{.Dir}}' github.com/wailsapp/wails/v3)"
 if [ -z "$WAILS_MOD_DIR" ] || [ ! -f "$WAILS_MOD_DIR/internal/assetserver/bundledassets/runtime.js" ]; then
@@ -50,7 +49,7 @@ if [ -z "$WAILS_MOD_DIR" ] || [ ! -f "$WAILS_MOD_DIR/internal/assetserver/bundle
 fi
 cp "$WAILS_MOD_DIR/internal/assetserver/bundledassets/runtime.js" android/app/src/main/assets/wails/runtime.js
 
-# Step 3: Go → Android .so
+# Go → Android .so
 NDK_ROOT="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/26.3.11579264}"
 if [ ! -d "$NDK_ROOT" ]; then
     echo "Error: Android NDK not found at $NDK_ROOT"
@@ -80,7 +79,6 @@ CGO_ENABLED=1 GOOS=android GOARCH=amd64 \
     go build -buildmode=c-shared -tags android,debug -buildvcs=false \
     -o ../android/app/src/main/jniLibs/x86_64/libwails.so ./cmd/server)
 
-# Step 5: Gradle assemble
 echo "--- Gradle assembleDebug ---"
 cd android
 ./gradlew assembleDebug

@@ -94,7 +94,6 @@ class AudioEngine {
       audio.pause();
       audio.currentTime = 0;
     } catch {
-      // 忽略停止过程中的浏览器限制
     }
   }
 
@@ -140,10 +139,8 @@ class AudioEngine {
       audio.loop = loop;
       audio.volume = this.preferences.sound_volume / 100;
       void audio.play().catch(() => {
-        // 浏览器限制或解码失败时静默降级
       });
     } catch {
-      // 浏览器不支持音频播放时保持静默
     }
   }
 }

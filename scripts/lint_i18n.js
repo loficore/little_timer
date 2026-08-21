@@ -13,9 +13,6 @@ import path from "node:path";
 const I18N_DIR = path.join(import.meta.dirname, "..", "assets", "i18n");
 const LANGUAGES = ["zh", "en", "jp"];
 
-/**
- * 解析 TOML 文件
- */
 function parseToml(content) {
   const lines = content.split(/\r?\n/);
   const result = {};
@@ -24,10 +21,9 @@ function parseToml(content) {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // 跳过注释和空行
     if (!trimmed || trimmed.startsWith("#")) continue;
 
-    // 处理 section header - 支持嵌套如 [errors.connection]
+    // Section 头支持嵌套，如 [errors.connection]
     if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
       const section = trimmed.slice(1, -1).trim();
       currentPath = section.split(".");
@@ -41,14 +37,12 @@ function parseToml(content) {
       continue;
     }
 
-    // 处理 key = value
     const eqIndex = trimmed.indexOf("=");
     if (eqIndex === -1) continue;
 
     const key = trimmed.slice(0, eqIndex).trim();
     let value = trimmed.slice(eqIndex + 1).trim();
 
-    // 解析值
     if (value.startsWith('"') && value.endsWith('"')) {
       value = value.slice(1, -1).replace(/\\"/g, '"');
     } else if (value === "true" || value === "false") {
@@ -58,12 +52,9 @@ function parseToml(content) {
       value = Number.isNaN(num) ? value : num;
     }
 
-    // 设置值到正确的嵌套位置
     if (currentPath.length === 0) {
-      // 全局 key
       result[key] = value;
     } else {
-      // 嵌套 key
       let node = result;
       for (let i = 0; i < currentPath.length; i++) {
         const part = currentPath[i];
@@ -79,9 +70,6 @@ function parseToml(content) {
   return result;
 }
 
-/**
- * 获取所有 key 的扁平路径
- */
 function flattenKeys(obj, prefix = []) {
   const keys = [];
 
@@ -98,9 +86,6 @@ function flattenKeys(obj, prefix = []) {
   return keys;
 }
 
-/**
- * 检查 TOML 格式
- */
 function checkTomlFormat(content, filename) {
   const errors = [];
   const lines = content.split(/\r?\n/);
@@ -110,23 +95,19 @@ function checkTomlFormat(content, filename) {
     const line = lines[i].trim();
     const lineNum = i + 1;
 
-    // 检查括号平衡
     for (const char of line) {
       if (char === "[") bracketBalance++;
       if (char === "]") bracketBalance--;
     }
 
-    // 检查无效字符
     if (line.includes("\t")) {
       errors.push(`Line ${lineNum}: 使用了 tab 缩进，建议使用空格`);
     }
 
-    // 检查行尾空格
     if (line !== line.replace(/\s+$/, "")) {
       errors.push(`Line ${lineNum}: 行尾有多余空格`);
     }
 
-    // 检查不完整的引号
     const quoteCount = (line.match(/"/g) || []).length;
     if (quoteCount % 2 !== 0 && !line.startsWith("#")) {
       errors.push(`Line ${lineNum}: 引号未配对`);
@@ -147,7 +128,6 @@ async function main() {
   const allKeys = new Set();
   const languageKeys = {};
 
-  // 加载所有语言文件
   for (const lang of LANGUAGES) {
     const filePath = path.join(I18N_DIR, `${lang}.toml`);
 
@@ -159,7 +139,6 @@ async function main() {
     const content = fs.readFileSync(filePath, "utf-8");
     files[lang] = content;
 
-    // 检查格式
     console.log(`📄 检查 ${lang}.toml 格式...`);
     const formatErrors = checkTomlFormat(content, `${lang}.toml`);
 
@@ -172,7 +151,6 @@ async function main() {
       console.log(`  ✅ 格式正确`);
     }
 
-    // 解析并收集 key
     const parsed = parseToml(content);
     const keys = flattenKeys(parsed);
     languageKeys[lang] = new Set(keys);
@@ -188,7 +166,6 @@ async function main() {
   let missingCount = 0;
   let extraCount = 0;
 
-  // 检查每种语言的 key
   for (const lang of LANGUAGES) {
     const keys = languageKeys[lang];
     const missing = [...allKeys].filter((k) => !keys.has(k));
@@ -222,7 +199,6 @@ async function main() {
     }
   }
 
-  // 总结
   console.log("\n📈 总结:");
   console.log(`  总 key 数: ${totalKeys}`);
   console.log(`  缺失 key: ${missingCount}`);

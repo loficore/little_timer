@@ -1,6 +1,6 @@
-// Package main — entry point for the little-timer HTTP server.
+// Package main — little-timer HTTP 服务器的入口。
 //
-// Replaces the W1 stub.  Wiring:
+// 取代 W1 stub。接线:
 //
 //	┌─────────┐  os.Args   ┌──────────┐  ServeOptions   ┌────────────┐
 //	│  main() │ ─────────► │ cli.Cobra│ ──────────────► │ runServer  │
@@ -11,21 +11,20 @@
 //	                                                           │
 //	                                                           ▼
 //	                                              Gin router + http.Server
-//	                                              (background goroutine)
+//	                                              （后台 goroutine）
 //
-// Platform behaviour:
+// 平台行为:
 //
-//   - Linux/macOS default: HTTP-only.  The webview window is opt-in.
-//   - Windows default:     Webview.  Pass --http-only to skip the window.
-//   - The webview package is gated behind `-tags webview`; without that
-//     tag, the Run() call returns an error and the HTTP server keeps
-//     serving on its own.  This keeps the binary buildable on machines
-//     without GTK/webkit dev packages (CI, minimal containers).
+//   - Linux/macOS 默认: 仅 HTTP。webview 窗口需显式开启。
+//   - Windows 默认:     Webview。传 --http-only 跳过窗口。
+//   - webview 包由 `-tags webview` 门控;没有该 tag 时 Run() 返回错误，
+//     HTTP 服务器独自继续服务。这保证在没有 GTK/webkit 开发包的机器
+//     （CI、精简容器）上二进制仍可构建。
 //
-// Signals:
+// 信号:
 //
-//   - SIGINT / SIGTERM: graceful shutdown (5s deadline for HTTP server)
-//   - webview window close: treated like a shutdown signal in webview mode
+//   - SIGINT / SIGTERM: 优雅关闭（HTTP 服务器有 5s 截止时间）
+//   - webview 窗口关闭: 在 webview 模式下等同关闭信号
 package main
 
 import (
@@ -47,9 +46,7 @@ import (
 	"little-timer/internal/webview"
 )
 
-// shutdownTimeout is the grace period for the HTTP server to drain
-// in-flight requests before being forced shut.  Mirrors the Zig
-// source's 5-second stop window.
+// shutdownTimeout 是 HTTP 服务器排空在途请求的宽限期，超时后强制关闭。
 const shutdownTimeout = 5 * time.Second
 
 func main() {
@@ -60,24 +57,18 @@ func main() {
 	}
 }
 
-// runServer is the serve callback handed to the CLI.  It wires up the
-// App bundle, starts the HTTP server, optionally blocks in the
-// webview window, then performs a graceful shutdown.
+// runServer 是交给 CLI 的 serve 回调。它组装 App 束、启动 HTTP 服务器、
+// 可选地在 webview 窗口中阻塞，然后执行优雅关闭。
 //
-// Returns an error instead of os.Exit so Cobra's Execute() can format
-// and report it (matches the layered-error convention used elsewhere
-// in the CLI / settings packages).
+// 返回 error 而非调用 os.Exit，让 Cobra 的 Execute() 能格式化并上报错误
+// （与 CLI / settings 包其余部分使用的分层错误约定一致）。
 func runServer(opts *cli.ServeOptions) error {
-	// 1. Bootstrap the App: SQLite → Settings → Clock → Backup → App.
 	app, cleanup, err := bootstrapApp(opts.DBPath)
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
 	defer cleanup()
 
-	// 2. Start the HTTP server in a background goroutine.  ListenAndServe
-	//    blocks, so we run it concurrently and surface fatal errors via
-	//    the serverErr channel.
 	router := httpx.NewRouter(app, opts.CORSOrigin)
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", opts.Port),
@@ -93,11 +84,8 @@ func runServer(opts *cli.ServeOptions) error {
 		}
 	}()
 
-	// 3. Wait for shutdown.  In http-only mode we block on signals.  In
-	//    webview mode we block on signals OR window-close.  The webview
-	//    call runs in its own goroutine because Run() doesn't take a
-	//    "block but return on signal" parameter — we want to react to
-	//    SIGTERM even when the user hasn't closed the window.
+	// webview 调用在自己的 goroutine 里运行，因为 Run() 没有
+	// "阻塞但收到信号即返回"的参数——即使用户还没关窗，我们也要能响应 SIGTERM。
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
@@ -113,7 +101,6 @@ func runServer(opts *cli.ServeOptions) error {
 		fmt.Fprintln(os.Stdout, "http-only mode: send SIGTERM (Ctrl+C) to quit")
 	}
 
-	// 4. Block until one of: signal, server error, webview exit.
 	var (
 		sig           os.Signal
 		srvErr        error
@@ -133,32 +120,21 @@ func runServer(opts *cli.ServeOptions) error {
 		}
 	}
 
-	// 5. If we exited via signal in webview mode, the webview goroutine
-	//    is still running.  Give it a moment to notice the server is
-	//    gone, then close the window from the main goroutine.  webview_go
-	//    shuts down cleanly when the parent process exits anyway.
-	_ = webviewClosed // silence unused warning
+	_ = webviewClosed // 消除未使用警告
 
-	// 6. Graceful HTTP shutdown.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		fmt.Fprintf(os.Stderr, "HTTP shutdown error: %v\n", err)
 	}
-
-	// If we got a server error during shutdown, prefer that as the
-	// return value so the caller (Cobra) prints the right message.
 	if srvErr != nil {
 		return srvErr
 	}
 	return winErr
 }
 
-// bootstrapApp wires up the SQLite → Settings → Clock → Backup → App
-// chain.  Returns the App plus a cleanup func that closes the DB and
-// deinitialises the clock manager.  Mirrors the Zig
-// `MainApplication.init(allocator)` flow but doesn't allocate a
-// general-purpose allocator (Go manages memory for us).
+// bootstrapApp 接线 SQLite → Settings → Clock → Backup → App 链。
+// 返回 App 和一个 cleanup 函数，后者关闭 DB 并反初始化时钟管理器。
 func bootstrapApp(dbPath string) (*httpapp.App, func(), error) {
 	sqlite := storage.NewSqliteManager().Init(dbPath)
 	if err := sqlite.Open(); err != nil {
@@ -177,9 +153,8 @@ func bootstrapApp(dbPath string) (*httpapp.App, func(), error) {
 
 	clk := domain.NewClockManager(sm.BuildClockConfig())
 
-	// Backup is optional — rebuild from the persisted BackupConfig;
-	// RebuildBackup falls back to a local adapter, and only returns an
-	// error when that also fails (backup disabled for this process).
+	// 备份可选——从持久化的 BackupConfig 重建;RebuildBackup 会回退到
+	// local 适配器，只有回退也失败时才返回错误（本进程禁用备份）。
 	a := httpapp.NewApp(clk, sm, sqlite, nil, dbPath)
 	if err := a.RebuildBackup(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: backup disabled (%v)\n", err)

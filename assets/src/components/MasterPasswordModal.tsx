@@ -102,7 +102,7 @@ export const MasterPasswordModal: FunctionalComponent<MasterPasswordModalProps> 
         onClick={(e) => e.stopPropagation()}
       >
         <h2 style={{ margin: "0 0 8px 0", fontSize: "20px", fontWeight: 600 }}>{title}</h2>
-        <p style={{ margin: "0 0 20px 0", color: "var(--text-secondary)", fontSize: "14px" }}>{description}</p>
+        <p style={{ margin: "0 0 20px 0", color: "var(--my-on-surface-variant)", fontSize: "14px" }}>{description}</p>
 
         <div style={{ marginBottom: "16px" }}>
           <input
@@ -147,11 +147,11 @@ export const MasterPasswordModal: FunctionalComponent<MasterPasswordModalProps> 
         {error && (
           <div
             style={{
-              color: "#ef4444",
+              color: "#fca5a5",
               fontSize: "14px",
               marginBottom: "16px",
               padding: "8px 12px",
-              backgroundColor: "rgba(239,68,68,0.1)",
+              backgroundColor: "color-mix(in oklab, rgba(239,68,68,0.22) 88%, var(--my-surface))",
               borderRadius: "6px",
             }}
           >
@@ -182,7 +182,7 @@ export const MasterPasswordModal: FunctionalComponent<MasterPasswordModalProps> 
               borderRadius: "8px",
               border: "none",
               backgroundColor: "var(--accent-color, #3b82f6)",
-              color: "white",
+              color: "var(--my-on-surface)",
               cursor: loading ? "not-allowed" : "pointer",
               opacity: loading ? 0.7 : 1,
               fontSize: "14px",

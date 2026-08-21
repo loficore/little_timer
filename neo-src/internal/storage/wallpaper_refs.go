@@ -1,21 +1,19 @@
-// Package storage — wallpaper reference-counting and unbind.
+// Package storage —— 壁纸引用计数与解绑。
 //
-// CountWallpaperRefs and UnbindWallpaper operate across the three tables
-// that carry a `wallpaper` column: habits, habit_sets, and settings.
-// All queries use exact-match `wallpaper = ?` so that only gallery-managed
-// refs (prefixed `local:`) are affected; legacy Zig-era values like
-// `/wallpapers/book.jpg` are left untouched.
+// CountWallpaperRefs 与 UnbindWallpaper 横跨三张带 `wallpaper` 列的表：
+// habits、habit_sets、settings。所有查询都用精确匹配 `wallpaper = ?`，
+// 因此只影响画廊管理的引用（`local:` 前缀）；Zig 时代遗留值如
+// `/wallpapers/book.jpg` 不会被触碰。
 package storage
 
 import (
 	"fmt"
 )
 
-// CountWallpaperRefs counts how many rows across habits, habit_sets, and
-// settings reference the given localRef.  Only exact-match `wallpaper = ?`
-// is used — legacy values like `/wallpapers/book.jpg` (which lack the
-// `local:` prefix) are not counted because the caller always passes a
-// `local:`-prefixed string.
+// CountWallpaperRefs 统计 habits、habit_sets、settings 三表中引用给定
+// localRef 的行数。只使用精确匹配 `wallpaper = ?` —— 像
+// `/wallpapers/book.jpg` 这样的遗留值（没有 `local:` 前缀）不会被计入，
+// 因为调用方传入的一定是 `local:` 前缀字符串。
 func (m *SqliteManager) CountWallpaperRefs(localRef string) (int64, error) {
 	if m.db == nil {
 		return 0, ErrDatabaseNotConnected
@@ -36,11 +34,10 @@ func (m *SqliteManager) CountWallpaperRefs(localRef string) (int64, error) {
 	return refs, nil
 }
 
-// UnbindWallpaper clears the wallpaper column in all three tables (habits,
-// habit_sets, settings) for every row matching localRef.  The operation is
-// transactional: any error triggers a rollback.  Returns the total number of
-// rows affected (sum of RowsAffected from all three UPDATEs).  Repeated
-// calls are idempotent (return 0).
+// UnbindWallpaper 在三张表（habits、habit_sets、settings）中把所有匹配
+// localRef 行的 wallpaper 列清空。操作是事务性的：任何错误都触发回滚。
+// 返回受影响行数总和（三次 UPDATE 的 RowsAffected 相加）。重复调用幂等
+// （返回 0）。
 func (m *SqliteManager) UnbindWallpaper(localRef string) (int64, error) {
 	if m.db == nil {
 		return 0, ErrDatabaseNotConnected
@@ -50,11 +47,11 @@ func (m *SqliteManager) UnbindWallpaper(localRef string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("UnbindWallpaper: begin tx: %w", err)
 	}
-	defer tx.Rollback() // no-op if already committed
+	defer tx.Rollback() // 已提交时是 no-op
 
 	var total int64
 
-	// UPDATE habits
+	// UPDATE habits 表
 	res, err := tx.Exec(`UPDATE habits SET wallpaper = '' WHERE wallpaper = ?`, localRef)
 	if err != nil {
 		return 0, fmt.Errorf("UnbindWallpaper: habits: %w", err)
@@ -62,7 +59,7 @@ func (m *SqliteManager) UnbindWallpaper(localRef string) (int64, error) {
 	n, _ := res.RowsAffected()
 	total += n
 
-	// UPDATE habit_sets
+	// UPDATE habit_sets 表
 	res, err = tx.Exec(`UPDATE habit_sets SET wallpaper = '' WHERE wallpaper = ?`, localRef)
 	if err != nil {
 		return 0, fmt.Errorf("UnbindWallpaper: habit_sets: %w", err)
@@ -70,7 +67,7 @@ func (m *SqliteManager) UnbindWallpaper(localRef string) (int64, error) {
 	n, _ = res.RowsAffected()
 	total += n
 
-	// UPDATE settings
+	// UPDATE settings 表
 	res, err = tx.Exec(`UPDATE settings SET wallpaper = '' WHERE wallpaper = ?`, localRef)
 	if err != nil {
 		return 0, fmt.Errorf("UnbindWallpaper: settings: %w", err)

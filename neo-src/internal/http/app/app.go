@@ -1,18 +1,10 @@
-// Package app hosts the App struct — the Go analogue of the Zig
-// `MainApplication` that the std_server.zig handlers thread through
-// global state.  Each handler receives `*App` via the Gin context's
-// `MustGet("app")` slot, so handlers can reach the clock, settings,
-// SQLite manager, backup manager, and master-password state without
-// importing a global package-level variable.
+// Package app 承载 App 结构体——应用的依赖与运行时状态束。
+// 每个处理器通过 Gin 上下文的 `MustGet("app")` 槽位收到 `*App`，
+// 因此处理器无需导入包级全局变量即可访问时钟、设置、SQLite 管理器、
+// 备份管理器和主密码状态。
 //
-// Splitting `App` into its own sub-package breaks the import cycle
-// that would otherwise form (router → handlers → http).  The router
-// and the handlers both import this package.
-//
-// Memory ownership: the Zig source uses an arena allocator and mutates
-// `MainApplication` under `std.Thread.Mutex`.  In Go we use a single
-// `sync.RWMutex` to mirror the lock; the rest of the state is owned by
-// the underlying components (ClockManager, SettingsManager, etc.).
+// 将 `App` 拆到独立子包打破了本会形成的导入环
+// （router → handlers → http）。router 与 handlers 都导入本包。
 package app
 
 import (
@@ -32,17 +24,14 @@ import (
 
 // App 汇集 HTTP 处理器所需的应用依赖与运行时状态。
 //
-// One App per server process.  Constructed by the caller (currently the
-// server bootstrap in `cmd/server/main.go`) and passed to `NewRouter`.
+// 每个服务器进程对应一个 App，由调用方构造（目前是
+// `cmd/server/main.go` 中的服务器引导流程），再传给 `NewRouter`。
 //
-// `Backup` is optional — when nil, backup endpoints return 503-ish
-// responses (handlers treat nil as "backup not configured").  This keeps
-// the http layer independent of whether a backup manager was wired in.
+// `Backup` 可选——为 nil 时备份 endpoint 返回类 503 响应
+// （处理器将 nil 视为"未配置备份"）。这让 http 层不依赖备份管理器是否已接线。
 type App struct {
 	mu sync.RWMutex
 
-	// Clock + settings + DB — mirrors the Zig MainApplication fields
-	// of the same name.
 	// Clock 管理当前计时状态。
 	Clock *domain.ClockManager
 	// Settings 管理应用设置。
@@ -52,31 +41,22 @@ type App struct {
 	// Backup 管理备份操作；未配置时可为 nil。
 	Backup *backup.BackupManager
 
-	// DBPath is captured at App construction so backup handlers can
-	// hand it to the adapter if needed.  Matches the Zig
-	// `app.settings_manager.sqlite_db.?.*.db_path` chain.
-	// DBPath 是数据库文件路径，供备份处理器使用。
+	// DBPath 是数据库文件路径，构造时捕获，供备份处理器使用。
 	DBPath string
 
-	// CurrentHabitID / CurrentTimerSessionID are the in-memory mirrors
-	// of `app.current_habit_id` / `app.current_timer_session_id`.  The
-	// Zig source resets these on `resetTimerSession`; the Go port does
-	// the same.
 	// CurrentHabitID 是当前计时关联的习惯 ID。
 	CurrentHabitID *int64
 	// CurrentTimerSessionID 是当前计时会话 ID。
 	CurrentTimerSessionID *int64
 
-	// Secrets is the in-process master-password store.  Mirrors the
-	// Zig `SoftwareSecretImpl` / `SecretStorage`.  Lazily created by
-	// the helper methods so callers can omit it during construction.
+	// secrets 是进程内主密码存储，由辅助方法惰性创建，
+	// 因此调用方构造时可以省略它。
 	secrets *crypto.SecretStorage
 }
 
 // NewApp 使用给定的依赖与默认内存状态构造一个 App。
-// state.  `dbPath` is captured so handlers that need the on-disk path
-// (currently only the backup handlers that build ad-hoc adapters) can
-// read it without re-deriving it from the SQLite manager.
+// 捕获 `dbPath` 是为了让需要磁盘路径的处理器（目前只有临时构建适配器的
+// 备份处理器）能直接读取，不必从 SQLite 管理器重新推导。
 func NewApp(
 	clk *domain.ClockManager,
 	sm *settings.SettingsManager,
@@ -93,11 +73,8 @@ func NewApp(
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Convenience mutex accessors.  The Zig source takes the lock on every
-// mutating endpoint (start/pause/reset/finish); in Go we expose Lock/Unlock
-// rather than hiding them behind helper methods so handlers stay explicit.
-// -----------------------------------------------------------------------------
+// mutex 便捷访问器——以 Lock/Unlock 形式暴露而非藏进辅助方法，
+// 让处理器的加锁保持显式。
 
 // Lock 获取 App 的写锁。
 func (a *App) Lock() { a.mu.Lock() }
@@ -111,35 +88,25 @@ func (a *App) RLock() { a.mu.RLock() }
 // RUnlock 释放 App 的读锁。
 func (a *App) RUnlock() { a.mu.RUnlock() }
 
-// -----------------------------------------------------------------------------
-// Backup manager accessors.  The manager is rebuilt whenever the
-// persisted BackupConfig changes (target switch, creds rotation) —
-// there is no SetTarget mutator on BackupManager, mirroring the Zig
-// source.  Handlers and Wails services read the current manager through
-// BackupManager() (RLock snapshot) and call RebuildBackup (write lock)
-// when the config has changed.
-// -----------------------------------------------------------------------------
+// Backup 管理器访问器。持久化的 BackupConfig 一变（切换 target、轮换
+// 凭据）就重建管理器——BackupManager 上没有 SetTarget 可变方法。
+// 处理器和 Wails 服务通过 BackupManager()（RLock 快照）读取当前管理器，
+// 配置变更时调用 RebuildBackup（写锁）。
 
-// BackupManager returns the current BackupManager snapshot.  May be nil
-// when backup is not configured (handlers treat nil as "backup not
-// configured").
+// BackupManager 返回当前 BackupManager 快照。未配置备份时可能为 nil
+// （处理器将 nil 视为"未配置备份"）。
 func (a *App) BackupManager() *backup.BackupManager {
 	a.RLock()
 	defer a.RUnlock()
 	return a.Backup
 }
 
-// RebuildBackup reconstructs the BackupManager from the persisted
-// BackupConfig and swaps it in under the App write lock.  When
-// construction fails for a cloud target (webdav/s3), backup is
-// disabled for this process: the error is logged with the target
-// type, a.Backup is set to nil, and the error is returned — there is
-// NO silent fallback to local, because the UI/settings advertise a
-// cloud target and local backups would diverge from the configured
-// behavior.  For local targets only, a construction error is logged
-// and falls back to a local adapter rooted in the default backup dir;
-// only when that fallback also fails is a.Backup set to nil (backup
-// disabled for this process).
+// RebuildBackup 从持久化的 BackupConfig 重建 BackupManager，并在 App 写锁保护下
+// 换入。云端 target（webdav/s3）构建失败时，本进程禁用备份:记录带 target
+// 类型的错误日志、将 a.Backup 置 nil 并返回错误——绝不静默回退到 local，
+// 因为 UI/设置宣传的是云端 target，本地备份会偏离配置的行为。仅 local
+// target 构建失败时，记录日志并回退到以默认备份目录为根的 local 适配器;
+// 只有该回退也失败时才将 a.Backup 置 nil（本进程禁用备份）。
 func (a *App) RebuildBackup(ctx context.Context) error {
 	backupDir := defaultBackupDir(a.DBPath)
 	cfg := a.Settings.BackupConfig()
@@ -169,10 +136,8 @@ func (a *App) RebuildBackup(ctx context.Context) error {
 	return nil
 }
 
-// defaultBackupDir returns a sibling-of-DB backup directory.  Ported
-// from `cmd/server/main.go`'s original defaultBackupDir (removed in
-// T3 once App owned the rule).
-// Bare-filename DB paths (Dir == "" or ".") resolve to `./backups`.
+// defaultBackupDir 返回与 DB 同级的备份目录。裸文件名 DB 路径
+// （Dir 为 "" 或 "."）解析为 `./backups`。
 func defaultBackupDir(dbPath string) string {
 	dir := filepath.Dir(dbPath)
 	if dir == "" || dir == "." {
@@ -181,19 +146,12 @@ func defaultBackupDir(dbPath string) string {
 	return filepath.Join(dir, "backups")
 }
 
-// -----------------------------------------------------------------------------
-// Timer session helpers — mirrors `createTimerSession`, `finishTimerSession`,
-// `resetTimerSession`, `saveTimerProgress`, `loadTimerProgress`.
+// 计时器会话辅助方法。
 //
-// All four assume the caller holds the App mutex (Lock or RLock) —
-// they only mutate the in-memory pointers and the database, never the
-// lock itself.  This matches the Zig source, where the helpers run
-// under the caller's mutex with no re-acquisition.
-// -----------------------------------------------------------------------------
+// 这些辅助方法假定调用方持有 App mutex（Lock 或 RLock）——它们只变更
+// 内存指针和数据库，绝不触碰锁本身，也不重新加锁。
 
 // CreateTimerSession 插入一条 timer_sessions 行并更新内存中的当前会话指针。调用方必须持有 a.mu 写锁。
-// in-memory pointers.  Caller MUST hold a.mu (write).  Mirrors
-// `app.createTimerSession`.
 func (a *App) CreateTimerSession(habitID *int64, mode string, work, rest, loop int64) (int64, error) {
 	id, err := a.SQLite.Timers().CreateTimerSession(habitID, mode, work, rest, loop)
 	if err != nil {
@@ -207,8 +165,6 @@ func (a *App) CreateTimerSession(habitID *int64, mode string, work, rest, loop i
 }
 
 // FinishTimerSession 将当前 timer_session 标记为结束并返回已用秒数。调用方必须持有 a.mu 写锁。
-// returns the elapsed seconds.  Caller MUST hold a.mu (write).  Mirrors
-// `app.finishTimerSession`.
 func (a *App) FinishTimerSession() (int64, error) {
 	sessionID := a.CurrentTimerSessionID
 	if sessionID == nil {
@@ -225,8 +181,6 @@ func (a *App) FinishTimerSession() (int64, error) {
 }
 
 // ResetTimerSession 清除内存中的当前会话指针并删除对应的 timer_session 行。调用方必须持有 a.mu 写锁。
-// current timer_session row.  Caller MUST hold a.mu (write).  Mirrors
-// `app.resetTimerSession`.
 func (a *App) ResetTimerSession() {
 	sessionID := a.CurrentTimerSessionID
 	a.CurrentTimerSessionID = nil
@@ -239,8 +193,6 @@ func (a *App) ResetTimerSession() {
 }
 
 // LoadTimerProgress 重新读取最近未结束的 timer_session 到内存指针。调用方必须持有 a.mu 写锁。
-// into the in-memory pointers.  Caller MUST hold a.mu (write).  Mirrors
-// `app.loadTimerProgress`.
 func (a *App) LoadTimerProgress() {
 	row, err := a.SQLite.Timers().GetActiveTimerSession()
 	if err != nil {
@@ -257,8 +209,6 @@ func (a *App) LoadTimerProgress() {
 }
 
 // SaveProgressLocked 将当前时钟状态持久化到活动的 timer_session 行。调用方必须持有 a.mu 写锁。
-// timer_session row.  Caller MUST hold a.mu (write).  Mirrors
-// `app.saveTimerProgress`.
 func (a *App) SaveProgressLocked() {
 	if a.CurrentTimerSessionID == nil {
 		return
@@ -292,14 +242,10 @@ func (a *App) SaveProgressLocked() {
 	log.Info("timer.session.save_progress", "session_id", row.ID, "elapsed", state.GetElapsedSeconds())
 }
 
-// -----------------------------------------------------------------------------
-// Master-password helpers — the Zig source plumbs these through
-// `app.settings_manager.hasMasterPassword()` etc.  The Go port keeps the
-// state on the SettingsManager's BackupConfig (which already carries the
-// lockout fields) plus a SecretStorage for the unlock password itself.
+// 主密码辅助方法。状态存放在 SettingsManager 的 BackupConfig（已带锁定
+// 字段）加上用于保存解锁密码本身的 SecretStorage。
 //
-// All helpers tolerate a nil Secrets (treat as "no master password set").
-// -----------------------------------------------------------------------------
+// 所有辅助方法都容忍 Secrets 为 nil（视为"未设置主密码"）。
 
 func (a *App) ensureSecrets() *crypto.SecretStorage {
 	if a.secrets == nil {
@@ -309,8 +255,6 @@ func (a *App) ensureSecrets() *crypto.SecretStorage {
 }
 
 // HasMasterPassword 返回是否已设置主密码（基于磁盘上的凭据或 BackupConfig 标志）。
-// Returns true when a master-password blob exists on disk OR the
-// BackupConfig row already says so.
 func (a *App) HasMasterPassword() bool {
 	cfg := a.Settings.BackupConfig()
 	if cfg.HasMasterPassword {
@@ -320,8 +264,6 @@ func (a *App) HasMasterPassword() bool {
 }
 
 // IsUnlocked 返回凭据是否已解锁且锁定期已过。
-// when the secrets store holds an unlocked master password AND the
-// lockout window has elapsed.
 func (a *App) IsUnlocked() bool {
 	cfg := a.Settings.BackupConfig()
 	if !a.ensureSecrets().IsLocked() && cfg.CredentialLockedUntil <= time.Now().Unix() {
@@ -331,13 +273,12 @@ func (a *App) IsUnlocked() bool {
 }
 
 // UnlockCredentials 使用给定密码解锁凭据并返回结构化结果。
-// Returns an UnlockResult JSON-friendly struct.  Always returns
-// `Success: true` when no master password is set (matches Zig).
+// 未设置主密码时 `Success` 恒为 true。
 func (a *App) UnlockCredentials(password string) domain.UnlockResult {
 	cfg := a.Settings.BackupConfig()
 	if !a.HasMasterPassword() {
 		log.Info("UnlockCredentials: no master password")
-		// No master password: always succeed.
+		// 无主密码:总是成功。
 		cfg.CredentialLockedUntil = 0
 		cfg.CredentialsUnlockTime = time.Now().Unix()
 		_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
@@ -356,8 +297,6 @@ func (a *App) UnlockCredentials(password string) domain.UnlockResult {
 }
 
 // SetMasterPassword 设置主密码并同步更新 BackupConfig 中的标志。
-// Persists the password via SecretStorage AND updates the BackupConfig
-// flag so the on-disk row matches.
 func (a *App) SetMasterPassword(password string) error {
 	if len(password) < 4 {
 		return errPasswordTooShort
@@ -374,7 +313,6 @@ func (a *App) SetMasterPassword(password string) error {
 }
 
 // GetMasterPasswordStatus 返回主密码相关的状态信息。
-// `app.settings_manager.getMasterPasswordStatus`.
 func (a *App) GetMasterPasswordStatus() domain.MasterPasswordStatus {
 	cfg := a.Settings.BackupConfig()
 	return domain.MasterPasswordStatus{
@@ -386,7 +324,6 @@ func (a *App) GetMasterPasswordStatus() domain.MasterPasswordStatus {
 }
 
 // LockCredentials 立即锁定凭据：将锁定期设为当前时间并清空内存中的密钥缓存。
-// lockout to "now+1s" and clears the in-memory secrets cache.
 func (a *App) LockCredentials() {
 	log.Info("LockCredentials: success")
 	cfg := a.Settings.BackupConfig()
@@ -395,29 +332,20 @@ func (a *App) LockCredentials() {
 	a.ensureSecrets().Lock()
 }
 
-// -----------------------------------------------------------------------------
-// Auth helpers.
-// -----------------------------------------------------------------------------
+// 认证辅助方法。
 
 // GenerateToken 生成 32 字节随机令牌并以 base64 字符串形式返回。
-// Mirrors Zig `crypto.generateToken` (which returned a 64-char hex
-// string; base64 of 32 bytes is 44 chars — close enough for the auth
-// header format and far cheaper than hex encoding).
+// 44 字符的 base64 对 bearer token 绰绰有余，且比 hex 编码更省。
 func GenerateToken() string {
 	return base64Raw(crypto.GenerateKey())
 }
 
-// -----------------------------------------------------------------------------
-// Errors.
-// -----------------------------------------------------------------------------
+// 错误。
 
 // errPasswordTooShort 在 SetMasterPassword 接收到不足 4 个字符的密码时返回。
-// supplied password is shorter than 4 characters.  Mirrors the Zig
-// `if (password_str.len < 4)` branch in handleSetMasterPassword.
 var errPasswordTooShort = &httpError{code: "password_too_short", message: "password too short (minimum 4 characters)"}
 
 // httpError 是供内部使用的轻量错误类型，便于在 JSON 响应中生成稳定的错误字符串。
-// `error.Error()` strings in JSON responses.
 type httpError struct {
 	code, message string
 }

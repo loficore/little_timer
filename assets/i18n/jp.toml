@@ -200,7 +200,6 @@ timer = "集中"
 habits = "習慣"
 stats = "統計"
 settings = "設定"
-gallery = "壁紙ギャラリー"
 
 [gallery]
 title = "壁紙ギャラリー"

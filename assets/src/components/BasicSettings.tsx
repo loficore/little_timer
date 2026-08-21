@@ -68,7 +68,6 @@ const saveDebugMode = (enabled: boolean) => {
       localStorage.removeItem(DEBUG_STORAGE_KEY);
     }
   } catch {
-    // 忽略
   }
 };
 

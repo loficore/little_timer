@@ -1,8 +1,7 @@
 //go:build webview && !embed_ui
 
-// Default URL for the webview: point at the Vite dev server so the
-// frontend's HMR works during local development.  Matches the Zig
-// `app_url` for the non-embed build (`src/core/webview_c.zig:9-12`).
+// webview 默认 URL：指向 Vite 开发服务器，让前端 HMR
+// 在本地开发时生效。
 
 package webview
 

@@ -1,20 +1,15 @@
-// Package app — Wails v3 service bindings.
+// Package app —— Wails v3 service 绑定。
 //
-// This file hosts the four services that the Wails v3 Android
-// frontend calls directly. Wails v3 binds exported methods via
-// reflection — no annotations are required — so the method names
-// and signatures here must match the WailsBindings generated in
+// 本文件承载 Wails v3 Android 前端直接调用的四个 service。Wails v3 通过
+// 反射绑定导出方法 —— 不需要注解 —— 所以这里的方法名和签名必须与
 // `cmd/server/assets/bindings/little-timer/internal/app/wailsbindings.ts`
-// (which is driven by `assets/src/utils/wailsApiClient.ts`).
+// 中生成的 WailsBindings 匹配（由 `assets/src/utils/wailsApiClient.ts` 驱动）。
 //
-// Each service is a thin wrapper around the existing *App helpers
-// plus a small amount of HTTP-handler-equivalent logic for the
-// endpoints that don't have direct *App methods yet. No new
-// business logic lives here.
+// 每个 service 都是现有 *App 辅助函数的薄包装，外加少量与 HTTP handler
+// 等价的逻辑，用于还没有直接 *App 方法的 endpoint。这里不放新业务逻辑。
 //
-// ponytail: no //wails: annotations, no factories, no interfaces —
-// every service holds *App and forwards. The Wails reflection layer
-// only needs the exported methods to exist on a public type.
+// 设计：没有 //wails: 注解、没有工厂、没有 interface —— 每个 service 持有
+// *App 并转发。Wails 反射层只需要公开类型上存在导出方法即可。
 package app
 
 import (
@@ -26,8 +21,7 @@ import (
 	"little-timer/internal/storage"
 )
 
-// modeKey mirrors `modeKey` in handlers/timer.go — renders the active
-// clock mode as the stable string the JS client expects.
+// modeKey 把当前 clock 模式渲染成 JS 客户端期望的稳定字符串。
 func modeKey(m domain.ModeEnum) string {
 	if m == domain.CountdownMode {
 		return "countdown"
@@ -35,20 +29,17 @@ func modeKey(m domain.ModeEnum) string {
 	return "stopwatch"
 }
 
-// -----------------------------------------------------------------------------
-// TimerService — mirrors the timer endpoints of std_server.zig.
-// -----------------------------------------------------------------------------
+// TimerService
 
-// TimerService exposes the timer state + control methods to the
-// Wails v3 frontend. All exported methods are reflection-bound.
+// TimerService 向 Wails v3 前端暴露 timer 状态 + 控制方法。所有导出方法
+// 都经反射绑定。
 type TimerService struct {
 	app *App
 }
 
-// NewTimerService builds a TimerService bound to the supplied App.
+// NewTimerService 构造绑定到给定 App 的 TimerService。
 func NewTimerService(app *App) *TimerService { return &TimerService{app: app} }
 
-// GetState mirrors handleGetState — returns the live clock state.
 func (s *TimerService) GetState() (any, error) {
 	log.Debug("timer.get_state", "method", "TimerService.GetState")
 	a := s.app
@@ -74,8 +65,7 @@ func (s *TimerService) GetState() (any, error) {
 	}, nil
 }
 
-// StartTimer mirrors handleStart. All parameters are optional — the
-// handler-equivalent defaults apply (stopwatch, 25 min work).
+// StartTimer 的参数可选；零值回退到默认（stopwatch、25 分钟工作）。
 func (s *TimerService) StartTimer(habitID *int64, mode string, workDuration int64, restDuration int64, loopCount int64) (any, error) {
 	log.Debug("timer.start", "method", "TimerService.StartTimer", "habit_id", habitID, "mode", mode)
 	a := s.app
@@ -92,8 +82,7 @@ func (s *TimerService) StartTimer(habitID *int64, mode string, workDuration int6
 	a.Lock()
 	defer a.Unlock()
 
-	// Already-running branch — Zig keeps the same session and reports
-	// the current habit id.
+	// 已在运行的分支：保持同一 session，报告当前 habit id。
 	if a.CurrentTimerSessionID != nil {
 		row, err := a.SQLite.Timers().GetTimerSessionByID(*a.CurrentTimerSessionID)
 		if err == nil {
@@ -109,7 +98,7 @@ func (s *TimerService) StartTimer(habitID *int64, mode string, workDuration int6
 					"session_id": *a.CurrentTimerSessionID,
 				}, nil
 			}
-			// Paused branch — resume.
+			// 暂停分支 —— 恢复。
 			cs := a.Clock.Update()
 			if (cs.IsPaused() && !cs.IsFinished()) || row.IsPaused {
 				pausedTotal := row.PausedTotalSeconds
@@ -136,7 +125,7 @@ func (s *TimerService) StartTimer(habitID *int64, mode string, workDuration int6
 				}, nil
 			}
 		}
-		// Stale session — clean up.
+		// 过期 session —— 清理。
 		a.ResetTimerSession()
 	}
 
@@ -155,8 +144,7 @@ func (s *TimerService) StartTimer(habitID *int64, mode string, workDuration int6
 	}, nil
 }
 
-// FinishTimer mirrors handleFinish — freezes the clock and emits a
-// daily session row tied to the current habit.
+// FinishTimer 冻结 clock，并为当前 habit 写入一条每日 session 行。
 func (s *TimerService) FinishTimer() (any, error) {
 	log.Debug("timer.finish", "method", "TimerService.FinishTimer")
 	a := s.app
@@ -169,9 +157,8 @@ func (s *TimerService) FinishTimer() (any, error) {
 	elapsed, err := a.FinishTimerSession()
 	if err != nil {
 		log.Error("timer.finish failed", "method", "TimerService.FinishTimer", "error", err.Error())
-		// Fallback path — same shape as Zig: emit user_finish_timer,
-		// compute elapsed from the clock state, and persist a daily
-		// session if there was an active habit.
+		// 回退路径：发 user_finish_timer，从 clock 状态算 elapsed，
+		// 若之前有 habit 则持久化一条每日 session。
 		a.Clock.HandleEvent(domain.UserFinishTimerEvent{})
 		state := a.Clock.Update()
 		elapsedSeconds := state.GetElapsedSeconds()
@@ -198,9 +185,8 @@ func (s *TimerService) FinishTimer() (any, error) {
 	}, nil
 }
 
-// GetProgress mirrors handleGetProgress — returns the live progress
-// + mode + paused/finished flags.  Lazily loads progress if no
-// current session is active.
+// GetProgress 返回实时进度、模式与 paused/finished 标志；无活动 session
+// 时惰性加载持久化 session。
 func (s *TimerService) GetProgress() (any, error) {
 	log.Debug("timer.get_progress", "method", "TimerService.GetProgress")
 	a := s.app
@@ -231,8 +217,7 @@ func (s *TimerService) GetProgress() (any, error) {
 	}, nil
 }
 
-// StartRest mirrors handleStartRest — switches the clock into a
-// 5-minute countdown and starts it.
+// StartRest 把 clock 切到 5 分钟倒计时并启动。
 func (s *TimerService) StartRest() (any, error) {
 	log.Debug("timer.start_rest", "method", "TimerService.StartRest")
 	a := s.app
@@ -259,7 +244,6 @@ func (s *TimerService) StartRest() (any, error) {
 	}, nil
 }
 
-// PauseTimer mirrors handlePause.
 func (s *TimerService) PauseTimer() (any, error) {
 	log.Debug("timer.pause", "method", "TimerService.PauseTimer")
 	a := s.app
@@ -271,7 +255,6 @@ func (s *TimerService) PauseTimer() (any, error) {
 	return map[string]any{"status": "paused"}, nil
 }
 
-// ResetTimer mirrors handleReset.
 func (s *TimerService) ResetTimer() (any, error) {
 	log.Debug("timer.reset", "method", "TimerService.ResetTimer")
 	a := s.app
@@ -283,11 +266,9 @@ func (s *TimerService) ResetTimer() (any, error) {
 	return map[string]any{"status": "reset"}, nil
 }
 
-// -----------------------------------------------------------------------------
-// HabitService — mirrors the habit / habit-set / session endpoints.
-// -----------------------------------------------------------------------------
+// HabitService
 
-// truncStr returns s truncated to 64 chars to avoid log spam.
+// truncStr 把 s 截断到 64 字符，避免刷屏日志。
 func truncStr(s string) string {
 	if len(s) > 64 {
 		return s[:64]
@@ -295,16 +276,14 @@ func truncStr(s string) string {
 	return s
 }
 
-// HabitService exposes habit CRUD + session queries to the Wails v3
-// frontend.
+// HabitService 向 Wails v3 前端暴露 habit CRUD + session 查询。
 type HabitService struct {
 	app *App
 }
 
-// NewHabitService builds a HabitService bound to the supplied App.
+// NewHabitService 构造绑定到给定 App 的 HabitService。
 func NewHabitService(app *App) *HabitService { return &HabitService{app: app} }
 
-// ListHabitSets mirrors handleHabitSetList.
 func (s *HabitService) ListHabitSets() (any, error) {
 	log.Debug("habit.list_sets", "method", "HabitService.ListHabitSets")
 	rows, err := s.app.SQLite.HabitSets().List(100, 0)
@@ -315,7 +294,6 @@ func (s *HabitService) ListHabitSets() (any, error) {
 	return rows, nil
 }
 
-// CreateHabitSet mirrors handleHabitSetCreate.
 func (s *HabitService) CreateHabitSet(name string, description string, color string) (any, error) {
 	log.Debug("habit.create_set", "method", "HabitService.CreateHabitSet", "name", truncStr(name), "color", color)
 	if name == "" {
@@ -338,7 +316,6 @@ func (s *HabitService) CreateHabitSet(name string, description string, color str
 	}, nil
 }
 
-// UpdateHabitSet mirrors handleHabitSetUpdate.
 func (s *HabitService) UpdateHabitSet(id int64, name string, description string, color string, wallpaper string) (any, error) {
 	log.Debug("habit.update_set", "method", "HabitService.UpdateHabitSet", "id", id, "name", truncStr(name), "color", color)
 	if name == "" {
@@ -361,7 +338,6 @@ func (s *HabitService) UpdateHabitSet(id int64, name string, description string,
 	}, nil
 }
 
-// DeleteHabitSet mirrors handleHabitSetDelete.
 func (s *HabitService) DeleteHabitSet(id int64) (any, error) {
 	log.Debug("habit.delete_set", "method", "HabitService.DeleteHabitSet", "id", id)
 	if err := s.app.SQLite.HabitSets().Delete(id); err != nil {
@@ -372,8 +348,7 @@ func (s *HabitService) DeleteHabitSet(id int64) (any, error) {
 	return map[string]any{"success": true}, nil
 }
 
-// ListHabits mirrors handleHabitList.  When setID is nil, returns
-// every habit; otherwise scopes to the requested set.
+// ListHabits 在 setID 为 nil 时返回所有 habit，否则限定在请求的 set 内。
 func (s *HabitService) ListHabits(setID *int64) (any, error) {
 	log.Debug("habit.list", "method", "HabitService.ListHabits", "set_id", setID)
 	var (
@@ -393,7 +368,6 @@ func (s *HabitService) ListHabits(setID *int64) (any, error) {
 	return rows, nil
 }
 
-// CreateHabit mirrors handleHabitCreate.
 func (s *HabitService) CreateHabit(setID int64, name string, goalSeconds int64, color string) (any, error) {
 	log.Debug("habit.create", "method", "HabitService.CreateHabit", "set_id", setID, "name", truncStr(name), "goal_seconds", goalSeconds)
 	if name == "" {
@@ -420,7 +394,6 @@ func (s *HabitService) CreateHabit(setID int64, name string, goalSeconds int64, 
 	}, nil
 }
 
-// UpdateHabit mirrors handleHabitUpdate.
 func (s *HabitService) UpdateHabit(id int64, name string, goalSeconds int64, color string, wallpaper string) (any, error) {
 	log.Debug("habit.update", "method", "HabitService.UpdateHabit", "id", id, "name", truncStr(name), "goal_seconds", goalSeconds, "color", color)
 	if name == "" {
@@ -446,7 +419,6 @@ func (s *HabitService) UpdateHabit(id int64, name string, goalSeconds int64, col
 	}, nil
 }
 
-// DeleteHabit mirrors handleHabitDelete.
 func (s *HabitService) DeleteHabit(id int64) (any, error) {
 	log.Debug("habit.delete", "method", "HabitService.DeleteHabit", "id", id)
 	if err := s.app.SQLite.Habits().Delete(id); err != nil {
@@ -457,8 +429,7 @@ func (s *HabitService) DeleteHabit(id int64) (any, error) {
 	return map[string]any{"success": true}, nil
 }
 
-// CreateSession mirrors handleSessionCreate.  Empty `date` defaults
-// to today.
+// CreateSession 把空 `date` 视为今天。
 func (s *HabitService) CreateSession(habitID int64, durationSeconds int64, count int64, date string) (any, error) {
 	log.Debug("habit.create_session", "method", "HabitService.CreateSession", "habit_id", habitID, "duration_seconds", durationSeconds, "count", count)
 	if date == "" {
@@ -481,9 +452,7 @@ func (s *HabitService) CreateSession(habitID int64, durationSeconds int64, count
 	}, nil
 }
 
-// ListSessions mirrors handleSessionList.  Three query shapes are
-// supported (matching the Zig source): a single date, a date range,
-// or no filter (= today).
+// ListSessions 支持三种查询形态：单日、日期区间、或不带过滤（= 今天）。
 func (s *HabitService) ListSessions(date string, startDate string, endDate string) (any, error) {
 	log.Debug("habit.list_sessions", "method", "HabitService.ListSessions", "date", date, "start_date", startDate, "end_date", endDate)
 	var (
@@ -506,8 +475,7 @@ func (s *HabitService) ListSessions(date string, startDate string, endDate strin
 	return rows, nil
 }
 
-// GetHabitDetail mirrors handleHabitDetail — single habit with
-// today's accumulated seconds + progress percent.
+// GetHabitDetail 返回单个 habit，附累计秒数（默认今天）与进度百分比。
 func (s *HabitService) GetHabitDetail(id int64, date string) (any, error) {
 	log.Debug("habit.detail", "method", "HabitService.GetHabitDetail", "id", id, "date", date)
 	a := s.app
@@ -534,27 +502,21 @@ func (s *HabitService) GetHabitDetail(id int64, date string) (any, error) {
 	}, nil
 }
 
-// -----------------------------------------------------------------------------
-// SettingsService — mirrors the /api/settings endpoints.
-// -----------------------------------------------------------------------------
+// SettingsService
 
-// SettingsService exposes the settings config to the Wails v3
-// frontend.
+// SettingsService 向 Wails v3 前端暴露 settings 配置。
 type SettingsService struct {
 	app *App
 }
 
-// NewSettingsService builds a SettingsService bound to the supplied App.
+// NewSettingsService 构造绑定到给定 App 的 SettingsService。
 func NewSettingsService(app *App) *SettingsService { return &SettingsService{app: app} }
 
-// GetSettings mirrors handleSettingsGet.
 func (s *SettingsService) GetSettings() (any, error) {
 	log.Debug("settings.get", "method", "SettingsService.GetSettings")
 	return s.app.Settings.Config(), nil
 }
 
-// UpdateSettings mirrors handleSettingsUpdate — applies a partial
-// SettingsConfig via SettingsManager.HandleSettingsEvent.
 func (s *SettingsService) UpdateSettings(json string) (any, error) {
 	log.Debug("settings.update", "method", "SettingsService.UpdateSettings")
 	if err := s.app.Settings.HandleSettingsEvent(domain.SettingsChangeEvent{JSON: json}); err != nil {
@@ -565,21 +527,17 @@ func (s *SettingsService) UpdateSettings(json string) (any, error) {
 	return map[string]any{"status": "settings_updated"}, nil
 }
 
-// -----------------------------------------------------------------------------
-// BackupService — mirrors the /api/backup/* + master-password endpoints.
-// -----------------------------------------------------------------------------
+// BackupService
 
-// BackupService exposes the backup config + master-password
-// lifecycle to the Wails v3 frontend.
+// BackupService 向 Wails v3 前端暴露 backup 配置 + 主口令生命周期。
 type BackupService struct {
 	app *App
 }
 
-// NewBackupService builds a BackupService bound to the supplied App.
+// NewBackupService 构造绑定到给定 App 的 BackupService。
 func NewBackupService(app *App) *BackupService { return &BackupService{app: app} }
 
-// GetBackupConfig mirrors handleBackupConfigGet — returns the
-// persisted BackupConfig with secrets masked.
+// GetBackupConfig 返回持久化的 BackupConfig，secret 已打码。
 func (s *BackupService) GetBackupConfig() (any, error) {
 	cfg := s.app.Settings.BackupConfig()
 	log.Debug("backup.get_config", "method", "BackupService.GetBackupConfig", "target_type", cfg.TargetType.String())
@@ -601,8 +559,6 @@ func (s *BackupService) GetBackupConfig() (any, error) {
 	}, nil
 }
 
-// UpdateBackupConfig mirrors handleBackupConfigUpdate — applies a
-// JSON BackupConfig update via SettingsManager.UpdateBackupConfigFromJSON.
 func (s *BackupService) UpdateBackupConfig(json string) (any, error) {
 	cfg := s.app.Settings.BackupConfig()
 	log.Debug("backup.update_config", "method", "BackupService.UpdateBackupConfig", "target_type", cfg.TargetType.String())
@@ -610,9 +566,8 @@ func (s *BackupService) UpdateBackupConfig(json string) (any, error) {
 		log.Error("backup.update_config failed", "method", "BackupService.UpdateBackupConfig", "error", err.Error())
 		return map[string]any{"success": false, "error": err.Error()}, nil
 	}
-	// Config is persisted; rebuild the manager from it.  A rebuild
-	// failure must not fail the call — the config is saved, the
-	// manager will be rebuilt on the next config change or boot.
+	// 配置已持久化；据此重建 manager。重建失败绝不能让调用失败 ——
+	// 配置已存下，manager 会在下次配置变更或启动时重建。
 	if err := s.app.RebuildBackup(context.Background()); err != nil {
 		log.Error("UpdateBackupConfig: rebuild failed", "error", err.Error())
 	}
@@ -620,7 +575,6 @@ func (s *BackupService) UpdateBackupConfig(json string) (any, error) {
 	return map[string]any{"success": true}, nil
 }
 
-// CreateBackup mirrors handleBackupCreate.
 func (s *BackupService) CreateBackup() (any, error) {
 	a := s.app
 	cfg := a.Settings.BackupConfig()
@@ -641,7 +595,6 @@ func (s *BackupService) CreateBackup() (any, error) {
 	return map[string]any{"success": true, "backup_path": name}, nil
 }
 
-// RestoreBackup mirrors handleBackupRestore.
 func (s *BackupService) RestoreBackup(name string) (any, error) {
 	a := s.app
 	cfg := a.Settings.BackupConfig()
@@ -658,9 +611,6 @@ func (s *BackupService) RestoreBackup(name string) (any, error) {
 	return map[string]any{"success": true}, nil
 }
 
-// DeleteBackup mirrors handleBackupDeleteByName — DELETE on the
-// `/api/backup/:name` route (the simpler form, not the `/delete/`
-// prefix).
 func (s *BackupService) DeleteBackup(name string) (any, error) {
 	a := s.app
 	cfg := a.Settings.BackupConfig()
@@ -677,8 +627,6 @@ func (s *BackupService) DeleteBackup(name string) (any, error) {
 	return map[string]any{"success": true}, nil
 }
 
-// VerifyBackup mirrors handleBackupVerify — exercises the
-// configured adapter's connection.
 func (s *BackupService) VerifyBackup() (any, error) {
 	a := s.app
 	cfg := a.Settings.BackupConfig()
@@ -698,7 +646,6 @@ func (s *BackupService) VerifyBackup() (any, error) {
 	return map[string]any{"success": true}, nil
 }
 
-// ListBackups mirrors handleBackupList.
 func (s *BackupService) ListBackups() (any, error) {
 	a := s.app
 	cfg := a.Settings.BackupConfig()
@@ -716,15 +663,12 @@ func (s *BackupService) ListBackups() (any, error) {
 	return map[string]any{"success": true, "backups": items}, nil
 }
 
-// GetMasterPasswordStatus mirrors handleMasterPasswordGet.
 func (s *BackupService) GetMasterPasswordStatus() (any, error) {
 	status := s.app.GetMasterPasswordStatus()
 	log.Debug("backup.master_status", "method", "BackupService.GetMasterPasswordStatus", "has_cred", status.HasPassword)
 	return status, nil
 }
 
-// SetMasterPassword mirrors handleMasterPasswordSet — enforces the
-// 4-character minimum that matches the Zig validator.
 func (s *BackupService) SetMasterPassword(password string) (any, error) {
 	log.Debug("backup.set_master", "method", "BackupService.SetMasterPassword", "has_cred", password != "")
 	if password == "" {
@@ -741,7 +685,6 @@ func (s *BackupService) SetMasterPassword(password string) (any, error) {
 	return map[string]any{"success": true}, nil
 }
 
-// UnlockCredentials mirrors handleBackupUnlock.
 func (s *BackupService) UnlockCredentials(password string) (any, error) {
 	log.Debug("backup.unlock", "method", "BackupService.UnlockCredentials")
 	res := s.app.UnlockCredentials(password)
@@ -752,7 +695,6 @@ func (s *BackupService) UnlockCredentials(password string) (any, error) {
 	}, nil
 }
 
-// LockCredentials mirrors handleBackupLock.
 func (s *BackupService) LockCredentials() (any, error) {
 	log.Debug("backup.lock", "method", "BackupService.LockCredentials")
 	s.app.LockCredentials()
@@ -760,12 +702,9 @@ func (s *BackupService) LockCredentials() (any, error) {
 	return map[string]any{"success": true}, nil
 }
 
-// -----------------------------------------------------------------------------
-// Shared helpers — duplicated from handlers/ to keep this file self-contained.
-// -----------------------------------------------------------------------------
+// 共享辅助函数 —— 从 handlers/ 复制而来，保持本文件自包含。
 
-// maskSecret returns "******" for non-empty secrets, "" otherwise.
-// Mirrors `mask` in handlers/backup.go.
+// maskSecret 对非空 secret 返回 "******"，否则返回 ""。
 func maskSecret(s string) string {
 	if s == "" {
 		return ""
@@ -773,14 +712,12 @@ func maskSecret(s string) string {
 	return "******"
 }
 
-// errEmptyName is returned by CreateHabitSet / CreateHabit / Update*
-// when the caller omits the name field.  Mirrors the same validator
-// in handlers/habits.go.
+// errEmptyName 由 CreateHabitSet / CreateHabit / Update* 在调用方漏传
+// name 字段时返回。
 var errEmptyName = &wailsError{code: "missing_name", message: "missing name"}
 
-// wailsError is the tiny error type used by the Wails service layer.
-// Kept distinct from httpError (in app.go) so the two layers stay
-// decoupled.
+// wailsError 是 Wails service 层使用的小型错误类型。与 httpError
+// （app.go 中）保持独立，让两层解耦。
 type wailsError struct {
 	code, message string
 }

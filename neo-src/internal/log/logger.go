@@ -107,17 +107,17 @@ func openLogDir(dir string) (*os.File, error) {
 		}
 	}
 
-	// Preferred: base file under size cap.
+	// 首选：未超出大小上限的基础文件。
 	if baseExists && baseInfo.Size() <= maxSize {
 		return os.OpenFile(filepath.Join(dir, prefix+".log"), os.O_WRONLY|os.O_APPEND, 0644)
 	}
 
-	// Fallback: highest suffix file under size cap.
+	// 回退：未超出大小上限的最大后缀文件。
 	if bestSuffixExists {
 		return os.OpenFile(filepath.Join(dir, prefix+"."+strconv.Itoa(bestSuffix)+".log"), os.O_WRONLY|os.O_APPEND, 0644)
 	}
 
-	// Create new file.
+	// 新建文件。
 	var filename string
 	if !baseExists && highestSuffix == 0 {
 		filename = prefix + ".log"

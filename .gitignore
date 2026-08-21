@@ -49,6 +49,7 @@ core.*
 *.bak
 *.backup
 *.tmp
+.jj*.json
 
 # === Logs ===
 logs/
@@ -90,3 +91,5 @@ assets/test-results/
 example/
 
 .tool-versions
+
+scripts/private/*

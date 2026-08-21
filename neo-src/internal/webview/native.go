@@ -1,8 +1,8 @@
 //go:build webview
 
-// Native webview implementation — compiled only when `-tags webview`
-// is passed.  Without the tag, `stub.go` provides the same `run()`
-// function with a friendly error so the binary still boots.
+// 原生 webview 实现 —— 仅在传入 `-tags webview` 时参与编译。
+// 没有该 tag 时，`stub.go` 提供同名 `run()` 函数并返回友好错误，
+// 保证二进制仍能启动。
 
 package webview
 

@@ -2,9 +2,8 @@ package app
 
 import "encoding/base64"
 
-// base64Raw returns the URL-safe base64 encoding of b without padding.
-// Used by GenerateToken to keep the auth token short enough for header
-// use.
+// base64Raw 返回 b 的 URL-safe base64 编码（无 padding）。GenerateToken
+// 用它把 auth token 控制在够短、能放进 header。
 func base64Raw(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }

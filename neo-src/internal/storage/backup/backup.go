@@ -1,16 +1,12 @@
-// Package backup — BackupManager coordinating adapters.
+// Package backup —— 协调各 adapter 的 BackupManager。
 //
-// Port of `src/storage/storage_backup.zig` (little_timer).  The Zig
-// source owns its own zqlite connection and uses it to flush the WAL
-// before copying the file.  In Go we delegate the "close / reopen"
-// dance to the *storage.SqliteManager so the SQLite file is in a
-// quiescent state when the adapter reads it — SQLite is single-writer
-// and concurrent read+copy while writes are in flight is unsafe.
+// manager 把“关闭 / 重开”这套动作委托给 *storage.SqliteManager，
+// 保证 adapter 读取时 SQLite 文件处于静默状态 —— SQLite 是单写者，
+// 写入进行中还并发 read+copy 并不安全。
 //
-// The BackupManager dispatches every operation against a single
-// BackupAdapter (constructed from a BackupConfig), which keeps the
-// surface area tight.  Switching targets means constructing a new
-// manager — there is no SetTarget mutator in the Zig source either.
+// BackupManager 把每个操作都派发到单个 BackupAdapter（由 BackupConfig
+// 构造），从而收紧 API 面。切换 target 意味着构造新 manager ——
+// 没有 SetTarget 变更器。
 package backup
 
 import (
@@ -32,11 +28,9 @@ import (
 	"little-timer/internal/storage"
 )
 
-// MaxBackups is the default retention cap.  Matches the Zig
-// `max_backups: u32 = 10` field.
+// MaxBackups 是默认的保留上限。
 const MaxBackups = 10
 
-// BackupManager is the Go port of `pub const BackupManager`.
 type BackupManager struct {
 	sqlite     *storage.SqliteManager
 	dbPath     string
@@ -45,8 +39,7 @@ type BackupManager struct {
 	adapter    BackupAdapter
 }
 
-// NewLocal returns a BackupManager wired to a LocalAdapter rooted at
-// backupDir.  Mirrors `BackupManager.init`.
+// NewLocal 返回接到 LocalAdapter（根目录为 backupDir）的 BackupManager。
 func NewLocal(sqliteMgr *storage.SqliteManager, dbPath, backupDir string) (*BackupManager, error) {
 	if backupDir == "" {
 		return nil, errors.New("backup: backupDir is required for local target")
@@ -63,8 +56,8 @@ func NewLocal(sqliteMgr *storage.SqliteManager, dbPath, backupDir string) (*Back
 	}, nil
 }
 
-// NewFromConfig picks an adapter based on cfg.TargetType and wires it
-// into a fresh BackupManager.  Mirrors `BackupManager.initWithConfig`.
+// NewFromConfig 根据 cfg.TargetType 选择 adapter，并接入全新的
+// BackupManager。
 func NewFromConfig(ctx context.Context, sqliteMgr *storage.SqliteManager, dbPath, backupDir string, cfg domain.BackupConfig) (*BackupManager, error) {
 	mgr, err := NewLocal(sqliteMgr, dbPath, backupDir)
 	if err != nil {
@@ -78,9 +71,8 @@ func NewFromConfig(ctx context.Context, sqliteMgr *storage.SqliteManager, dbPath
 	return mgr, nil
 }
 
-// buildAdapter picks the right adapter for the configured target type.
-// webdav / s3 always need their full config; local falls back to
-// backupDir when no path was supplied.
+// buildAdapter 为配置的 target 类型挑选正确的 adapter。
+// webdav / s3 一定需要完整配置；local 在未提供路径时回退到 backupDir。
 func buildAdapter(ctx context.Context, cfg domain.BackupConfig, backupDir string) (BackupAdapter, error) {
 	switch cfg.TargetType {
 	case domain.BackupTargetWebDAV:
@@ -108,34 +100,27 @@ func buildAdapter(ctx context.Context, cfg domain.BackupConfig, backupDir string
 	}
 }
 
-// Adapter returns the underlying adapter (handy for tests).
+// Adapter 返回底层 adapter（对测试方便）。
 func (m *BackupManager) Adapter() BackupAdapter { return m.adapter }
 
-// MaxBackups returns the retention cap.  Mirrors `pub max_backups`.
+// MaxBackups 返回保留上限。
 func (m *BackupManager) MaxBackups() int { return m.maxBackups }
 
-// SetMaxBackups adjusts the retention cap.
+// SetMaxBackups 调整保留上限。
 func (m *BackupManager) SetMaxBackups(n int) {
 	if n > 0 {
 		m.maxBackups = n
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Backup / restore.
-// -----------------------------------------------------------------------------
-
-// CreateBackup generates a new backup file and uploads it via the
-// configured adapter.  Mirrors `pub fn createBackup`.
+// CreateBackup 生成新备份文件并通过配置的 adapter 上传。
 //
-// Uses VACUUM INTO for a hot snapshot (requires SQLite >= 3.27.0)
-// instead of the old wal_checkpoint + direct copy.  SHA-256 is computed
-// from the snapshot before upload, then verified by downloading the
-// uploaded copy and comparing digests.
+// 用 VACUUM INTO 做热快照（要求 SQLite >= 3.27.0），替代旧的
+// wal_checkpoint + 直接拷贝。SHA-256 在上传前从快照计算，随后通过
+// 下载已上传的副本比对摘要来验证。
 //
-// Manifest writes are best-effort: the uploaded .db file is the source
-// of truth (already SHA-256-verified), so a manifest build/write
-// failure is logged as a warning and does not fail the backup.
+// manifest 写入是尽力而为：已上传的 .db 文件才是事实来源（已通过
+// SHA-256 验证），所以 manifest 构建/写入失败只记警告，不会让备份失败。
 func (m *BackupManager) CreateBackup() (string, error) {
 	if m.sqlite == nil || !m.sqlite.IsOpen() {
 		return "", fmt.Errorf("%w: sqlite not open", ErrBackupFailed)
@@ -143,7 +128,7 @@ func (m *BackupManager) CreateBackup() (string, error) {
 	ts := time.Now().Unix()
 	name := fmt.Sprintf("%s%d%s", filenamePrefix, ts, filenameSuffix)
 
-	// Create temp file for VACUUM INTO hot backup.
+	// 为 VACUUM INTO 热备份创建临时文件。
 	tmp, err := os.CreateTemp(filepath.Dir(m.dbPath), "lt_backup_*.db")
 	if err != nil {
 		return "", fmt.Errorf("%w: tempfile: %v", ErrBackupFailed, err)
@@ -154,24 +139,23 @@ func (m *BackupManager) CreateBackup() (string, error) {
 	}
 	defer os.Remove(tmpPath)
 
-	// Hot backup: VACUUM INTO writes a consistent snapshot to the temp
-	// file.  Requires a brief exclusive lock; acceptable for infrequent
-	// backups.  SQLite does not support bind parameters for VACUUM INTO,
-	// so single quotes in the path must be escaped by doubling them.
+	// 热备份：VACUUM INTO 把一致性快照写入临时文件。需要短暂的排他锁；
+	// 对低频备份可以接受。SQLite 不支持 VACUUM INTO 的绑定参数，
+	// 所以路径里的单引号必须翻倍转义。
 	escapedPath := strings.ReplaceAll(tmpPath, "'", "''")
 	if _, err := m.sqlite.DB().Exec(fmt.Sprintf("VACUUM INTO '%s'", escapedPath)); err != nil {
 		log.Error("CreateBackup: vacuum failed", "error", err.Error())
 		return "", fmt.Errorf("%w: vacuum into: %v", ErrBackupFailed, err)
 	}
 
-	// Compute SHA-256 from the temp file before upload.
+	// 上传前从临时文件计算 SHA-256。
 	hash, err := sha256File(tmpPath)
 	if err != nil {
 		log.Error("CreateBackup: sha256 failed", "error", err.Error())
 		return "", fmt.Errorf("%w: sha256: %v", ErrBackupFailed, err)
 	}
 
-	// Get file size for the manifest.
+	// 取文件大小用于 manifest。
 	fi, err := os.Stat(tmpPath)
 	if err != nil {
 		log.Error("CreateBackup: stat failed", "error", err.Error())
@@ -179,13 +163,13 @@ func (m *BackupManager) CreateBackup() (string, error) {
 	}
 	sizeBytes := uint64(fi.Size())
 
-	// Upload the temp file.
+	// 上传临时文件。
 	if err := m.adapter.Backup(tmpPath, name); err != nil {
 		log.Error("CreateBackup: upload failed", "error", err.Error())
 		return "", err
 	}
 
-	// GET-back verify: download the uploaded backup and compare SHA-256.
+	// GET-back 校验：下载已上传的备份并比对 SHA-256。
 	tmpVerify, err := os.CreateTemp(filepath.Dir(m.dbPath), "lt_verify_*.db")
 	if err != nil {
 		log.Error("CreateBackup: verify tempfile failed", "error", err.Error())
@@ -211,16 +195,16 @@ func (m *BackupManager) CreateBackup() (string, error) {
 	if hash != verifyHash {
 		log.Error("CreateBackup: sha256 mismatch",
 			"expected", hash, "got", verifyHash)
-		// Best-effort delete the corrupted backup.
+		// 尽力删除损坏的备份。
 		if delErr := m.adapter.Delete(name); delErr != nil {
 			log.Error("CreateBackup: delete after mismatch failed", "error", delErr.Error())
 		}
 		return "", fmt.Errorf("%w: sha256 mismatch", ErrBackupFailed)
 	}
 
-	// Write manifest for ALL targets.  Best-effort: the uploaded .db is
-	// already SHA-256-verified, so a manifest failure only degrades the
-	// convenience index — log a warning, do not fail the backup.
+	// 为所有 target 写 manifest。尽力而为：已上传的 .db 已通过
+	// SHA-256 验证，manifest 失败只会降低索引的便利性 ——
+	// 记警告，不让备份失败。
 	manifest, err := m.buildManifest(name, ts, hash, sizeBytes)
 	if err != nil {
 		log.Warn("CreateBackup: build manifest failed", "error", err.Error())
@@ -229,17 +213,15 @@ func (m *BackupManager) CreateBackup() (string, error) {
 	}
 
 	if err := m.cleanupOldBackups(); err != nil {
-		// Retention is best-effort; log but don't fail the backup.
+		// 保留策略是尽力而为；记日志但不让备份失败。
 		log.Error("CreateBackup: cleanup failed", "error", err.Error())
 	}
 	log.Info("CreateBackup: success", "name", name, "sha256", hash)
 	return name, nil
 }
 
-// RestoreFromBackup fetches a backup by name and overwrites the live DB.
-// Mirrors `pub fn restoreFromBackup`.  The DB connection is closed
-// during the swap and reopened afterward so the running app picks up
-// the restored schema.
+// RestoreFromBackup 按名字取回备份并覆盖活动 DB。交换期间会关闭 DB
+// 连接、完成后重开，让运行中的应用拿到恢复后的 schema。
 func (m *BackupManager) RestoreFromBackup(name string) error {
 	if m.sqlite == nil || !m.sqlite.IsOpen() {
 		return fmt.Errorf("%w: sqlite not open", ErrRestoreFailed)
@@ -263,9 +245,8 @@ func (m *BackupManager) RestoreFromBackup(name string) error {
 	return nil
 }
 
-// buildManifest creates the manifest JSON string for WriteManifest.
-// sha256 and sizeBytes are populated from the just-created backup file
-// so every entry carries integrity metadata.
+// buildManifest 为 WriteManifest 生成 manifest JSON 字符串。
+// sha256 与 sizeBytes 取自刚创建的备份文件，使每个条目都带完整性元数据。
 func (m *BackupManager) buildManifest(backupName string, timestamp int64, sha256hash string, sizeBytes uint64) (string, error) {
 	backups, err := m.adapter.List()
 	if err != nil {
@@ -282,7 +263,7 @@ func (m *BackupManager) buildManifest(backupName string, timestamp int64, sha256
 	manifestBackups := make([]manifestBackup, 0, len(backups)+1)
 	for _, b := range backups {
 		if b.Name == backupName {
-			continue // skip the just-created backup; it's appended below with SHA256
+			continue // 跳过刚创建的备份；下面会带 SHA256 追加
 		}
 		manifestBackups = append(manifestBackups, manifestBackup{
 			Name:      b.Name,
@@ -315,8 +296,7 @@ func (m *BackupManager) buildManifest(backupName string, timestamp int64, sha256
 	return string(data), nil
 }
 
-// swapDatabase closes the SQLite connection, replaces the file, then
-// reopens.  Mirrors the close/reopen dance in storage_backup.zig.
+// swapDatabase 关闭 SQLite 连接、替换文件，然后重开。
 func (m *BackupManager) swapDatabase(src string) error {
 	if err := m.sqlite.Close(); err != nil {
 		return fmt.Errorf("%w: close before swap: %v", ErrRestoreFailed, err)
@@ -333,27 +313,22 @@ func (m *BackupManager) swapDatabase(src string) error {
 	return nil
 }
 
-// DeleteBackup removes a single backup.  Mirrors `pub fn deleteBackup`.
+// DeleteBackup 删除单个备份。
 func (m *BackupManager) DeleteBackup(name string) error {
 	return m.adapter.Delete(name)
 }
 
-// ListBackups returns every backup known to the adapter.  Mirrors
-// `pub fn listBackups`.
+// ListBackups 返回 adapter 已知的所有备份。
 func (m *BackupManager) ListBackups() ([]BackupInfo, error) {
 	return m.adapter.List()
 }
 
-// TestConnection validates the configured adapter is reachable.
+// TestConnection 校验配置的 adapter 可达。
 func (m *BackupManager) TestConnection() error {
 	return m.adapter.TestConnection()
 }
 
-// -----------------------------------------------------------------------------
-// BackupInfo helpers — `getBackupInfo` / `freeBackupInfo` analogues.
-// -----------------------------------------------------------------------------
-
-// BackupSummary is the analogue of `getBackupInfo`'s anonymous struct.
+// BackupSummary 汇总 adapter 内备份的数量与总大小。
 type BackupSummary struct {
 	TotalBackups   int    `json:"total_backups"`
 	TotalSizeBytes uint64 `json:"total_size_bytes"`
@@ -361,7 +336,7 @@ type BackupSummary struct {
 	NewestBackup   string `json:"newest_backup,omitempty"`
 }
 
-// Summary aggregates counts and size of the adapter's stored backups.
+// Summary 聚合 adapter 所存备份的数量与大小。
 func (m *BackupManager) Summary() (BackupSummary, error) {
 	items, err := m.adapter.List()
 	if err != nil {
@@ -385,7 +360,7 @@ func (m *BackupManager) Summary() (BackupSummary, error) {
 	}, nil
 }
 
-// sha256File computes the SHA-256 hex digest of a file via streaming.
+// sha256File 以流式方式计算文件的 SHA-256 十六进制摘要。
 func sha256File(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -399,9 +374,8 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// cleanupOldBackups trims the adapter down to m.maxBackups entries by
-// deleting the oldest.  Local + WebDAV + S3 all support Delete so this
-// is uniform across adapters.
+// cleanupOldBackups 通过删除最旧的条目把 adapter 修剪到 m.maxBackups
+// 条。Local + WebDAV + S3 都支持 Delete，因此各 adapter 行为一致。
 func (m *BackupManager) cleanupOldBackups() error {
 	items, err := m.adapter.List()
 	if err != nil {

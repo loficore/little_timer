@@ -2,7 +2,7 @@
  * SSE 连接管理 Hook
  * 统一管理 SSE 连接、自动重连和事件处理
  *
- * On Android (Wails): SSE is not available — Wails uses event bindings instead.
+ * 在 Android（Wails）上：不可用 SSE —— Wails 改用事件绑定。
  */
 
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
@@ -76,7 +76,6 @@ export const useSSE = (
         logError(`SSE 连接错误: ${errorMsg}`);
         onError?.(error);
       },
-      // 连接成功时的回调
       () => {
         setIsConnected(true);
         logInfo("SSE 连接已建立");

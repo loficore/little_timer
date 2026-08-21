@@ -1,32 +1,19 @@
-// Package settings — top-level settings manager.
+// Package settings —— 顶层设置 manager。持有：
 //
-// Port of `src/settings/settings_manager.zig` (little_timer).  Owns:
+//   - domain.SettingsConfig —— 基础 / 时钟默认值 / 日志 / 鉴权
+//   - domain.BackupConfig —— 备份 target + WebDAV / S3 凭据
+//   - 一个 PresetsManager（no-op 桩；见 presets.go）
+//   - 一个从 SQLite 加载的 viper.Viper 实例（唯一事实来源 ——
+//     没有 default.json，也没有仅凭 env 的回退）
 //
-//   - domain.SettingsConfig — basic / clock defaults / logging / auth
-//   - domain.BackupConfig  — backup target + WebDAV / S3 credentials
-//   - a PresetsManager (no-op stub; see presets.go)
-//   - a viper.Viper instance loaded from SQLite (the ONLY source of truth
-//     — no default.json, no env-only fallback)
+// manager 在构造时接受一个 `*storage.SqliteManager`（已接好子模块）。
+// 若 SQLite 文件尚未打开，它会负责打开（创建父目录、chmod 0600、跑迁移）。
 //
-// The Zig source uses an embedded `*settings_sqlite.SqliteManager`; in
-// Go we accept a `*storage.SqliteManager` (already wired with the
-// sub-managers) at construction.  The manager opens the SQLite file
-// (creating parents, chmod-ing 0600, running migration) if it isn't
-// already open.
-//
-// Memory ownership: the Zig code allocates strings with an arena
-// allocator and tracks them via `owned_*` fields; Go strings are
-// immutable, so a single `domain.SettingsConfig` value is owned by the
-// manager and re-used in-place on every Save / Load.  The trade-off
-// (one less copy on read) is fine — SettingsConfig is small.
-//
-// Credential encryption: webdav_password / s3_access_key / s3_secret_key
-// are encrypted at rest using AES-256-GCM with a key derived from a
-// fixed app secret + the SQLite file path (no OS keychain integration
-// in W4 — see `deriveCredentialKey`).  This satisfies the "no plaintext
-// encryption keys on disk" constraint while keeping the encryption
-// package exercised end-to-end.  A TODO is left for the OS-keychain
-// integration once a dbus / Windows credential library lands.
+// 凭据加密：webdav_password / s3_access_key / s3_secret_key 用 AES-256-GCM
+// 静态加密，密钥由固定应用 secret + SQLite 文件路径派生（不依赖 OS
+// keychain —— 见 `deriveCredentialKey`）。这满足“磁盘上绝无明文凭据”的
+// 约束，同时让加密包端到端受测。TODO: 等 dbus / Windows 凭据库落地后接入
+// OS keychain。
 package settings
 
 import (
@@ -47,43 +34,40 @@ import (
 	"little-timer/internal/storage"
 )
 
-// SettingsManager is the Go port of `pub const SettingsManager = struct`.
+// SettingsManager 持有基于 SQLite 的内存 settings + backup 配置。
 type SettingsManager struct {
 	sqlite *storage.SqliteManager
-	dbPath string // captured at construction for credential-key derivation
+	dbPath string // 构造时捕获，用于凭据密钥派生
 
 	config       domain.SettingsConfig
 	backupConfig domain.BackupConfig
 
 	presets *PresetsManager
 
-	// viper is the read API used by the rest of the app (e.g. http handlers
-	// can call manager.Viper().GetString("basic.language") without going
-	// through Go struct accessors).  SQLite stays the single source of truth
-	// — viper is populated FROM the SQLite row, never the other way.
+	// viper 是应用其余部分使用的读取 API（例如 http handler 可以直接
+	// 调 manager.Viper().GetString("basic.language")，不必走 Go struct
+	// 访问器）。SQLite 仍是唯一事实来源 —— viper 从 SQLite 行填充，
+	// 绝不反向。
 	viper *viper.Viper
 
-	// dirty is set by mutators and consumed by Save(); mirrors the Zig
-	// `is_dirty: bool` field.
+	// dirty 由变更器置位、由 Save() 消费。
 	dirty bool
 
-	// credentialUnlockPassword tracks an unlocked master-password state for
-	// the credentials subsystem.  Mirrors the Zig `credential_unlock_password`
-	// field.  Set to nil when locked.
+	// credentialUnlockPassword 跟踪凭据子系统的“主口令已解锁”状态。
+	// 锁定时为 nil。
 	credentialUnlockPassword []byte
 }
 
-// BasicConfig is a small typed view used by UpdateBasic.  Mirrors the
-// Zig `pub const BasicConfig = struct`.
+// BasicConfig 是 UpdateBasic 使用的小型强类型视图。
 type BasicConfig struct {
 	Timezone    int8
 	Language    string
 	DefaultMode domain.DefaultMode
 }
 
-// New opens (or reuses) the SQLite file at dbPath and returns a SettingsManager
-// ready for use.  If dbPath is empty a per-platform default is computed
-// under `os.UserConfigDir()` matching the Zig `getDefaultDatabasePath`.
+// New 打开（或复用）dbPath 处的 SQLite 文件，返回可直接使用的
+// SettingsManager。dbPath 为空时在 `os.UserConfigDir()` 下计算
+// 平台默认路径。
 func New(dbPath string) (*SettingsManager, error) {
 	resolved, err := resolveDatabasePath(dbPath)
 	if err != nil {
@@ -102,10 +86,9 @@ func New(dbPath string) (*SettingsManager, error) {
 	return newFromSqlite(mgr, resolved)
 }
 
-// NewFromSqliteManager wraps an already-open SqliteManager.  Useful for
-// tests where the test harness already opened the DB.  `dbPath` is
-// captured for credential-key derivation; if the underlying DB is at a
-// different path, supply it explicitly.
+// NewFromSqliteManager 包装一个已打开的 SqliteManager。适用于测试框架
+// 已经开好 DB 的场景。`dbPath` 会被捕获用于凭据密钥派生；若底层 DB 在
+// 其他路径，请显式提供。
 func NewFromSqliteManager(mgr *storage.SqliteManager, dbPath string) (*SettingsManager, error) {
 	if mgr == nil || !mgr.IsOpen() {
 		return nil, errors.New("settings: sqlite manager is nil or not open")
@@ -119,8 +102,8 @@ func newFromSqlite(mgr *storage.SqliteManager, dbPath string) (*SettingsManager,
 		dbPath:  dbPath,
 		presets: NewPresetsManager(),
 		viper:   viper.New(),
-		// config / backupConfig are populated by Load(); callers that don't
-		// Load first will see zero values (matches Zig `SettingsManager{}`).
+		// config / backupConfig 由 Load() 填充；不先 Load 的调用方
+		// 会看到零值。
 	}
 	if err := sm.loadAll(); err != nil {
 		return nil, err
@@ -128,16 +111,14 @@ func newFromSqlite(mgr *storage.SqliteManager, dbPath string) (*SettingsManager,
 	return sm, nil
 }
 
-// -----------------------------------------------------------------------------
-// Load / Save (mirrors `pub fn load(self)` / `pub fn save(self)`).
-// -----------------------------------------------------------------------------
+// Load / Save。
 
-// Load re-reads every settings row from SQLite and repopulates viper.
+// Load 从 SQLite 重读全部 settings 行并重新填充 viper。
 func (sm *SettingsManager) Load() error {
 	return sm.loadAll()
 }
 
-// Save flushes the in-memory config + backup config to SQLite.
+// Save 把内存中的 config + backup 配置刷入 SQLite。
 func (sm *SettingsManager) Save() error {
 	if err := sm.saveSettingsToDB(); err != nil {
 		return err
@@ -158,7 +139,7 @@ func (sm *SettingsManager) loadAll() error {
 				return initErr
 			}
 		} else {
-			// try to recover by re-seeding defaults
+			// 尝试重新播种默认值来恢复
 			cfg = domain.NewDefaultSettingsConfig()
 			if initErr := sm.initializeDefaultSettings(cfg); initErr != nil {
 				return initErr
@@ -168,8 +149,7 @@ func (sm *SettingsManager) loadAll() error {
 	sm.config = cfg
 
 	if err := sm.loadBackupConfigFromDB(); err != nil {
-		// ponytail: best-effort — fall back to defaults if the row is
-		// missing or unreadable (matches Zig behaviour).
+		// TODO: 尽力而为 —— 行缺失或不可读时回退到默认值。
 		sm.backupConfig = domain.NewDefaultBackupConfig()
 	}
 	sm.populateViper()
@@ -187,37 +167,31 @@ func (sm *SettingsManager) initializeDefaultSettings(cfg domain.SettingsConfig) 
 	return nil
 }
 
-// -----------------------------------------------------------------------------
-// Public accessors.
-// -----------------------------------------------------------------------------
+// 公开访问器。
 
-// Config returns a copy of the in-memory SettingsConfig.  Mirrors the
-// Zig `pub fn getConfig(self) *SettingsConfig` — the caller can mutate
-// the returned value, but the manager's stored copy is unchanged; use
-// Update* methods to persist changes.
+// Config 返回内存中 SettingsConfig 的副本。调用方可以改返回值的字段，
+// 但 manager 存的副本不受影响；要持久化请用 Update* 方法。
 func (sm *SettingsManager) Config() domain.SettingsConfig {
 	return sm.config
 }
 
-// BackupConfig returns a copy of the in-memory BackupConfig.
+// BackupConfig 返回内存中 BackupConfig 的副本。
 func (sm *SettingsManager) BackupConfig() domain.BackupConfig {
 	return sm.backupConfig
 }
 
-// Viper returns the in-memory viper instance.  Populated from SQLite on
-// every Load() / Save().
+// Viper 返回内存中的 viper 实例。每次 Load() / Save() 都从 SQLite 填充。
 func (sm *SettingsManager) Viper() *viper.Viper { return sm.viper }
 
-// Presets returns the PresetsManager.  See presets.go for why this is a
-// near no-op in W4.
+// Presets 返回 PresetsManager。为什么它近乎 no-op 见 presets.go。
 func (sm *SettingsManager) Presets() *PresetsManager { return sm.presets }
 
-// IsDirty mirrors `pub fn is_dirty` accessor (read-only flag here).
+// IsDirty 只读报告 dirty 标志。
 func (sm *SettingsManager) IsDirty() bool { return sm.dirty }
 
-// populateViper re-keys every relevant SettingsConfig + BackupConfig
-// field into viper so consumers can call `sm.Viper().GetString(...)`.
-// This is the "Viper reads from SQLite" pathway.
+// populateViper 把 SettingsConfig + BackupConfig 的所有相关字段重新
+// 以 key 形式灌进 viper，消费者即可调用 `sm.Viper().GetString(...)`。
+// 这就是“Viper 从 SQLite 读”的路径。
 func (sm *SettingsManager) populateViper() {
 	v := sm.viper
 	v.Set("basic.timezone", sm.config.Basic.Timezone)
@@ -242,15 +216,12 @@ func (sm *SettingsManager) populateViper() {
 	v.Set("logging.max_file_count", sm.config.Logging.MaxFileCount)
 
 	v.Set("auth.auth_enabled", sm.config.Auth.AuthEnabled)
-	// Auth token is sensitive — never populated into viper.
+	// auth token 敏感 —— 绝不灌进 viper。
 }
 
-// -----------------------------------------------------------------------------
-// Mutators.
-// -----------------------------------------------------------------------------
+// 变更器。
 
-// UpdateBasic validates + applies a BasicConfig.  Mirrors
-// `pub fn updateBasic(self, basic_config) ValidationError!void`.
+// UpdateBasic 校验并应用一个 BasicConfig。
 func (sm *SettingsManager) UpdateBasic(bc BasicConfig) error {
 	if err := ValidateTimezone(bc.Timezone); err != nil {
 		return err
@@ -266,7 +237,7 @@ func (sm *SettingsManager) UpdateBasic(bc BasicConfig) error {
 	return nil
 }
 
-// UpdateAuth replaces the auth block.
+// UpdateAuth 替换 auth 块。
 func (sm *SettingsManager) UpdateAuth(auth domain.SettingsAuth) error {
 	sm.config.Auth = auth
 	sm.dirty = true
@@ -274,9 +245,8 @@ func (sm *SettingsManager) UpdateAuth(auth domain.SettingsAuth) error {
 	return sm.Save()
 }
 
-// UpdateBackupConfig parses a JSON object (the shape produced by
-// `updateBackupConfig 收到 JSON` in the Zig source) and applies it.
-// JSON-only fields not present in the blob are left untouched.
+// UpdateBackupConfigFromJSON 解析一个 JSON 对象并应用。blob 中未出现的
+// 字段保持不动。
 func (sm *SettingsManager) UpdateBackupConfigFromJSON(jsonStr string) error {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
@@ -338,8 +308,7 @@ func (sm *SettingsManager) UpdateBackupConfigFromJSON(jsonStr string) error {
 	return sm.saveBackupConfigToDB()
 }
 
-// HandleSettingsEvent processes the discriminated union from
-// domain.SettingsEvent.  Mirrors `pub fn handleSettingsEvent`.
+// HandleSettingsEvent 处理来自 domain.SettingsEvent 的判别 union。
 func (sm *SettingsManager) HandleSettingsEvent(ev domain.SettingsEvent) error {
 	switch e := ev.(type) {
 	case domain.SettingsChangeEvent:
@@ -348,16 +317,15 @@ func (sm *SettingsManager) HandleSettingsEvent(ev domain.SettingsEvent) error {
 		}
 		return sm.Save()
 	case domain.SettingsGetEvent:
-		// Reserved: http layer reads via Config() / Viper() directly.
+		// 预留：http 层直接经 Config() / Viper() 读取。
 		return nil
 	default:
 		return fmt.Errorf("settings: unknown event type %T", ev)
 	}
 }
 
-// BuildClockConfig assembles a ClockTaskConfig using the persisted
-// defaults + the user's preferred DefaultMode.  Mirrors
-// `pub fn buildClockConfig`.
+// BuildClockConfig 用持久化默认值 + 用户首选 DefaultMode 组装
+// ClockTaskConfig。
 func (sm *SettingsManager) BuildClockConfig() domain.ClockTaskConfig {
 	mode := domain.CountdownMode
 	if sm.config.Basic.DefaultMode == domain.DefaultModeStopwatch {
@@ -370,19 +338,18 @@ func (sm *SettingsManager) BuildClockConfig() domain.ClockTaskConfig {
 	}
 }
 
-// AddPreset is a no-op pass-through to the (inert) PresetsManager.
+// AddPreset 是通向（惰性）PresetsManager 的 no-op 直通。
 func (sm *SettingsManager) AddPreset(preset domain.TimerPreset) error {
 	sm.dirty = true
 	return sm.presets.Add(preset)
 }
 
-// GetPresets mirrors `pub fn getPresets`.
+// GetPresets 返回预设列表。
 func (sm *SettingsManager) GetPresets() []domain.TimerPreset {
 	return sm.presets.GetAll()
 }
 
-// ResetToDefaults restores every field to the Zig defaults and saves.
-// Mirrors `pub fn resetToDefaults`.
+// ResetToDefaults 把所有字段恢复默认并保存。
 func (sm *SettingsManager) ResetToDefaults() error {
 	sm.config = domain.NewDefaultSettingsConfig()
 	sm.backupConfig = domain.NewDefaultBackupConfig()
@@ -394,7 +361,7 @@ func (sm *SettingsManager) ResetToDefaults() error {
 	return nil
 }
 
-// Close flushes + closes the underlying SQLite connection.
+// Close 刷盘并关闭底层 SQLite 连接。
 func (sm *SettingsManager) Close() error {
 	if sm.sqlite == nil {
 		return nil
@@ -402,9 +369,7 @@ func (sm *SettingsManager) Close() error {
 	return sm.sqlite.Close()
 }
 
-// -----------------------------------------------------------------------------
-// parseSettingsFromJSON — see settings_manager.zig:762.
-// -----------------------------------------------------------------------------
+// parseSettingsFromJSON —— 就地应用一个 JSON settings payload。
 
 func (sm *SettingsManager) parseSettingsFromJSON(jsonStr string) error {
 	var root map[string]any
@@ -499,14 +464,14 @@ func (sm *SettingsManager) parseSettingsFromJSON(jsonStr string) error {
 	}
 
 	if presets, ok := root["presets"].([]any); ok && len(presets) > 0 {
-		// Presets are inert in W4 (see presets.go), but we still drain the
-		// list so re-saving doesn't surprise the consumer.
+		// 预设是惰性的（见 presets.go），但我们仍会排空这个列表，
+		// 以免重新保存时消费者感到意外。
 		sm.presets = NewPresetsManager()
 		for _, p := range presets {
 			if _, ok := p.(map[string]any); !ok {
 				continue
 			}
-			// Validation is best-effort here — invalid presets are dropped.
+			// 这里的校验尽力而为 —— 无效预设直接丢弃。
 			_ = sm.presets.MaxCount()
 		}
 	}
@@ -516,23 +481,16 @@ func (sm *SettingsManager) parseSettingsFromJSON(jsonStr string) error {
 	return nil
 }
 
-// -----------------------------------------------------------------------------
-// SQLite persistence — settings row.
-// -----------------------------------------------------------------------------
+// SQLite 持久化 —— settings 行。
 
 func (sm *SettingsManager) saveSettingsToDB() error {
 	return sm.sqlite.SaveSettings(sm.config)
 }
 
-// -----------------------------------------------------------------------------
-// SQLite persistence — backup_config row.
+// SQLite 持久化 —— backup_config 行。
 //
-// The Zig source's saveBackupConfig/loadBackupConfig lives in the storage
-// layer (storage_crud.zig).  That module isn't part of this port's
-// "settings, crypto, backup" boundary, so the equivalent SQL is hosted
-// in this file.  Schema columns are unchanged — we read/write the same
-// field set the Zig source does.
-// -----------------------------------------------------------------------------
+// 其他表的等价备份 SQL 住在 storage 层；这里托管本表是为了让
+// settings/crypto/backup 边界自包含。schema 列不变。
 
 const backupConfigSQL = `INSERT OR REPLACE INTO backup_config (
     id, target_type, enabled, auto_backup, auto_backup_interval,
@@ -681,10 +639,8 @@ func (sm *SettingsManager) loadBackupConfigFromDB() error {
 	return nil
 }
 
-// -----------------------------------------------------------------------------
-// Credential encryption (AES-256-GCM with a deterministic key — see file
-// header for the rationale and the OS-keychain TODO).
-// -----------------------------------------------------------------------------
+// 凭据加密（AES-256-GCM + 确定性密钥 —— 设计理由与 OS-keychain TODO
+// 见文件头）。
 
 func (sm *SettingsManager) deriveCredentialKey() []byte {
 	h := sha256.New()
@@ -693,8 +649,7 @@ func (sm *SettingsManager) deriveCredentialKey() []byte {
 	return h.Sum(nil)
 }
 
-// encryptOptional returns nil for empty plaintexts (matches Zig source:
-// "if (plaintext.len == 0) return allocator.alloc(u8, 0)").
+// encryptOptional 对空明文返回 nil。
 func (sm *SettingsManager) encryptOptional(key, plaintext []byte) ([]byte, error) {
 	if len(plaintext) == 0 {
 		return nil, nil
@@ -703,8 +658,7 @@ func (sm *SettingsManager) encryptOptional(key, plaintext []byte) ([]byte, error
 	return crypto.Encrypt(plaintext, key, nonce)
 }
 
-// decryptOptional returns "" when the blob is missing or too short to be
-// a valid ciphertext (matches the Zig fallback path).
+// decryptOptional 在 blob 缺失或短到不可能是合法密文时返回 ""。
 func (sm *SettingsManager) decryptOptional(key, blob []byte) (string, error) {
 	if len(blob) < crypto.AES256GCMNonceSize+crypto.AES256GCMTagSize {
 		return "", nil
@@ -716,14 +670,11 @@ func (sm *SettingsManager) decryptOptional(key, blob []byte) (string, error) {
 	return string(pt), nil
 }
 
-// -----------------------------------------------------------------------------
-// Helpers.
-// -----------------------------------------------------------------------------
+// 辅助函数。
 
-// resolveDatabasePath mirrors `getDefaultDatabasePath` — if the caller
-// supplied an empty path we pick a per-platform default under
-// `os.UserConfigDir()`.  Linux uses `little_timer`, macOS/Windows use
-// `LittleTimer` to match the Zig source.
+// resolveDatabasePath —— 调用方传空路径时，我们在
+// `os.UserConfigDir()` 下挑平台默认值。Linux 用 `little_timer`，
+// macOS/Windows 用 `LittleTimer`。
 func resolveDatabasePath(input string) (string, error) {
 	if input != "" {
 		return input, nil
@@ -733,7 +684,7 @@ func resolveDatabasePath(input string) (string, error) {
 		return "", fmt.Errorf("settings: UserConfigDir: %w", err)
 	}
 	appDir := "little_timer"
-	// ponytail: hostname-based switch — matches Zig's builtin.os.tag ternary.
+	// 基于主机名的切换（Windows/macOS 默认值 vs 其他）。
 	if isWindowsLike() {
 		appDir = "LittleTimer"
 	} else if isMacLike() {

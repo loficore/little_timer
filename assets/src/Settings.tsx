@@ -7,12 +7,13 @@ import { WallpaperModal } from "./components/WallpaperModal";
 import { CountdownSettings } from "./components/CountdownSettings";
 import { StopwatchSettings } from "./components/StopwatchSettings";
 import { BackupTab } from "./components/settings/BackupTab";
+import { GalleryContent } from "./components/GalleryContent";
 import { MasterPasswordModal } from "./components/MasterPasswordModal";
 import { t, setLanguage } from "./utils/i18n";
 import { getAPIClient } from "./utils/apiClientSingleton";
 import type { BackupConfig } from "./types/api";
 import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
-import { ClockIconComponent, CheckIconComponent, ResetIcon, SettingsIcon, BackupIcon } from "./utils/icons";
+import { ClockIconComponent, CheckIconComponent, ResetIcon, SettingsIcon, BackupIcon, PhotoIconComponent } from "./utils/icons";
 import { loadAudioPreferences, normalizeAudioPreferences, saveAudioPreferences, DEFAULT_AUDIO_PREFERENCES } from "./utils/audio";
 import { STORAGE_KEYS } from "./utils/constants";
 import { applyTheme, applyLightStyle } from "./hooks/useAppSettings";
@@ -28,6 +29,7 @@ const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
   { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
   { id: "backup", labelKey: "settings.tabs.backup", icon: <BackupIcon /> },
+  { id: "gallery", labelKey: "gallery.title", icon: <PhotoIconComponent /> },
 ];
 
 interface BasicSettingsConfig {
@@ -295,7 +297,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     });
     saveAudioPreferences(audioPreferences);
     
-    // 保存布局密度到localStorage
     localStorage.setItem(STORAGE_KEYS.LAYOUT_DENSITY, String(config.basic.layout_density ?? "normal"));
     window.dispatchEvent(new CustomEvent("setting-change", {
       detail: { key: "layout_density", value: String(config.basic.layout_density ?? "normal") }
@@ -433,7 +434,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
     try {
       observer.observe({ type: "longtask", buffered: true });
     } catch {
-      // 部分 WebView 不支持 longtask，忽略即可。
     }
 
     return () => {
@@ -534,6 +534,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
               }}
             />
           )}
+          {activeTab === "gallery" && <GalleryContent />}
         </TabPanel>
 
         <div
@@ -555,7 +556,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
             {t("common.reset_default")}
           </button>
           {saveMessage && (
-            <div className="px-4 sm:px-5 py-2 rounded-lg text-xs sm:text-sm font-medium bg-secondary-dark text-accent-dark animate-pulse">
+            <div className="px-4 sm:px-5 py-2 rounded-lg text-xs sm:text-sm font-medium bg-[var(--my-primary-container)] text-[var(--my-on-primary-container)] animate-pulse">
               {saveMessage}
             </div>
           )}

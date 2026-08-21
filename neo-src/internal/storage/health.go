@@ -1,6 +1,4 @@
-// Package storage — health check + integrity check.
-//
-// Port of `src/storage/storage_health.zig` (little_timer).
+// Package storage —— 健康检查 + 完整性检查。
 package storage
 
 import (
@@ -9,8 +7,7 @@ import (
 	"fmt"
 )
 
-// HealthCheckError mirrors `pub const HealthCheckError = error{...}` in
-// storage_health.zig.
+// HealthCheckError 是健康检查的类型化哨兵错误。
 type HealthCheckError string
 
 const (
@@ -20,34 +17,28 @@ const (
 
 func (e HealthCheckError) Error() string { return string(e) }
 
-// HealthCheckInfo mirrors `pub const HealthCheckInfo = struct { status,
-// last_check, record_count }`.  Go strings are immutable so no allocator is
-// needed; ownership is the caller's.
+// HealthCheckInfo 是 health_check 行的快照。
 type HealthCheckInfo struct {
 	Status      string
 	LastCheck   string
 	RecordCount int64
 }
 
-// HealthCheckManager is the Go port of `pub const HealthCheckManager =
-// struct { db, allocator }`.  It does not own the *sql.DB; the SqliteManager
-// wires it via SetDB.
+// HealthCheckManager 执行健康检查。它不持有 *sql.DB；
+// 由 SqliteManager 通过 SetDB 接线。
 type HealthCheckManager struct {
 	db *sql.DB
 }
 
-// NewHealthCheckManager returns an empty manager.  Mirrors
-// `HealthCheckManager.init(allocator, null)`.
+// NewHealthCheckManager 返回空 manager。
 func NewHealthCheckManager() *HealthCheckManager {
 	return &HealthCheckManager{}
 }
 
-// SetDB attaches a *sql.DB.  Mirrors `health_manager.db = self.db` in the
-// Zig open() implementation.
+// SetDB 接入 *sql.DB。
 func (h *HealthCheckManager) SetDB(db *sql.DB) { h.db = db }
 
-// Initialize ensures a row exists in `health_check` (id=1).  Mirrors the
-// Zig `fn initialize`.
+// Initialize 确保 `health_check` 中存在 id=1 行。
 func (h *HealthCheckManager) Initialize() error {
 	if h.db == nil {
 		return ErrHealthCheckFailed
@@ -63,10 +54,8 @@ func (h *HealthCheckManager) Initialize() error {
 	return err
 }
 
-// PerformCheck runs PRAGMA integrity_check and refreshes the health row.
-//
-// Mirrors the Zig `fn performCheck`.  Returns ErrIntegrityCheckFailed when
-// integrity_check yields anything other than "ok" — same as Zig.
+// PerformCheck 运行 PRAGMA integrity_check 并刷新 health 行。
+// integrity_check 结果不是 "ok" 时返回 ErrIntegrityCheckFailed。
 func (h *HealthCheckManager) PerformCheck() error {
 	if h.db == nil {
 		return ErrHealthCheckFailed
@@ -83,8 +72,7 @@ func (h *HealthCheckManager) PerformCheck() error {
 	return h.UpdateRecord()
 }
 
-// UpdateRecord counts `sessions` rows and overwrites the health_check row.
-// Mirrors `fn updateRecord` in storage_health.zig.
+// UpdateRecord 统计 `sessions` 行数并覆盖写 health_check 行。
 func (h *HealthCheckManager) UpdateRecord() error {
 	if h.db == nil {
 		return ErrHealthCheckFailed
@@ -100,9 +88,8 @@ func (h *HealthCheckManager) UpdateRecord() error {
 	return err
 }
 
-// GetInfo reads the current health_check row.  Mirrors `fn getInfo`; when
-// no row exists, returns a sentinel "unknown" / "never" record (same as
-// Zig).
+// GetInfo 读取当前 health_check 行。没有该行时返回哨兵值
+// "unknown" / "never"。
 func (h *HealthCheckManager) GetInfo() (HealthCheckInfo, error) {
 	if h.db == nil {
 		return HealthCheckInfo{}, ErrHealthCheckFailed
@@ -124,8 +111,7 @@ func (h *HealthCheckManager) GetInfo() (HealthCheckInfo, error) {
 	return info, nil
 }
 
-// IsHealthy returns true iff the persisted health_check row status is
-// "healthy".  Mirrors `fn isHealthy`.
+// IsHealthy 当持久化的 health_check 行状态为 "healthy" 时返回 true。
 func (h *HealthCheckManager) IsHealthy() (bool, error) {
 	info, err := h.GetInfo()
 	if err != nil {
@@ -134,9 +120,8 @@ func (h *HealthCheckManager) IsHealthy() (bool, error) {
 	return info.Status == "healthy", nil
 }
 
-// PerformDeepCheck is a Go port of `fn performDeepCheck` — runs PerformCheck
-// and gathers extra counts from sessions / settings / health_check.  Mirrors
-// the Zig helper without the allocator dance (Go strings are immutable).
+// PerformDeepCheck 运行 PerformCheck 并额外统计
+// sessions / settings / health_check 的行数。
 func (h *HealthCheckManager) PerformDeepCheck() (HealthCheckInfo, error) {
 	if err := h.PerformCheck(); err != nil {
 		return HealthCheckInfo{}, err
@@ -159,7 +144,7 @@ func (h *HealthCheckManager) PerformDeepCheck() (HealthCheckInfo, error) {
 		return h.GetInfo()
 	}
 
-	_ = healthRecords // mirrors `_health_records` debug-only reference in Zig.
+	_ = healthRecords // 不属于返回的 info
 	status := "healthy"
 	last := "never"
 	if lastCheck.Valid {

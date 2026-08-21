@@ -1,13 +1,7 @@
-// Package handlers — Server-Sent Events stream.
+// Package handlers —— Server-Sent Events 流。
 //
-// File `events.go` ports `handleSSE` from std_server.zig.  Streams
-// `state_changed` / `tick` events to the connected client at 1Hz,
-// matching the original loop.
-//
-// Wire format: `event: <type>\ndata: <json>\n\n`, where each event has
-// an `event:` line naming its type.  Mirrors the Zig `body_writer.print
-// ("data: {s}\n\n", ...)` shape — we add an explicit `event:` line so
-// the frontend's EventSource can route on event name.
+// Wire format：`event: <type>\ndata: <json>\n\n`。显式的 `event:` 行
+// 让前端 EventSource 按事件名路由。
 package handlers
 
 import (
@@ -21,16 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// handleEvents mirrors `handleSSE`.  Sends one `state_changed` event
-// immediately on connect, then one `tick` event per second.
-//
-// On the Zig source the loop runs `app.clock_manager.update()` and
-// emits the resulting `state_json` as `data:`.  We follow the same
-// shape but emit both an `event:` line and a `data:` line so the
-// browser's EventSource can `addEventListener('tick', …)` etc.
-//
-// Connection limits (1h max session, 30s max heartbeat gap) match the
-// Zig source's `max_session_seconds` / `max_heartbeat_gap_seconds`.
+// handleEvents 以 1Hz 向客户端流式推送 clock 状态：连接时立即发一个
+// `state_changed` 事件，随后每秒一个 `tick` 事件。
 func Events(c *gin.Context) {
 	a := appFromCtx(c)
 
@@ -45,8 +31,7 @@ func Events(c *gin.Context) {
 		return
 	}
 
-	// Initial state push so the client doesn't sit waiting for the
-	// first tick.
+	// 先推一次初始状态，别让客户端干等第一个 tick。
 	a.RLock()
 	habitID := a.CurrentHabitID
 	a.RUnlock()
@@ -91,26 +76,23 @@ func Events(c *gin.Context) {
 	}
 }
 
-// writeSSE writes a single SSE frame of the form
+// writeSSE 向给定 writer 写入一个形如下面的 SSE 帧：
 //
 //	event: <name>\ndata: <json>\n\n
 //
-// to the supplied writer.  The data line is a single line of JSON;
-// embedded newlines are not escaped (matches the Zig behaviour — the
-// state JSON never contains a literal newline).
+// data 行是单行 JSON；内嵌换行不做转义（state JSON 从不包含字面换行符）。
 func writeSSE(w http.ResponseWriter, event string, payload any) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		// Fall back to an empty event so the stream stays alive.
+		// 回退为空事件，保持流存活。
 		_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", event)
 		return
 	}
 	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
 }
 
-// handleFrontendLog mirrors `handleFrontendLog` — receives a JSON
-// log entry from the browser and re-emits it via the server logger.
-// The handler is exposed at `POST /api/log` (public, no auth).
+// FrontendLog 接收浏览器发来的 JSON 日志条目，并用 server logger 重新
+// 输出。暴露在 `POST /api/log`（公开，无需鉴权）。
 func FrontendLog(c *gin.Context) {
 	var entry struct {
 		Category string `json:"category"`
@@ -130,6 +112,6 @@ func FrontendLog(c *gin.Context) {
 	if entry.Level == "" {
 		entry.Level = "info"
 	}
-log.Printf("[frontend:%s][%s] %s: %s", entry.Category, entry.Runtime, strings.ToUpper(entry.Level), entry.Message)
+	log.Printf("[frontend:%s][%s] %s: %s", entry.Category, entry.Runtime, strings.ToUpper(entry.Level), entry.Message)
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }

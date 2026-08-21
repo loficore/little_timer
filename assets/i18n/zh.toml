@@ -25,7 +25,6 @@ timer = "专注"
 habits = "习惯"
 stats = "统计"
 settings = "设置"
-gallery = "壁纸图库"
 
 [gallery]
 title = "壁纸图库"

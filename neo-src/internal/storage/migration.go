@@ -1,11 +1,7 @@
-// Package storage — schema migrations.
+// Package storage —— schema 迁移。
 //
-// Port of `src/storage/storage_migration.zig` (little_timer).
-//
-// The SQL CREATE TABLE statements are copied verbatim from the Zig source
-// (lines 464–649 of storage_migration.zig).  Do NOT reformat or "improve"
-// them — the schema must remain byte-identical so the Go build can read
-// SQLite databases previously written by the Zig build.
+// SQL CREATE TABLE 语句定义了磁盘契约。不要重新格式化或“优化”它们 ——
+// 既有数据库必须保持可读，改动一律走新的 schema 版本，绝不直接编辑这些字符串。
 package storage
 
 import (
@@ -14,11 +10,10 @@ import (
 	"fmt"
 )
 
-// CurrentSchemaVersion mirrors `pub const CURRENT_SCHEMA_VERSION = 8;`
-// in storage_migration.zig.
+// CurrentSchemaVersion 是本构建目标针对的 schema 版本。
 const CurrentSchemaVersion = 8
 
-// MigrationError mirrors the Zig `pub const MigrationError = error{...}`.
+// MigrationError 是迁移失败的类型化哨兵错误。
 type MigrationError string
 
 const (
@@ -29,11 +24,8 @@ const (
 
 func (e MigrationError) Error() string { return string(e) }
 
-// -----------------------------------------------------------------------------
-// Verbatim schema (storage_migration.zig:464–649).
-// Stored as package-level constants so the bytes never drift from the Zig
-// source — anything that mutates these strings must update the Zig file too.
-// -----------------------------------------------------------------------------
+// 规范 schema SQL。以包级常量存放；改动这些字符串会破坏既有数据库 ——
+// 要改请新增 schema 版本。
 
 const schemaVersionTableSQL = `CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,
@@ -119,8 +111,7 @@ const settingsTableSQL = `CREATE TABLE IF NOT EXISTS settings (
  log_tick_interval INTEGER NOT NULL DEFAULT 1000 CHECK(log_tick_interval >= 100 AND log_tick_interval <= 10000),
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);`
 
-// requiredTables mirrors the `required_tables` slice in
-// `verifyTablesExist`.  Any drift must be matched on both sides.
+// requiredTables 列出 verifyTablesExist 检查的表。任何变动都必须两边同步。
 var requiredTables = []string{
 	"habit_sets",
 	"habits",
@@ -131,7 +122,7 @@ var requiredTables = []string{
 	"backup_config",
 }
 
-// indexes mirrors `createOptimizedIndexes` in storage_migration.zig.
+// indexes 与 schema 一同创建，用于查询性能。
 var indexes = []struct {
 	Name string
 	SQL  string
@@ -147,9 +138,8 @@ var indexes = []struct {
 	{"idx_timer_sessions_is_running", "CREATE INDEX IF NOT EXISTS idx_timer_sessions_is_running ON timer_sessions(is_running);"},
 }
 
-// backupConfigTableSQL is the v7 backup_config table (with v8 credential
-// columns).  Lifted from `migrateToV7` + `migrateToV8`.  Used by
-// `recreateSingleTable`; not part of the v0 schema.
+// backupConfigTableSQL 是 v7 的 backup_config 表（带 v8 凭据列）。
+// 供 recreateSingleTable 使用；不属于初始 schema。
 const backupConfigTableSQL = `CREATE TABLE IF NOT EXISTS backup_config (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     target_type TEXT NOT NULL DEFAULT 'local',
@@ -173,38 +163,29 @@ const backupConfigTableSQL = `CREATE TABLE IF NOT EXISTS backup_config (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`
 
-// -----------------------------------------------------------------------------
-// MigrationManager — Go port of `pub const MigrationManager = struct {...}`.
-// -----------------------------------------------------------------------------
-
-// MigrationManager drives schema version detection + table creation.  It does
-// not own the *sql.DB; the SqliteManager wires it up via SetDB.
+// MigrationManager 负责 schema 版本检测 + 建表。它不持有 *sql.DB；
+// 由 SqliteManager 通过 SetDB 接线。
 type MigrationManager struct {
 	db *sql.DB
 }
 
-// NewMigrationManager returns an empty MigrationManager.  Call SetDB before
-// using it.  Mirrors `MigrationManager.init(allocator, null)`.
+// NewMigrationManager 返回空的 MigrationManager。使用前先调用 SetDB。
 func NewMigrationManager() *MigrationManager {
 	return &MigrationManager{}
 }
 
-// SetDB attaches a *sql.DB.  Mirrors the Zig code that mutates
-// `migration_manager.db = self.db` after `open`.
+// SetDB 接入 *sql.DB。
 func (m *MigrationManager) SetDB(db *sql.DB) { m.db = db }
 
-// CheckAndMigrate is the Go port of `pub fn checkAndMigrate(...)`.
+// CheckAndMigrate 检测 schema 版本并把数据库带到最新。
 //
-// Steps:
+// 步骤：
 //
-//  1. Create the schema_version table.
-//  2. Read the current version.
-//  3. Either run createTables() (fresh DB), no-op (up to date), or walk
-//     a version ladder (in-place upgrade).  In this port we don't preserve
-//     every historical v0→v8 step (the Zig source has explicit migration
-//     helpers for each step); a fresh DB is handled by createTables, and an
-//     existing DB that matches CurrentSchemaVersion is accepted as-is.
-//  4. Verify the required tables exist; recreate any that are missing.
+//  1. 创建 schema_version 表。
+//  2. 读取当前版本。
+//  3. 全新 DB → createTables；已是最新 → no-op；较旧的 DB → 原样接受，
+//     交给校验环节重建缺失的表（我们不重放 v0→v8 的每一步历史迁移）。
+//  4. 校验必需表齐全；重建缺失的表。
 func (m *MigrationManager) CheckAndMigrate() error {
 	if m.db == nil {
 		return ErrTableCreationFailed
@@ -221,7 +202,7 @@ func (m *MigrationManager) CheckAndMigrate() error {
 
 	switch {
 	case currentVersion == 0:
-		// Brand-new database — create the full v8 schema in one shot.
+		// 全新数据库 —— 一次性建出完整 v8 schema。
 		if err := m.createTables(); err != nil {
 			return err
 		}
@@ -230,17 +211,14 @@ func (m *MigrationManager) CheckAndMigrate() error {
 		}
 
 	case currentVersion == CurrentSchemaVersion:
-		// Already up to date — nothing to do.
+		// 已是最新 —— 什么都不做。
 
 	case currentVersion < CurrentSchemaVersion:
-		// Older DB found.  The Zig source has explicit migrateToV3…V8 helpers;
-		// in this port we accept any v < current as "create from scratch if
-		// the tables are missing", which matches `recreateSingleTable` in the
-		// Zig code (every missing table gets rebuilt).  Verify + rebuild below.
-		// Any DB already at a known schema will pass verifyTablesExist.
+		// 发现较旧的 DB。不重放逐版本迁移；每个缺失的表都由下面的
+		// 校验环节重建，已处于已知 schema 的 DB 会原样通过校验。
 
 	default:
-		// currentVersion > CurrentSchemaVersion.
+		// currentVersion > CurrentSchemaVersion。
 		return fmt.Errorf("%w: db is at v%d, app supports v%d",
 			ErrInvalidSchemaVersion, currentVersion, CurrentSchemaVersion)
 	}
@@ -248,8 +226,8 @@ func (m *MigrationManager) CheckAndMigrate() error {
 	return m.verifyTablesExist()
 }
 
-// getSchemaVersion reads `SELECT MAX(version) FROM schema_version`.  Returns
-// 0 for an empty table (matches `MAX` over no rows returning NULL → 0 in Zig).
+// getSchemaVersion 读取 `SELECT MAX(version) FROM schema_version`。
+// 空表返回 0（MAX 对空行集结果是 NULL）。
 func (m *MigrationManager) getSchemaVersion() (int, error) {
 	var v sql.NullInt64
 	if err := m.db.QueryRow(`SELECT MAX(version) FROM schema_version;`).Scan(&v); err != nil {
@@ -261,7 +239,7 @@ func (m *MigrationManager) getSchemaVersion() (int, error) {
 	return int(v.Int64), nil
 }
 
-// setSchemaVersion inserts a new schema_version row.
+// setSchemaVersion 插入新的 schema_version 行。
 func (m *MigrationManager) setSchemaVersion(version int) error {
 	_, err := m.db.Exec(
 		`INSERT INTO schema_version (version, description) VALUES (?, ?);`,
@@ -270,11 +248,11 @@ func (m *MigrationManager) setSchemaVersion(version int) error {
 	return err
 }
 
-// createTables is the Go port of `fn createTables` — runs every CREATE TABLE
-// in the v0 schema, then the indexes, then seeds the default settings row.
+// createTables 执行 schema 中的每条 CREATE TABLE，然后是索引，
+// 最后播种默认 settings 行。
 //
-// The CREATE TABLE strings are the same byte-for-byte constants used by
-// verifyTablesExist's recreate path, so any drift is caught immediately.
+// CREATE TABLE 字符串与 verifyTablesExist 的重建路径用的是逐字节相同的
+// 常量，因此任何漂移都会立刻暴露。
 func (m *MigrationManager) createTables() error {
 	steps := []struct {
 		name string
@@ -293,12 +271,10 @@ func (m *MigrationManager) createTables() error {
 		}
 	}
 
-	// Indexes — failures here are non-fatal in the Zig source (logged but
-	// ignored).  Mirror that.
+	// 索引 —— 这里失败不致命。
 	for _, idx := range indexes {
 		if _, err := m.db.Exec(idx.SQL); err != nil {
-			// ponytail: best-effort, matches Zig behaviour; surface in logs
-			// but don't fail the migration.
+			// 尽力而为：记日志但不让迁移失败。
 			_ = err
 		}
 	}
@@ -309,8 +285,7 @@ func (m *MigrationManager) createTables() error {
 	return nil
 }
 
-// initializeDefaultSettings seeds `settings` with id=1 if it is empty.
-// Mirrors `fn initializeDefaultSettings` in storage_migration.zig.
+// initializeDefaultSettings 在 `settings` 为空时播种 id=1 行。
 func (m *MigrationManager) initializeDefaultSettings() error {
 	var count int64
 	if err := m.db.QueryRow(`SELECT COUNT(*) FROM settings WHERE id = 1;`).Scan(&count); err != nil {
@@ -327,16 +302,15 @@ func (m *MigrationManager) initializeDefaultSettings() error {
 	return err
 }
 
-// verifyTablesExist is the Go port of `fn verifyTablesExist` — runs a
-// `SELECT 1 FROM <table> LIMIT 1` for each required table and recreates any
-// that fail.
+// verifyTablesExist 对每张必需表执行 `SELECT 1 FROM <table> LIMIT 1`，
+// 失败的表一律重建。
 func (m *MigrationManager) verifyTablesExist() error {
 	for _, table := range requiredTables {
 		q := fmt.Sprintf("SELECT 1 FROM %s LIMIT 1;", table)
 		if _, err := m.db.Exec(q); err == nil {
 			continue
 		}
-		// Table missing or unreadable — try to recreate.
+		// 表缺失或不可读 —— 尝试重建。
 		if rerr := m.recreateSingleTable(table); rerr != nil {
 			return rerr
 		}
@@ -344,8 +318,7 @@ func (m *MigrationManager) verifyTablesExist() error {
 	return nil
 }
 
-// recreateSingleTable rebuilds one table from the canonical SQL strings.
-// Mirrors the Zig if/else chain in `recreateSingleTable`.
+// recreateSingleTable 用规范 SQL 字符串重建单张表。
 func (m *MigrationManager) recreateSingleTable(name string) error {
 	switch name {
 	case "habit_sets":
@@ -374,8 +347,8 @@ func (m *MigrationManager) recreateSingleTable(name string) error {
 	}
 }
 
-// IsMigrationFailed is a small helper for callers that want to test the
-// sentinel error type without importing errors.As just to compare.
+// IsMigrationFailed 是小辅助函数，让调用方无需为了比较而引入 errors.As，
+// 就能测试哨兵错误类型。
 func IsMigrationFailed(err error) bool {
 	return errors.Is(err, ErrMigrationFailed)
 }

@@ -1,5 +1,3 @@
-// 日志辅助函数 - 支持分类和后端保存
-
 export type LogCategory = 'lifecycle' | 'operation' | 'network' | 'error' | 'perf';
 export type FrontendLogLevel = 'error' | 'info' | 'debug';
 export type FrontendRuntime = 'webview' | 'browser' | 'unknown';
@@ -30,7 +28,6 @@ export const getFrontendRuntime = (): FrontendRuntime => {
     const fromQuery = normalizeRuntime(search.get(RUNTIME_QUERY_KEY));
     if (fromQuery) return fromQuery;
   } catch {
-    // 忽略 URL 解析异常
   }
 
   if (window.webui) return 'webview';
@@ -50,7 +47,6 @@ const readPerfDebugFlag = (): boolean => {
       return true;
     }
   } catch {
-    // 忽略 URL 解析异常
   }
 
   try {
@@ -58,7 +54,6 @@ const readPerfDebugFlag = (): boolean => {
     if (value === '1') return true;
     if (value === '0') return false;
   } catch {
-    // 忽略 localStorage 异常
   }
 
   // WebView 调试优先开启，便于定位页面卡顿。
@@ -82,7 +77,6 @@ export const setPerfDebugEnabled = (enabled: boolean) => {
       localStorage.removeItem(PERF_DEBUG_STORAGE_KEY);
     }
   } catch {
-    // 忽略 localStorage 不可用场景
   }
 };
 
@@ -103,14 +97,12 @@ const readFrontendLogLevel = (): FrontendLogLevel => {
     const fromQuery = normalizeLogLevel(search.get(LOG_LEVEL_QUERY_KEY));
     if (fromQuery) return fromQuery;
   } catch {
-    // 忽略 URL 解析异常
   }
 
   try {
     const fromStorage = normalizeLogLevel(localStorage.getItem(LOG_LEVEL_STORAGE_KEY));
     if (fromStorage) return fromStorage;
   } catch {
-    // 忽略 localStorage 异常
   }
 
   return 'debug';
@@ -130,7 +122,6 @@ export const setFrontendLogLevel = (level: FrontendLogLevel) => {
   try {
     localStorage.setItem(LOG_LEVEL_STORAGE_KEY, level);
   } catch {
-    // 忽略 localStorage 异常
   }
 };
 
@@ -146,7 +137,7 @@ const shouldLog = (category: LogCategory): boolean => {
 const logToBackend = (category: LogCategory, message: string, level: 'info' | 'error') => {
   if (typeof window === 'undefined') return;
 
-  // Android: route through Wails JS bridge → logcat (tag: WailsJSBridge/JS)
+  // Android：经由 Wails JS 桥接 → logcat（tag: WailsJSBridge/JS）
   if ((window as any).wails && typeof (window as any).wails.log === 'function') {
     (window as any).wails.log(level === 'error' ? 'error' : 'info', message);
     return;
@@ -220,7 +211,6 @@ export const logPerf = (scope: string, payload?: Record<string, unknown>) => {
   logInfo(`[PERF] ${scope}${detail}`, 'perf');
 };
 
-// 便捷函数 - 按类别日志
 export const logLifecycle = (msg: string) => logInfo(msg, 'lifecycle');
 export const logOperation = (msg: string) => logInfo(msg, 'operation');
 export const logNetwork = (msg: string) => logInfo(msg, 'network');

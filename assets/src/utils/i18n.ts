@@ -1,6 +1,6 @@
 import toml from "toml";
 
-// Vite root-absolute glob (resolved from project root, not from this file's location)
+// Vite 根绝对 glob（相对项目根解析，而非本文件所在目录）
 const rawI18n = import.meta.glob("/i18n/*.toml", {
   as: "raw",
   eager: true,

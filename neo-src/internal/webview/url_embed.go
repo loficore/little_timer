@@ -1,10 +1,9 @@
 //go:build webview && embed_ui
 
-// Production URL for the webview: point at the in-process HTTP server
-// on :8080, which serves the embedded HTML bundle.  Mirrors the Zig
-// `app_url` for the embed build (`src/core/webview_c.zig:9-12`).
+// webview 生产 URL：指向 :8080 上的进程内 HTTP server，
+// 由它提供内嵌的 HTML 构建产物。
 //
-// Compile with `-tags "webview,embed_ui"` to use this URL.
+// 编译时使用 `-tags "webview,embed_ui"` 启用此 URL。
 
 package webview
 

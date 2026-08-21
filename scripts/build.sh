@@ -1,12 +1,7 @@
 #!/bin/bash
 # 构建脚本 - Linux/macOS
-# 用法: ./scripts/build.sh [--debug|--release] [--embed-html|--no-embed-html] [--go]
-#
-#   --go            仅构建 Go 后端（跳过 Zig 前端 + 后端）
-#   --zig           仅构建 Zig 后端（默认行为，去掉 --go 即可）
-#   --both          构建 Zig + Go 两个后端（前端只构建一次）
-#
-# 不带参数时行为同原来：构建前端 + Zig 后端。
+# 用法: ./scripts/build.sh [--debug|--release] [--embed-html|--no-embed-html] [--go|--zig|--both]
+# 不带参数时默认构建前端 + 后端。
 
 set -e
 
@@ -15,8 +10,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-# 解析参数
-BUILD_MODE="zig"      # "zig" | "go" | "both"
+BUILD_MODE="zig"
 EMBED_UI="false"
 OPTIMIZE="ReleaseFast"
 
@@ -69,7 +63,7 @@ for arg in "$@"; do
     esac
 done
 
-# ── 前端构建（zig / both 模式需要） ────────────────────────────────
+# 前端构建
 if [ "$BUILD_MODE" != "go" ]; then
     echo "=== 构建前端 ==="
     cd assets
@@ -83,21 +77,6 @@ if [ "$BUILD_MODE" != "go" ]; then
     cd ..
 fi
 
-# ── Zig 后端 ─────────────────────────────────────────────────────────
-if [ "$BUILD_MODE" = "zig" ] || [ "$BUILD_MODE" = "both" ]; then
-    echo "=== 构建 Zig 后端 (Optimize=$OPTIMIZE, EmbedUI=$EMBED_UI) ==="
-    if command -v zig &> /dev/null; then
-        if [ "$EMBED_UI" = "true" ]; then
-            zig build -Doptimize=$OPTIMIZE -Dembed_ui=true
-        else
-            zig build -Doptimize=$OPTIMIZE
-        fi
-    else
-        echo "警告: 未找到 zig，跳过 Zig 后端构建"
-    fi
-fi
-
-# ── Go 后端 ─────────────────────────────────────────────────────────
 if [ "$BUILD_MODE" = "go" ] || [ "$BUILD_MODE" = "both" ]; then
     echo "=== 构建 Go 后端 (Optimize=$OPTIMIZE, EmbedUI=$EMBED_UI) ==="
     cd neo-src

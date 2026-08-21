@@ -22,7 +22,7 @@ import (
 	"unsafe"
 )
 
-// androidHandler writes log records to Android logcat via __android_log_print.
+// androidHandler 通过 __android_log_print 把日志记录写入 Android logcat。
 type androidHandler struct{}
 
 func (h *androidHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
@@ -40,7 +40,7 @@ func (h *androidHandler) Handle(_ context.Context, r slog.Record) error {
 }
 
 func (h *androidHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
-func (h *androidHandler) WithGroup(_ string) slog.Handler       { return h }
+func (h *androidHandler) WithGroup(_ string) slog.Handler      { return h }
 
 func androidLogPriority(l slog.Level) int {
 	switch {
@@ -55,7 +55,7 @@ func androidLogPriority(l slog.Level) int {
 	}
 }
 
-// fileHandler replicates textHandler.Handle's output to a file.
+// fileHandler 复刻 textHandler.Handle 的输出，写入文件。
 type fileHandler struct {
 	file *os.File
 }
@@ -75,9 +75,9 @@ func (h *fileHandler) Handle(_ context.Context, r slog.Record) error {
 }
 
 func (h *fileHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
-func (h *fileHandler) WithGroup(_ string) slog.Handler       { return h }
+func (h *fileHandler) WithGroup(_ string) slog.Handler      { return h }
 
-// fanoutHandler writes to multiple handlers (logcat + file).
+// fanoutHandler 写入多个 handler（logcat + 文件）。
 type fanoutHandler struct {
 	handlers []slog.Handler
 }
@@ -116,7 +116,7 @@ func (f *fanoutHandler) WithGroup(name string) slog.Handler {
 	return &fanoutHandler{handlers: handlers}
 }
 
-// initSink returns a top-level fanout handler that writes to both logcat and file.
+// initSink 返回顶层 fanout handler，同时写入 logcat 和文件。
 func initSink(file *os.File) slog.Handler {
 	return &fanoutHandler{
 		handlers: []slog.Handler{

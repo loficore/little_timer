@@ -1,35 +1,33 @@
-// Package storage — facade combining SqliteManager with the higher-level
-// domain types.
+// Package storage —— 把 SqliteManager 与高层 domain 类型组合起来的门面。
 //
-// The spec calls for a thin facade (sqlite.go already coordinates the
-// sub-modules).  This file adds the domain-shaped convenience methods
-// (`SaveSettings(domain.SettingsConfig)` / `LoadSettings() domain.SettingsConfig`)
-// so callers from the http layer don't have to drill through .Crud().
+// 规范要求一个薄门面（sqlite.go 已协调各子模块）。本文件补充领域形状的
+// 便捷方法（`SaveSettings(domain.SettingsConfig)` /
+// `LoadSettings() domain.SettingsConfig`），让 http 层调用方不必穿过 .Crud() 层层取数。
 package storage
 
 import "little-timer/internal/domain"
 
-// SaveSettings persists a SettingsConfig to the settings row.
+// SaveSettings 把 SettingsConfig 持久化到 settings 行。
 func (m *SqliteManager) SaveSettings(config domain.SettingsConfig) error {
 	return m.crud.SaveSettings(config)
 }
 
-// LoadSettings reads the settings row and returns a populated SettingsConfig.
+// LoadSettings 读取 settings 行并返回填充好的 SettingsConfig。
 func (m *SqliteManager) LoadSettings() (domain.SettingsConfig, error) {
 	return m.crud.LoadSettings()
 }
 
-// PerformHealthCheck is a thin wrapper around Health().PerformCheck().
+// PerformHealthCheck 是 Health().PerformCheck() 的薄包装。
 func (m *SqliteManager) PerformHealthCheck() error {
 	return m.health.PerformCheck()
 }
 
-// IsHealthy returns true iff the persisted health_check row says "healthy".
+// IsHealthy 当持久化的 health_check 行显示 "healthy" 时返回 true。
 func (m *SqliteManager) IsHealthy() (bool, error) {
 	return m.health.IsHealthy()
 }
 
-// GetHealthInfo returns the current health_check row.
+// GetHealthInfo 返回当前 health_check 行。
 func (m *SqliteManager) GetHealthInfo() (HealthCheckInfo, error) {
 	return m.health.GetInfo()
 }

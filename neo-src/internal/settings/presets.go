@@ -1,24 +1,17 @@
-// Package settings — preset manager.
+// Package settings —— 预设 manager。
 //
-// Port of `src/settings/settings_presets.zig` (little_timer).
+// 预设 manager 是有意为之的 no-op 桩：每个方法什么都不做，Add 刻意惰性。
+// settings 层在 `SettingsManager.parseSettingsFromJson` 里直接解析预设形状的
+// JSON，不经由本 manager，所以这个 API 只为形状兼容而存在。
 //
-// The Zig source marks the entire module as deprecated and ships only
-// stubs: every method is a no-op and `PresetsManager.add()` is
-// intentionally inert.  We mirror that behaviour verbatim — the
-// settings layer parses preset-shaped JSON in
-// `SettingsManager.parseSettingsFromJson` directly without going through
-// this manager, so the API exists for parity only.
-//
-// If a future wave re-enables preset persistence, the implementation
-// hooks here without touching the public surface.
+// 若未来某轮重新启用预设持久化，实现挂在此处即可，不动公开接口。
 package settings
 
 import (
 	"little-timer/internal/domain"
 )
 
-// PresetsError mirrors `pub const PresetsError = error{...}`.  Kept for
-// parity even though no call site currently returns it.
+// PresetsError 为将来预留；目前没有调用点返回它。
 type PresetsError string
 
 const (
@@ -28,51 +21,46 @@ const (
 
 func (e PresetsError) Error() string { return string(e) }
 
-// MaxPresetCount mirrors the Zig `max_count: usize = 999` field.  Exposed
-// so the validator and settings manager can use the same bound.
+// MaxPresetCount 是预设上限，与 validator 和 settings manager 共享。
 const MaxPresetCount = 999
 
-// PresetsManager mirrors `pub const PresetsManager = struct { ... }`.
-//
-// The Zig source sets `max_count = 999` and exposes Add/Remove/Get/Count
-// as no-ops.  We preserve that contract — the struct exists so callers
-// can hold a "I have presets" reference, but the methods don't store
-// anything.  Persistence of presets happens via the `presets` field on
-// the JSON payload in `SettingsManager.parseSettingsFromJson`.
+// PresetsManager 是一个方法全为 no-op 的桩。struct 存在是为了让调用方
+// 能持有一个“我有预设”的引用，但什么都不存；持久化发生在
+// `SettingsManager.parseSettingsFromJson` 里 JSON payload 的 `presets` 字段。
 type PresetsManager struct {
 	maxCount int
 }
 
-// NewPresetsManager returns a PresetsManager with the default limit.
+// NewPresetsManager 返回带默认上限的 PresetsManager。
 func NewPresetsManager() *PresetsManager {
 	return &PresetsManager{maxCount: MaxPresetCount}
 }
 
-// Add is a no-op.  Mirrors `pub fn add(_: *PresetsManager, preset)`.
+// Add 是 no-op。
 func (*PresetsManager) Add(domain.TimerPreset) error { return nil }
 
-// Remove is a no-op.  Mirrors `pub fn remove(_: *PresetsManager, _: usize)`.
+// Remove 是 no-op。
 func (*PresetsManager) Remove(int) {}
 
-// Get always returns nil.  Mirrors `pub fn get(...) ?*const TimerPreset`.
+// Get 恒返回 nil。
 func (*PresetsManager) Get(int) *domain.TimerPreset { return nil }
 
-// GetAll returns an empty slice.  Mirrors `pub fn getAll(...) []const TimerPreset`.
+// GetAll 返回空 slice。
 func (*PresetsManager) GetAll() []domain.TimerPreset { return nil }
 
-// GetByName always returns nil.  Mirrors `pub fn getByName(...) ?*const TimerPreset`.
+// GetByName 恒返回 nil。
 func (*PresetsManager) GetByName(string) *domain.TimerPreset { return nil }
 
-// Count always returns 0.  Mirrors `pub fn count(...) usize`.
+// Count 恒返回 0。
 func (*PresetsManager) Count() int { return 0 }
 
-// Clear is a no-op.  Mirrors `pub fn clear(...)`.
+// Clear 是 no-op。
 func (*PresetsManager) Clear() {}
 
-// Deinit is a no-op.  Mirrors `pub fn deinit(...)`.
+// Deinit 是 no-op。
 func (*PresetsManager) Deinit() {}
 
-// MaxCount returns the configured maximum (default 999).
+// MaxCount 返回配置的最大值（默认 999）。
 func (p *PresetsManager) MaxCount() int {
 	if p == nil {
 		return MaxPresetCount

@@ -5,9 +5,9 @@
 
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
-import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, PhotoIconComponent } from "../utils/icons";
+import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon } from "../utils/icons";
 
-type Page = "timer" | "habits" | "stats" | "settings" | "gallery";
+type Page = "timer" | "habits" | "stats" | "settings";
 
 interface SidebarProps {
     /** 当前所在页面 */
@@ -45,13 +45,6 @@ const navItems = [
             <SettingsIcon className="h-5 w-5" />
         ),
     },
-    {
-        id: "gallery" as const,
-        labelKey: "nav.gallery",
-        icon: (
-            <PhotoIconComponent className="h-5 w-5" />
-        ),
-    },
 ];
 
 export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavigate }) => {
@@ -59,13 +52,13 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
         <aside className="my-sidebar flex flex-col w-60 h-full shrink-0">
             {/* Logo */}
             <div className="p-4 shadow-[inset_0_-1px_0_color-mix(in_oklab,var(--my-outline)_22%,transparent)]">
-                <h1 className="text-xl font-bold flex items-center gap-2 text-white/90">
+                <h1 className="text-xl font-bold flex items-center gap-2 text-[var(--my-on-surface)] opacity-90">
                     <StarIconComponent />
-                    <span className="text-white">Little Timer</span>
+                    <span className="text-[var(--my-on-surface)]">Little Timer</span>
                 </h1>
             </div>
 
-            {/* Navigation */}
+            {/* 导航 */}
             <nav className="flex-1 p-2">
                 {navItems.map((item) => (
                     <button
@@ -80,8 +73,8 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
                 ))}
             </nav>
 
-            {/* Footer */}
-            <div className="p-4 text-center text-sm text-white/60 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--my-outline)_18%,transparent)]">
+            {/* 底部 */}
+            <div className="p-4 text-center text-sm text-[var(--my-on-surface)] opacity-60 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--my-outline)_18%,transparent)]">
                 <p>v1.0.0</p>
             </div>
         </aside>

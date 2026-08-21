@@ -1,23 +1,12 @@
-// Package domain holds the core types and business-logic primitives of
-// little-timer. This file is the Go port of the Zig module
-// `src/core/interface.zig`.
-//
-// Mapping rules used here:
-//
-//   - Zig `enum`           → Go `type X int` with `iota` constants.
-//   - Zig `union(enum)`    → Go sealed interface (marker method) with concrete
-//     struct variants.
-//   - Zig `struct { x = d }` → Go struct with field tags + a `New…` constructor
-//     that applies the Zig defaults.
-//   - Zig `[]const u8`     → Go `string` (immutable, no allocator needed).
-//   - Zig `u64`/`i64`/`u32`→ Go `uint64`/`int64`/`uint32` (matched bit widths).
+// Package domain 持有 little-timer 的核心类型与业务逻辑原语：
+// 时钟枚举、事件类型、预设，以及设置/备份配置 struct。
 package domain
 
 import "time"
 
 var now = time.Now
 
-// TodayString returns today's date in the user's timezone offset from UTC.
+// TodayString 按用户相对 UTC 的时区偏移返回今天的日期。
 func TodayString(offsetHours int8) string {
 	return formatDateAtOffset(now(), offsetHours)
 }
@@ -26,9 +15,7 @@ func formatDateAtOffset(base time.Time, offsetHours int8) string {
 	return base.UTC().Add(time.Duration(offsetHours) * time.Hour).Format("2006-01-02")
 }
 
-// -----------------------------------------------------------------------------
-// Time-unit constants (seconds).
-// -----------------------------------------------------------------------------
+// 时间单位常量（秒）。
 
 const (
 	Second = 1
@@ -38,16 +25,14 @@ const (
 	Year   = 31536000
 )
 
-// -----------------------------------------------------------------------------
-// Defaults — mirror DEFAULT_* constants from interface.zig.
-// -----------------------------------------------------------------------------
+// 默认值。
 
 const (
-	DefaultWorkDurationSeconds        = 25 * Minute // 1500 s (pomodoro work)
-	DefaultRestDurationSeconds        = 5 * Minute  // 300 s
-	DefaultMaxStopwatchSeconds        = 24 * Hour   // 86400 s
-	DefaultMaxDurationSeconds         = Day         // 86400 s
-	DefaultMaxYearSeconds             = 365 * Year  // ~1 year
+	DefaultWorkDurationSeconds        = 25 * Minute // 番茄钟工作时长
+	DefaultRestDurationSeconds        = 5 * Minute
+	DefaultMaxStopwatchSeconds        = 24 * Hour
+	DefaultMaxDurationSeconds         = Day
+	DefaultMaxYearSeconds             = 365 * Year
 	DefaultTickIntervalMs             = 1000
 	DefaultAutoSaveIntervalMs         = 5000
 	MinTickIntervalMs                 = 100
@@ -58,12 +43,7 @@ const (
 	DefaultGoalSeconds = 1500
 )
 
-// -----------------------------------------------------------------------------
-// ModeEnum — replaces `pub const ModeEnumT = enum { COUNTDOWN_MODE,
-// STOPWATCH_MODE };` from interface.zig.
-// -----------------------------------------------------------------------------
-
-// ModeEnum is the high-level mode the clock is currently running in.
+// ModeEnum 是时钟当前运行的高层模式。
 type ModeEnum int
 
 const (
@@ -71,7 +51,7 @@ const (
 	StopwatchMode
 )
 
-// String renders a stable label for logs/diagnostics.
+// String 为日志/诊断输出稳定标签。
 func (m ModeEnum) String() string {
 	switch m {
 	case CountdownMode:
@@ -83,10 +63,8 @@ func (m ModeEnum) String() string {
 	}
 }
 
-// DefaultMode is the persisted "preferred mode" stored in SettingsConfig.
-// Mirrors `pub const DefaultMode = enum { countdown, stopwatch };` in
-// interface.zig (string-valued in Zig because it serialises to JSON; Go
-// serialises via `String()` if a JSON tag is added later).
+// DefaultMode 是 SettingsConfig 中持久化的“首选模式”，
+// 通过 `String()` 序列化为字符串形式。
 type DefaultMode int
 
 const (
@@ -105,7 +83,7 @@ func (d DefaultMode) String() string {
 	}
 }
 
-// ParseDefaultMode converts a string to DefaultMode, defaulting to countdown.
+// ParseDefaultMode 把字符串解析为 DefaultMode，默认取倒计时。
 func ParseDefaultMode(s string) DefaultMode {
 	if s == "stopwatch" {
 		return DefaultModeStopwatch
@@ -113,11 +91,7 @@ func ParseDefaultMode(s string) DefaultMode {
 	return DefaultModeCountdown
 }
 
-// -----------------------------------------------------------------------------
-// ClockTaskConfig — port of `pub const ClockTaskConfig = struct { … }`.
-// -----------------------------------------------------------------------------
-
-// CountdownConfig is the configuration block for the countdown (timer) mode.
+// CountdownConfig 是倒计时（timer）模式的配置块。
 type CountdownConfig struct {
 	DurationSeconds     uint64 `json:"duration_seconds"`
 	Loop                bool   `json:"loop"`
@@ -125,7 +99,7 @@ type CountdownConfig struct {
 	LoopCount           uint32 `json:"loop_count"`
 }
 
-// NewDefaultCountdownConfig returns the pomodoro-style default: 25 min, no loop.
+// NewDefaultCountdownConfig 返回番茄钟式默认值：25 分钟、不循环。
 func NewDefaultCountdownConfig() CountdownConfig {
 	return CountdownConfig{
 		DurationSeconds:     DefaultWorkDurationSeconds,
@@ -135,28 +109,28 @@ func NewDefaultCountdownConfig() CountdownConfig {
 	}
 }
 
-// StopwatchConfig is the configuration block for the stopwatch mode.
+// StopwatchConfig 是正计时模式的配置块。
 type StopwatchConfig struct {
 	MaxSeconds uint64 `json:"max_seconds"`
 }
 
-// NewDefaultStopwatchConfig returns the default 24-hour cap.
+// NewDefaultStopwatchConfig 返回默认的 24 小时上限。
 func NewDefaultStopwatchConfig() StopwatchConfig {
 	return StopwatchConfig{
 		MaxSeconds: DefaultMaxStopwatchSeconds,
 	}
 }
 
-// ClockTaskConfig is the union of countdown + stopwatch config plus a default
-// mode — stored alongside presets and settings.
+// ClockTaskConfig 是倒计时 + 正计时配置的合体，外加默认模式 ——
+// 与预设和设置一起持久化。
 type ClockTaskConfig struct {
 	DefaultMode ModeEnum        `json:"default_mode"`
 	Countdown   CountdownConfig `json:"countdown"`
 	Stopwatch   StopwatchConfig `json:"stopwatch"`
 }
 
-// NewDefaultClockTaskConfig returns a config pre-populated with the Zig
-// defaults: countdown mode, 25 min work, 24 h stopwatch cap.
+// NewDefaultClockTaskConfig 返回预置默认值的配置：倒计时模式、
+// 25 分钟工作、24 小时正计时代上限。
 func NewDefaultClockTaskConfig() ClockTaskConfig {
 	return ClockTaskConfig{
 		DefaultMode: CountdownMode,
@@ -165,83 +139,69 @@ func NewDefaultClockTaskConfig() ClockTaskConfig {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// ClockEvent — sealed-interface discriminated union (was a Zig tagged union).
-// -----------------------------------------------------------------------------
-
-// ClockEvent is the sum type of every event the clock accepts. In Zig this was
-// `pub const ClockEvent = union(enum) { tick: i64, … };`; in Go the marker
-// method `isClockEvent()` seals the interface to the concrete variants below
-// (and to no others). Adding a new variant means writing a new struct that
-// implements the marker.
+// ClockEvent 是时钟可接受的每种事件的和类型。标记方法 `isClockEvent()`
+// 把 interface 密封为下面这些具体变体（不含其他）。新增变体意味着写一个
+// 实现该标记方法的新 struct。
 type ClockEvent interface {
 	isClockEvent()
 }
 
-// TickEvent advances both countdown and stopwatch states by DeltaMs.
+// TickEvent 让倒计时和正计时状态各自前进 DeltaMs。
 type TickEvent struct {
 	DeltaMs int64
 }
 
 func (TickEvent) isClockEvent() {}
 
-// UserStartTimerEvent starts (or resumes) the clock.
+// UserStartTimerEvent 启动（或恢复）时钟。
 type UserStartTimerEvent struct{}
 
 func (UserStartTimerEvent) isClockEvent() {}
 
-// UserPauseTimerEvent pauses the clock.
+// UserPauseTimerEvent 暂停时钟。
 type UserPauseTimerEvent struct{}
 
 func (UserPauseTimerEvent) isClockEvent() {}
 
-// UserResetTimerEvent restores the initial configuration.
+// UserResetTimerEvent 恢复初始配置。
 type UserResetTimerEvent struct{}
 
 func (UserResetTimerEvent) isClockEvent() {}
 
-// UserFinishTimerEvent freezes the clock and marks it as finished (for stats).
+// UserFinishTimerEvent 冻结时钟并标记为已完成（供统计使用）。
 type UserFinishTimerEvent struct{}
 
 func (UserFinishTimerEvent) isClockEvent() {}
 
-// UserChangeModeEvent switches modes with hard-coded defaults (see
-// ClockManager.handleEvent for the reset semantics).
+// UserChangeModeEvent 用硬编码默认值切换模式
+// （复位语义见 ClockManager.handleEvent）。
 type UserChangeModeEvent struct {
 	Mode ModeEnum
 }
 
 func (UserChangeModeEvent) isClockEvent() {}
 
-// UserChangeConfigEvent replaces the current configuration wholesale.
+// UserChangeConfigEvent 整体替换当前配置。
 type UserChangeConfigEvent struct {
 	Config ClockTaskConfig
 }
 
 func (UserChangeConfigEvent) isClockEvent() {}
 
-// -----------------------------------------------------------------------------
-// TimerPreset — port of `pub const TimerPreset = struct { … };`.
-// -----------------------------------------------------------------------------
-
-// TimerPreset is a saved, named configuration the user can recall.
+// TimerPreset 是用户可随时取用的已命名保存配置。
 type TimerPreset struct {
 	Name   string          `json:"name"`
 	Mode   ModeEnum        `json:"mode"`
 	Config ClockTaskConfig `json:"config"`
 }
 
-// -----------------------------------------------------------------------------
-// SettingsConfig — port of `pub const SettingsConfig = struct { … };`.
-// -----------------------------------------------------------------------------
-
-// SettingsBasic captures the basic user preferences.
+// SettingsBasic 收集基础用户偏好。
 type SettingsBasic struct {
-	Timezone    int8        `json:"timezone"` // hours east of UTC, default 8 (CN)
-	Language    string      `json:"language"` // e.g. "ZH"
+	Timezone    int8        `json:"timezone"` // 相对 UTC 的小时数，默认 8（中国）
+	Language    string      `json:"language"` // 例如 "ZH"
 	DefaultMode DefaultMode `json:"default_mode"`
 	ThemeMode   string      `json:"theme_mode"` // "dark" | "light" | ...
-	Wallpaper   string      `json:"wallpaper"`  // global wallpaper path/URL
+	Wallpaper   string      `json:"wallpaper"`  // 全局壁纸路径/URL
 }
 
 func NewDefaultSettingsBasic() SettingsBasic {
@@ -254,7 +214,7 @@ func NewDefaultSettingsBasic() SettingsBasic {
 	}
 }
 
-// SettingsLogging captures the logging + perf tuning knobs.
+// SettingsLogging 收集日志与性能调优开关。
 type SettingsLogging struct {
 	Level             string `json:"level"`
 	EnableTimestamp   bool   `json:"enable_timestamp"`
@@ -277,7 +237,7 @@ func NewDefaultSettingsLogging() SettingsLogging {
 	}
 }
 
-// SettingsAuth captures the bearer-token auth toggle.
+// SettingsAuth 收集 bearer-token 鉴权开关。
 type SettingsAuth struct {
 	AuthEnabled bool   `json:"auth_enabled"`
 	AuthToken   string `json:"auth_token"`
@@ -290,7 +250,7 @@ func NewDefaultSettingsAuth() SettingsAuth {
 	}
 }
 
-// SettingsConfig is the top-level persisted application configuration.
+// SettingsConfig 是顶层持久化应用配置。
 type SettingsConfig struct {
 	Basic         SettingsBasic   `json:"basic"`
 	ClockDefaults ClockTaskConfig `json:"clock_defaults"`
@@ -298,9 +258,8 @@ type SettingsConfig struct {
 	Auth          SettingsAuth    `json:"auth"`
 }
 
-// NewDefaultSettingsConfig returns a fully-populated SettingsConfig that
-// matches the Zig defaults. The clock_defaults block uses `New…` to apply
-// nested defaults too.
+// NewDefaultSettingsConfig 返回填满默认值的 SettingsConfig。
+// clock_defaults 块用 `New…` 函数构造，嵌套默认值同样生效。
 func NewDefaultSettingsConfig() SettingsConfig {
 	return SettingsConfig{
 		Basic:         NewDefaultSettingsBasic(),
@@ -310,38 +269,34 @@ func NewDefaultSettingsConfig() SettingsConfig {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// SettingsEvent — secondary union, ported for parity with interface.zig.
-// The HTTP layer consumes JSON payloads; this just keeps the shape available.
-// -----------------------------------------------------------------------------
+// SettingsEvent —— settings 层的次要 union。
+// HTTP 层消费 JSON payload；这里只是保留这个形状。
 
-// SettingsGetEvent asks the settings layer to serialise the current config
-// into the supplied buffer slot (no-op in Go — http layer handles it).
+// SettingsGetEvent 请求 settings 层把当前配置序列化到指定的 buffer
+// 槽位（在 Go 中是 no-op —— 由 http 层处理）。
 type SettingsGetEvent struct {
-	// Slot is a logical "where to write" hint — in Go the http layer reads
-	// directly from the store, so this is reserved for future use.
+	// Slot 是逻辑上的“写到哪”提示 —— Go 里 http 层直接读 store，
+	// 所以它保留给将来使用。
 	Slot string
 }
 
 func (SettingsGetEvent) isSettingsEvent() {}
 
-// SettingsChangeEvent carries a JSON-encoded config to apply.
+// SettingsChangeEvent 携带待应用的 JSON 编码配置。
 type SettingsChangeEvent struct {
 	JSON string
 }
 
 func (SettingsChangeEvent) isSettingsEvent() {}
 
-// SettingsEvent is the discriminated union over settings-layer events.
+// SettingsEvent 是 settings 层事件的判别 union。
 type SettingsEvent interface {
 	isSettingsEvent()
 }
 
-// -----------------------------------------------------------------------------
-// EventType — top-level dispatcher between clock and settings streams.
-// -----------------------------------------------------------------------------
+// EventType —— clock 与 settings 两条事件流的顶层派发器。
 
-// EventType is the discriminated union used by the cross-cutting event bus.
+// EventType 是横切事件总线使用的判别 union。
 type EventType interface {
 	isEventType()
 }
@@ -349,21 +304,19 @@ type EventType interface {
 func (ClockEventWrapper) isEventType()    {}
 func (SettingsEventWrapper) isEventType() {}
 
-// ClockEventWrapper carries a ClockEvent through the bus.
+// ClockEventWrapper 让 ClockEvent 经由总线传递。
 type ClockEventWrapper struct {
 	Event ClockEvent
 }
 
-// SettingsEventWrapper carries a SettingsEvent through the bus.
+// SettingsEventWrapper 让 SettingsEvent 经由总线传递。
 type SettingsEventWrapper struct {
 	Event SettingsEvent
 }
 
-// -----------------------------------------------------------------------------
-// Backup target / info / config — ported verbatim from interface.zig.
-// -----------------------------------------------------------------------------
+// 备份 target / info / config。
 
-// BackupTargetType selects which destination a backup uses.
+// BackupTargetType 选择备份使用的目标端。
 type BackupTargetType int
 
 const (
@@ -385,13 +338,13 @@ func (b BackupTargetType) String() string {
 	}
 }
 
-// UnlockResult is returned by a credentials unlock attempt.
+// UnlockResult 是凭据解锁尝试的返回值。
 type UnlockResult struct {
 	Success     bool  `json:"success"`
 	LockedUntil int64 `json:"locked_until"`
 }
 
-// MasterPasswordStatus summarises the credentials subsystem state.
+// MasterPasswordStatus 概览凭据子系统状态。
 type MasterPasswordStatus struct {
 	HasPassword bool  `json:"has_password"`
 	Unlocked    bool  `json:"unlocked"`
@@ -399,54 +352,52 @@ type MasterPasswordStatus struct {
 	UnlockTime  int64 `json:"unlock_time"`
 }
 
-// ApiAction is the cross-layer UI trigger (port of `pub const ApiAction =
-// union(enum)`). Kept here so downstream packages can share the contract;
-// modal params are stored as a free-form map for now.
+// ApiAction 是跨层的 UI 触发器。放在这里以便下游包共享该契约；
+// modal 参数目前是自由形式的 map。
 type ApiAction struct {
 	ShowModal *ApiShowModal `json:"show_modal,omitempty"`
 }
 
-// ApiShowModal is the modal-show variant of ApiAction.
+// ApiShowModal 是 ApiAction 的显示 modal 变体。
 type ApiShowModal struct {
 	Target string            `json:"target"`
 	Params map[string]string `json:"params"`
 }
 
-// BackupConfig is the persisted backup configuration. All WebDAV / S3 fields
-// are present (even when unused by the active target) so a single struct
-// round-trips through JSON without dropping user input.
+// BackupConfig 是持久化的备份配置。所有 WebDAV / S3 字段都存在
+// （即使当前 target 用不到），这样一个 struct 就能完整往返 JSON、
+// 不丢用户输入。
 type BackupConfig struct {
 	Enabled        bool             `json:"enabled"`
 	AutoBackup     bool             `json:"auto_backup"`
-	AutoBackupSecs uint64           `json:"auto_backup_interval"` // seconds
+	AutoBackupSecs uint64           `json:"auto_backup_interval"` // 秒
 	TargetType     BackupTargetType `json:"target_type"`
 
-	// Local-only.
+	// 仅 Local 使用。
 	LocalPath string `json:"local_path"`
 
-	// WebDAV-only.
+	// 仅 WebDAV 使用。
 	WebDAVURL        string `json:"webdav_url"`
 	WebDAVUsername   string `json:"webdav_username"`
-	WebDAVPassword   string `json:"webdav_password"` // encrypted at rest
+	WebDAVPassword   string `json:"webdav_password"` // 静态加密
 	WebDAVPathPrefix string `json:"webdav_path_prefix"`
 
-	// S3-only.
+	// 仅 S3 使用。
 	S3Endpoint   string `json:"s3_endpoint"`
 	S3Bucket     string `json:"s3_bucket"`
 	S3Region     string `json:"s3_region"`
 	S3AccessKey  string `json:"s3_access_key"`
-	S3SecretKey  string `json:"s3_secret_key"` // encrypted at rest
+	S3SecretKey  string `json:"s3_secret_key"` // 静态加密
 	S3PathPrefix string `json:"s3_path_prefix"`
 
-	// Credentials.
+	// 凭据。
 	HasMasterPassword        bool   `json:"has_master_password"`
 	CredentialsUnlockTime    int64  `json:"credentials_unlock_time"`
 	CredentialUnlockAttempts uint32 `json:"credential_unlock_attempts"`
 	CredentialLockedUntil    int64  `json:"credential_locked_until"`
 }
 
-// NewDefaultBackupConfig returns the Zig defaults: disabled, local target,
-// empty paths.
+// NewDefaultBackupConfig 返回默认值：关闭、local target、路径为空。
 func NewDefaultBackupConfig() BackupConfig {
 	return BackupConfig{
 		Enabled:                  false,
@@ -471,14 +422,14 @@ func NewDefaultBackupConfig() BackupConfig {
 	}
 }
 
-// BackupInfo describes a single backup artifact (file listing, history, etc).
+// BackupInfo 描述单个备份产物（文件列表、历史等）。
 type BackupInfo struct {
 	Name      string `json:"name"`
 	Timestamp int64  `json:"timestamp"`
 	SizeBytes uint64 `json:"size_bytes"`
 }
 
-// BoolToInt mirrors Zig's `@intFromBool`.  SQLite BOOLEAN stores 0/1.
+// BoolToInt 把 bool 转成 SQLite BOOLEAN 存储的 0/1 表示。
 func BoolToInt(b bool) int {
 	if b {
 		return 1
@@ -486,11 +437,7 @@ func BoolToInt(b bool) int {
 	return 0
 }
 
-// -----------------------------------------------------------------------------
-// Time helpers — keep wall-clock semantics identical to the Zig port.
-// -----------------------------------------------------------------------------
+// 时间辅助函数。
 
-// NowMs returns wall-clock milliseconds since the Unix epoch. The Zig
-// reference uses `std.time.nanoTimestamp() / 1_000_000`; Go's `UnixMilli()`
-// is the equivalent.
+// NowMs 返回自 Unix epoch 起的墙钟毫秒。
 func NowMs() int64 { return time.Now().UnixMilli() }

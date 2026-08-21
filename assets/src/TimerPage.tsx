@@ -267,7 +267,6 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                         });
                     }
                 }).catch(() => {
-                    // 忽略通知权限错误
                 });
             }
         }

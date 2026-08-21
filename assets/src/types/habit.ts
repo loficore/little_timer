@@ -1,5 +1,3 @@
-// 习惯追踪相关类型定义
-
 /**
  * @description 习惯集合信息
  */
@@ -65,7 +63,7 @@ export interface HabitWithProgress extends Habit {
   /** 今日完成次数 */
   today_count: number;
   /** 当前进度百分比（0-100） */
-  progress: number; // 0-100 percentage
+  progress: number;
 }
 
 /**

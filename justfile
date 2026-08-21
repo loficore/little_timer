@@ -1,14 +1,12 @@
 set shell := ["bash", "-eu", "-c"]
 set dotenv-load
 
-# ── 1. 动态加载本地私有配置 ──────────────────────────────────────────
 import? "justfile.local"
 
 SSH_TARGET := env_var_or_default("MY_ACT_SSH_TARGET", "")
 REMOTE_PATH := env_var_or_default("MY_ACT_REMOTE_PATH", "")
 ROOT := justfile_directory()
 
-# ── 2. 核心公共命令 ──────────────────────────────────────────────────
 ci-run: go-build-check build-check
 
 act:
@@ -19,8 +17,6 @@ act:
             echo "=== [本地调试] 在当前机器运行 act ==="; \
             act --secret-file .act.env -P ubuntu-latest=catthehacker/ubuntu:act-latest; \
         fi
-
-# ── 3. 原有公共命令（保持不变） ────────────────────────────────────────
 
 frontend-dev:
         @./scripts/dev.sh
@@ -36,8 +32,6 @@ frontend-build:
 
 backend-dev:
         @zig build -Dembed_ui=false -Doptimize=Debug run -- --webview
-
-# ── Go backend (neo-src) ──────────────────────────────────────────────
 
 go_src := justfile_directory() / "neo-src"
 
@@ -148,8 +142,6 @@ go-clean:
 
 go-build-embed:
         @cd {{go_src}} && ../scripts/go-wrapper.sh build -tags embed_ui -o bin/server ./cmd/server
-
-# ── Android ────────────────────────────────────────────────────────────
 
 apk:
         @./scripts/build-android.sh

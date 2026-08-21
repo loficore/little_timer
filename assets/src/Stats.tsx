@@ -112,7 +112,6 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
         }, false, false);
       }
     } catch {
-      // 忽略运行期瞬态错误，下一轮渲染会覆盖。
     }
 
     try {
@@ -127,7 +126,6 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
         barChart.update("none");
       }
     } catch {
-      // 忽略运行期瞬态错误，下一轮渲染会覆盖。
     }
   };
 
@@ -137,7 +135,6 @@ export const StatsPage: FunctionalComponent<StatsPageProps> = ({ onBackClick }) 
   ): Promise<void> => {
     queueRef.current = queueRef.current
       .catch(() => {
-        // 吞掉上一轮异常，避免队列中断。
       })
       .then(task);
     return queueRef.current;

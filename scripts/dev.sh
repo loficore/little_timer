@@ -11,7 +11,6 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-# 解析参数
 MODE="http"
 for arg in "$@"; do
     case $arg in

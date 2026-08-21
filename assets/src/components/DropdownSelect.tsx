@@ -46,7 +46,6 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 关闭下拉菜单当点击外部时
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (

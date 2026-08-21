@@ -1,22 +1,6 @@
-// Package handlers — Timer endpoints.
+// Package handlers — 计时器 endpoint。
 //
-// File `timer.go` is the Go port of the timer-related handlers in
-// std_server.zig.  Each handler pulls the *App from the Gin context
-// (set by the auth middleware) and mirrors the Zig response shapes
-// byte-for-byte.
-//
-// Endpoints (paths match Zig exactly):
-//
-//	GET  /api/state             → handleGetState
-//	GET  /api/timer/progress    → handleGetProgress
-//	POST /api/start             → handleStart
-//	POST /api/pause             → handlePause
-//	POST /api/reset             → handleReset
-//	POST /api/finish            → handleFinish
-//	POST /api/mode              → handleModeSwitch
-//	POST /api/timer/rest        → handleStartRest
-//	GET  /api/timer/config      → handleGetConfig
-//	POST /api/timer/config      → handleUpdateConfig
+// 每个计时器处理器从 Gin 上下文取 *App（由 auth 中间件设置）。
 package handlers
 
 import (
@@ -32,22 +16,20 @@ import (
 	"little-timer/internal/http/app"
 )
 
-// ponytail: package-level constants for hard-coded timer durations
+// 硬编码计时器时长的包级常量。
 const (
-	DefaultWorkDuration = 25 * 60 // seconds
-	DefaultRestDuration = 5 * 60  // seconds
+	DefaultWorkDuration = 25 * 60 // 秒
+	DefaultRestDuration = 5 * 60  // 秒
 )
 
-// appFromCtx pulls the *App placed by the auth middleware.  Panics if
-// the middleware was not installed — that's a programmer error, not a
-// runtime condition to handle.
+// appFromCtx 取出 auth 中间件放入的 *App。若中间件未安装则
+// panic —— 那是程序员错误，不是需要处理的运行时状况。
 func appFromCtx(c *gin.Context) *app.App {
 	return c.MustGet("app").(*app.App)
 }
 
-// buildStateResponse mirrors `buildStateJson` in std_server.zig.
-// Returns the JSON object as a map[string]any so the field order is
-// stable across Go versions (Gin's JSON encoder sorts keys).
+// buildStateResponse 以 map 形式返回状态 JSON 对象，使字段顺序
+// 在各 Go 版本间保持稳定（Gin 的 JSON 编码器会对键排序）。
 func buildStateResponse(state *domain.ClockState, modeKey string, timezone int8, habitID *int64) gin.H {
 	out := gin.H{
 		"time":           state.GetTimeInfo(),
@@ -74,12 +56,8 @@ func modeKey(m domain.ModeEnum) string {
 	return "stopwatch"
 }
 
-// -----------------------------------------------------------------------------
 // GET /api/state
-// -----------------------------------------------------------------------------
 
-// handleGetState mirrors `handleGetState` — returns the current clock
-// state as JSON.
 func TimerState(c *gin.Context) {
 	a := appFromCtx(c)
 	state := a.Clock.Update()
@@ -92,13 +70,10 @@ func TimerState(c *gin.Context) {
 	c.JSON(http.StatusOK, buildStateResponse(state, modeKey(state.GetMode()), tz, habitID))
 }
 
-// -----------------------------------------------------------------------------
 // GET /api/timer/progress
-// -----------------------------------------------------------------------------
 
-// handleGetProgress mirrors `handleGetProgress` — returns the live
-// progress + mode + paused/finished flags.  Lazily loads progress if
-// no current session is active.
+// handleGetProgress 返回实时进度 + 模式 + paused/finished 标志。
+// 若无活动会话则惰性加载进度。
 func TimerProgress(c *gin.Context) {
 	a := appFromCtx(c)
 
@@ -128,12 +103,9 @@ func TimerProgress(c *gin.Context) {
 	})
 }
 
-// -----------------------------------------------------------------------------
 // POST /api/start
-// -----------------------------------------------------------------------------
 
-// startRequest is the JSON body of `POST /api/start`.  All fields are
-// optional — defaults mirror the Zig source.
+// startRequest 是 `POST /api/start` 的 JSON 请求体。所有字段均可选。
 type startRequest struct {
 	HabitID      *int64 `json:"habit_id,omitempty"`
 	Mode         string `json:"mode,omitempty"`
@@ -142,12 +114,12 @@ type startRequest struct {
 	LoopCount    int64  `json:"loop_count,omitempty"`
 }
 
-// handleStart mirrors `handleStart`.  Body: {habit_id?, mode?, work_duration?, rest_duration?, loop_count?}.
+// handleStart。Body: {habit_id?, mode?, work_duration?, rest_duration?, loop_count?}。
 func TimerStart(c *gin.Context) {
 	a := appFromCtx(c)
 
 	var req startRequest
-	_ = c.ShouldBindJSON(&req) // body is optional — defaults below.
+	_ = c.ShouldBindJSON(&req) // body 可选——下方有默认值。
 
 	mode := "stopwatch"
 	if req.Mode == "countdown" {
@@ -163,10 +135,9 @@ func TimerStart(c *gin.Context) {
 	a.Lock()
 	defer a.Unlock()
 
-	// Already-running branch — Zig keeps the same session and reports
-	// the current habit id.
+	// 已在运行的分支——保留同一会话并上报当前 habit id。
 	if a.CurrentTimerSessionID != nil {
-		// Look up the live row.
+		// 查询实时数据行。
 		row, err := a.SQLite.Timers().GetTimerSessionByID(*a.CurrentTimerSessionID)
 		if err == nil {
 			if row.IsRunning && !row.IsFinished && !row.IsPaused {
@@ -182,7 +153,7 @@ func TimerStart(c *gin.Context) {
 				})
 				return
 			}
-			// Paused branch — resume.
+			// 暂停分支——恢复。
 			state := a.Clock.Update()
 			if state.IsPaused() && (!state.IsFinished() || row.IsPaused) {
 				pausedTotal := row.PausedTotalSeconds
@@ -210,7 +181,7 @@ func TimerStart(c *gin.Context) {
 				return
 			}
 		}
-		// Stale session — clean up.
+		// 过期会话——清理。
 		a.ResetTimerSession()
 	}
 
@@ -228,11 +199,8 @@ func TimerStart(c *gin.Context) {
 	})
 }
 
-// -----------------------------------------------------------------------------
 // POST /api/pause
-// -----------------------------------------------------------------------------
 
-// handlePause mirrors `handlePause`.
 func TimerPause(c *gin.Context) {
 	a := appFromCtx(c)
 	a.Lock()
@@ -242,11 +210,8 @@ func TimerPause(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "paused"})
 }
 
-// -----------------------------------------------------------------------------
 // POST /api/reset
-// -----------------------------------------------------------------------------
 
-// handleReset mirrors `handleReset`.
 func TimerReset(c *gin.Context) {
 	a := appFromCtx(c)
 	a.Lock()
@@ -257,12 +222,10 @@ func TimerReset(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "reset"})
 }
 
-// -----------------------------------------------------------------------------
 // POST /api/finish
-// -----------------------------------------------------------------------------
 
-// handleFinish mirrors `handleFinish`.  On success creates a daily
-// session row tied to the current habit so habit stats stay in sync.
+// handleFinish。成功时创建一条与当前 habit 关联的每日会话记录，
+// 使习惯统计保持同步。
 func TimerFinish(c *gin.Context) {
 	a := appFromCtx(c)
 	a.Lock()
@@ -273,9 +236,8 @@ func TimerFinish(c *gin.Context) {
 
 	elapsed, err := a.FinishTimerSession()
 	if err != nil {
-		// Fallback path — same shape as Zig: emit user_finish_timer,
-		// compute elapsed from the clock state, and persist a daily
-		// session if there was an active habit.
+		// 兜底路径:发出 user_finish_timer，从时钟状态计算 elapsed，
+		// 并在存在活动 habit 时持久化一条每日会话记录。
 		a.Clock.HandleEvent(domain.UserFinishTimerEvent{})
 		state := a.Clock.Update()
 		elapsedSeconds := state.GetElapsedSeconds()
@@ -306,21 +268,17 @@ func TimerFinish(c *gin.Context) {
 	})
 }
 
-// -----------------------------------------------------------------------------
 // POST /api/mode
-// -----------------------------------------------------------------------------
 
-// handleModeSwitch mirrors `handleModeChange`.  Body is a JSON object
-// `{"mode":"countdown"|"stopwatch"}`.
+// handleModeSwitch。Body 为 JSON 对象 `{"mode":"countdown"|"stopwatch"}`。
 func TimerMode(c *gin.Context) {
 	a := appFromCtx(c)
 
 	var body struct {
 		Mode string `json:"mode"`
 	}
-	// Body is the raw mode string in Zig (no JSON object).  We accept
-	// either form: a JSON object with "mode", or a bare string.  The
-	// browser client always sends JSON, so this is the common path.
+	// 两种形式都接受:带 "mode" 的 JSON 对象，或裸字符串。浏览器客户端
+	// 始终发送 JSON，因此这是常见路径。
 	raw, err := c.GetRawData()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{})
@@ -350,12 +308,9 @@ func TimerMode(c *gin.Context) {
 	})
 }
 
-// -----------------------------------------------------------------------------
 // POST /api/timer/rest
-// -----------------------------------------------------------------------------
 
-// handleStartRest mirrors `handleStartRest` — switches the clock into
-// a 5-minute countdown and starts it.
+// handleStartRest 把时钟切换到 5 分钟倒计时并启动。
 func TimerStartRest(c *gin.Context) {
 	a := appFromCtx(c)
 	const restSeconds uint64 = DefaultRestDuration
@@ -381,14 +336,8 @@ func TimerStartRest(c *gin.Context) {
 	})
 }
 
-// -----------------------------------------------------------------------------
 // GET /api/timer/config  /  POST /api/timer/config
-// -----------------------------------------------------------------------------
 
-// handleConfig returns the currently-active ClockTaskConfig as JSON.
-// Mirrors the Zig GET branch — there's no dedicated handler in std_server.zig,
-// but the route is referenced in task-list comments, so we wire it through
-// to the active state.
 func TimerConfig(c *gin.Context) {
 	a := appFromCtx(c)
 	cfg := a.Settings.BuildClockConfig()
@@ -406,8 +355,8 @@ func TimerConfig(c *gin.Context) {
 	})
 }
 
-// handleUpdateConfig applies a partial config update.  Body mirrors the
-// ClockTaskConfig shape with the same JSON field names as `GET`.
+// TimerUpdateConfig 应用部分配置更新。Body 为 ClockTaskConfig 形状，
+// JSON 字段名与 `GET` 相同。
 func TimerUpdateConfig(c *gin.Context) {
 	a := appFromCtx(c)
 	var req domain.ClockTaskConfig
@@ -415,11 +364,8 @@ func TimerUpdateConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid json"})
 		return
 	}
-	// Reuse the same UserChangeConfigEvent path the Zig source uses.
 	a.Clock.HandleEvent(domain.UserChangeConfigEvent{Config: req})
 	c.JSON(http.StatusOK, gin.H{"status": "config_updated"})
 }
 
-// -----------------------------------------------------------------------------
-// Internals.
-// -----------------------------------------------------------------------------
+// 内部实现。

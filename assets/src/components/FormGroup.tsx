@@ -56,7 +56,7 @@ export const FormGroup: FunctionalComponent<FormGroupProps> = ({
     >
       {/* 标签部分 */}
       <label
-        className={`font-medium text-text-primary-dark ${
+        className={`font-medium text-[var(--my-on-surface)] ${
           isVertical
             ? "text-xs sm:text-sm"
             : "text-sm sm:text-base flex-shrink-0 min-w-[120px]"
@@ -76,7 +76,7 @@ export const FormGroup: FunctionalComponent<FormGroupProps> = ({
             <span className="text-xs text-red-500 font-medium">{error}</span>
           )}
           {!error && hint && (
-            <span className="text-xs text-text-secondary-dark italic">
+            <span className="text-xs text-[var(--my-on-surface-variant)] italic">
               {hint}
             </span>
           )}

@@ -1,27 +1,17 @@
-// Package middleware contains Gin middleware used by the little-timer HTTP
-// server.
-//
-// File `cors.go` is a permissive CORS handler intended for development
-// (frontend running on a different origin).  In production a stricter
-// allow-list would be appropriate.
+// Package middleware 包含 little-timer HTTP server 使用的 Gin 中间件。
 package middleware
 
 import (
 	"github.com/gin-gonic/gin"
 )
 
-// CORS returns a Gin middleware that sets the standard CORS headers and
-// short-circuits OPTIONS preflight requests.
+// CORS 返回一个 Gin 中间件：设置标准 CORS 头并短路 OPTIONS 预检请求。
 //
-// The headers mirror the Zig std_server.zig behaviour: it ran as a single
-// HTTP listener with no CORS layer because the embedded webview shared
-// origin with the server.  Now that the webview is optional and the
-// frontend can be served from `localhost:5173` (Vite dev) or any other
-// host, the http layer needs to allow those origins.
+// 前端可能从 `localhost:5173`（Vite dev）或任意其他 host 提供服务，
+// 所以 HTTP 层必须放行这些 origin。
 //
-// `allowOrigin` controls `Access-Control-Allow-Origin`.  Use "*" for
-// "allow everything"; pass a concrete origin to lock down.  Empty string
-// is treated as "*".
+// `allowOrigin` 控制 `Access-Control-Allow-Origin`。用 "*" 表示
+// “全部允许”；传具体 origin 即可收紧。空字符串按 "*" 处理。
 func CORS(allowOrigin string) gin.HandlerFunc {
 	if allowOrigin == "" {
 		allowOrigin = "*"
@@ -34,7 +24,7 @@ func CORS(allowOrigin string) gin.HandlerFunc {
 		header.Set("Access-Control-Expose-Headers", "Content-Length, Content-Type")
 		header.Set("Access-Control-Max-Age", "86400")
 
-		// CORS spec forbids Allow-Credentials with wildcard origin.
+		// CORS 规范禁止 Allow-Credentials 与通配 origin 同时使用。
 		if allowOrigin != "*" {
 			header.Set("Access-Control-Allow-Credentials", "true")
 		}

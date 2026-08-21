@@ -103,7 +103,6 @@ timer = "Focus"
 habits = "Habits"
 stats = "Stats"
 settings = "Settings"
-gallery = "Wallpaper Gallery"
 
 [gallery]
 title = "Wallpaper Gallery"

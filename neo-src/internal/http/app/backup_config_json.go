@@ -6,14 +6,10 @@ import (
 	"little-timer/internal/domain"
 )
 
-// backupConfigToJSON serialises a BackupConfig to a JSON string suitable
-// for SettingsManager.UpdateBackupConfigFromJSON.
-//
-// The Zig source's `updateBackupConfig` accepts a raw JSON body copied
-// straight from the request; in Go we round-trip through
-// `UpdateBackupConfigFromJSON` which expects the same shape.  Marshalling
-// the BackupConfig struct directly is the simplest way to preserve field
-// names — BackupConfig's tags already match the Zig field names.
+// backupConfigToJSON 把 BackupConfig 序列化成可直接喂给
+// SettingsManager.UpdateBackupConfigFromJSON 的 JSON 字符串。直接 marshal
+// struct 是保留字段名的最简办法 —— BackupConfig 的 JSON tag 本来就和
+// 解析器期望的 wire 形状一致。
 func backupConfigToJSON(cfg domain.BackupConfig) string {
 	b, err := json.Marshal(cfg)
 	if err != nil {

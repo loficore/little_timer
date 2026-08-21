@@ -1,17 +1,8 @@
-// Package handlers — Wallpaper upload / list / serve / delete.
+// Package handlers — 壁纸上传 / 列表 / 服务 / 删除。
 //
-// File `wallpaper.go` ports the wallpaper handlers from std_server.zig.
-// Routes:
-//
-//	POST   /api/wallpapers        → handleWallpaperUpload
-//	GET    /api/wallpapers        → handleWallpaperList
-//	GET    /api/wallpapers/:id    → handleWallpaperServe
-//	DELETE /api/wallpapers/:id    → handleWallpaperDelete
-//
-// Wallpapers are stored as plain files under
-// `<db_dir>/wallpapers/<uuid32>.<ext>`.  The DB is consulted only to derive
-// `db_dir` (the parent of the SQLite file).  The file list endpoint scans
-// the directory directly.
+// 壁纸以普通文件形式存于 `<db_dir>/wallpapers/<uuid32>.<ext>`。
+// 仅在推导 `db_dir`（SQLite 文件的父目录）时访问数据库。
+// 文件列表 endpoint 直接扫描目录。
 package handlers
 
 import (
@@ -29,8 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// wallpapersDir returns the absolute path to the wallpapers directory,
-// creating it on first use.  Mirrors `getWallpapersDir` in std_server.zig.
+// wallpapersDir 返回壁纸目录的绝对路径，首次使用时自动创建。
 func wallpapersDir(dbPath string) (string, error) {
 	dbDir := filepath.Dir(dbPath)
 	if dbDir == "" {
@@ -43,8 +33,7 @@ func wallpapersDir(dbPath string) (string, error) {
 	return dir, nil
 }
 
-// sanitizeFilename replaces every character outside [a-zA-Z0-9._-] with
-// an underscore.  Mirrors Zig `sanitizeFilename`.
+// sanitizeFilename 将 [a-zA-Z0-9._-] 以外的所有字符替换为下划线。
 func sanitizeFilename(name string) string {
 	out := make([]rune, 0, len(name))
 	for _, r := range name {
@@ -61,9 +50,8 @@ func sanitizeFilename(name string) string {
 	return string(out)
 }
 
-// handleWallpaperUpload mirrors `handleUploadWallpaper`.  Accepts a
-// `multipart/form-data` request with a single "file" field.
-// Uses temp-file + 50MB cap + UUID naming + image compression.
+// WallpaperUpload 接受带单个 "file" 字段的 `multipart/form-data` 请求。
+// 采用临时文件 + 50MB 上限 + UUID 命名 + 图像压缩。
 func WallpaperUpload(c *gin.Context) {
 	a := appFromCtx(c)
 
@@ -85,18 +73,17 @@ func WallpaperUpload(c *gin.Context) {
 	}
 	defer src.Close()
 
-	// Extension from original filename (sanitised).
+	// 扩展名取自原始文件名（已净化）。
 	safe := sanitizeFilename(fileHeader.Filename)
 	ext := filepath.Ext(filepath.Base(safe))
 
-	// Stream to temp file with 50MB limit.
 	tmp, err := os.CreateTemp(dir, "upload-*")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"err": "failed to create temp file"})
 		return
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // clean up temp on any exit path
+	defer os.Remove(tmpName)
 
 	limitReader := io.LimitReader(src, 50*1024*1024+1)
 	written, err := io.Copy(tmp, limitReader)
@@ -114,7 +101,6 @@ func WallpaperUpload(c *gin.Context) {
 		return
 	}
 
-	// Process the image (decode, scale, re-encode).
 	tmpFile, err := os.Open(tmpName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"err": "failed to open temp file"})
@@ -143,10 +129,9 @@ func WallpaperUpload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"filename": finalName})
 }
 
-// handleWallpaperList mirrors `handleListWallpapers`.  Returns a JSON
-// array of {name, size, refs} objects — filename only (no path exposure),
-// the on-disk byte size, and the number of rows across habits/habit_sets/
-// settings that reference the wallpaper via `local:<name>`.
+// WallpaperList 返回 {name, size, refs} 对象的 JSON 数组——
+// 仅文件名（不暴露路径）、磁盘字节大小，以及 habits/habit_sets/settings
+// 中通过 `local:<name>` 引用该壁纸的行数。
 func WallpaperList(c *gin.Context) {
 	a := appFromCtx(c)
 	dir, err := wallpapersDir(a.DBPath)
@@ -166,12 +151,12 @@ func WallpaperList(c *gin.Context) {
 		}
 		info, err := os.Stat(filepath.Join(dir, e.Name()))
 		if err != nil {
-			// Skip unreadable entries — consistent with "only readable files".
+			// 跳过不可读条目——与"仅可读文件"语义一致。
 			continue
 		}
 		refs, err := a.SQLite.CountWallpaperRefs("local:" + e.Name())
 		if err != nil {
-			// Reference count query failed; treat as unreferenced.
+			// 引用计数查询失败，按无引用处理。
 			refs = 0
 		}
 		out = append(out, gin.H{"name": e.Name(), "size": info.Size(), "refs": refs})
@@ -179,8 +164,7 @@ func WallpaperList(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-// handleWallpaperServe mirrors `handleServeWallpaper`.  Sets the
-// Content-Type based on the file extension.
+// WallpaperServe 根据文件扩展名设置 Content-Type。
 func WallpaperServe(c *gin.Context) {
 	a := appFromCtx(c)
 	filename := c.Param("id")
@@ -208,14 +192,12 @@ func WallpaperServe(c *gin.Context) {
 	c.File(filePath)
 }
 
-// handleWallpaperDelete mirrors `handleDeleteWallpaper`.
+// WallpaperDelete 先解绑再删除壁纸文件。
 //
-// Order is critical for consistency: first unbind every DB reference to the
-// wallpaper (habits / habit_sets / settings) in a single transaction, then
-// physically remove the file.  If the unbind fails we return 500 and leave
-// the file untouched — no dangling `local:` refs.  If the file removal fails
-// (e.g. missing file) we still return 500; the DB is already unbound, so a
-// retry is safe.
+// 顺序对一致性至关重要:先在一个事务内解除所有 DB 对该壁纸的引用
+// （habits / habit_sets / settings），再物理删除文件。解绑失败则返回 500
+// 且文件保持原样——不留悬空的 `local:` 引用。文件删除失败（如文件缺失）
+// 同样返回 500；此时 DB 已解绑，可安全重试。
 func WallpaperDelete(c *gin.Context) {
 	a := appFromCtx(c)
 	filename := c.Param("id")
@@ -240,8 +222,7 @@ func WallpaperDelete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "unbound": unbound})
 }
 
-// mimeByExt maps a file extension to a MIME type.  Mirrors the Zig
-// extension switch.
+// mimeByExt 将文件扩展名映射为 MIME 类型。
 func mimeByExt(ext string) string {
 	switch strings.ToLower(ext) {
 	case ".jpg", ".jpeg":
@@ -261,11 +242,10 @@ func mimeByExt(ext string) string {
 	}
 }
 
-// contentTypeToExt maps a Content-Type header value to a file extension.
-// Returns "" for unrecognised types.
+// contentTypeToExt 将 Content-Type 头值映射为文件扩展名，无法识别时返回 ""。
 //
-// The match is case-insensitive per RFC 7231 §3.1.1.1 (media types are
-// case-insensitive): "IMAGE/PNG" must map to ".png" just like "image/png".
+// 匹配不区分大小写，依据 RFC 7231 §3.1.1.1（媒体类型大小写不敏感）:
+// "IMAGE/PNG" 必须和 "image/png" 一样映射到 ".png"。
 func contentTypeToExt(contentType string) string {
 	switch strings.ToLower(contentType) {
 	case "image/jpeg":
@@ -285,37 +265,35 @@ func contentTypeToExt(contentType string) string {
 	}
 }
 
-// errURLHostNotAllowed marks an SSRF-blocked URL host.
+// errURLHostNotAllowed 标记被 SSRF 策略拦截的 URL host。
 var errURLHostNotAllowed = errors.New("URL host not allowed")
 
-// netLookupIP is the hostname resolver used by isBlockedHost; a package var
-// so tests can stub it without touching the real DNS.
+// netLookupIP 是 isBlockedHost 使用的主机名解析器；声明为包级变量，
+// 便于测试时替换，不触碰真实 DNS。
 var netLookupIP = net.LookupIP
 
-// isBlockedIP reports whether an IP falls in a network range that the
-// wallpaper fetcher must never contact.  Loopback (127.0.0.0/8, ::1) is
-// deliberately ALLOWED: this is a personal desktop app where an attacker
-// could already reach the local machine, and keeping loopback open lets the
-// dev/test flow use httptest servers bound to 127.0.0.1.  The real SSRF
-// targets are cloud metadata (169.254.169.254) and internal network ranges,
-// and those are all blocked below.
+// isBlockedIP 判断 IP 是否落在壁纸下载器绝不可访问的网段内。
+// loopback（127.0.0.0/8、::1）是有意放行的:这是一款个人桌面应用，
+// 攻击者本就能触达本机；放开 loopback 可让 dev/test 流程使用绑定在
+// 127.0.0.1 上的 httptest 服务器。真正的 SSRF 目标是云 metadata
+// （169.254.169.254）和内网网段，下面全部封禁。
 func isBlockedIP(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
-	// IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1) carry the IPv4
-	// address inside; normalize so the private/loopback checks see it.
+	// IPv4-mapped IPv6 地址（如 ::ffff:127.0.0.1）内嵌 IPv4 地址；
+	// 先归一化，私有/loopback 检查才能看到它。
 	if v4 := ip.To4(); v4 != nil {
 		ip = v4
 	}
-	// Link-local IPv4 (169.254.0.0/16) is NOT covered by net.IP.IsPrivate()
-	// and holds the cloud-metadata endpoint 169.254.169.254.
+	// link-local IPv4（169.254.0.0/16）不在 net.IP.IsPrivate() 覆盖范围内，
+	// 而云 metadata endpoint 169.254.169.254 就在其中。
 	if ip.IsLinkLocalUnicast() {
 		return true
 	}
-	// Explicitly allow loopback, then block the rest of the non-routable
-	// ranges: RFC 1918 private (10/8, 172.16/12, 192.168/16), IPv6 unique
-	// local (fc00::/7), link-local, multicast and unspecified addresses.
+	// 显式放行 loopback，再封禁其余不可路由网段:RFC 1918 私有
+	// （10/8、172.16/12、192.168/16）、IPv6 唯一本地（fc00::/7）、
+	// link-local、组播与未指定地址。
 	if ip.IsLoopback() {
 		return false
 	}
@@ -325,14 +303,10 @@ func isBlockedIP(ip net.IP) bool {
 		ip.IsLinkLocalMulticast()
 }
 
-// isBlockedHost resolves host (an authority string, port already stripped)
-// and reports whether the connection target is SSRF-blocked.  A host that is
-// a bare IP literal is parsed directly; otherwise every resolved address is
-// checked and the host is blocked if ANY address is blocked (an attacker
-// controlling DNS could otherwise resolve a name to a mix of public and
-// private addresses and still hit the internal one).  Resolution failures
-// are treated conservatively as blocked: if we cannot prove the host is safe,
-// we refuse to fetch it.
+// isBlockedHost 判断解析 `host` 后是否出现任何被 SSRF 拦截的地址。
+// 裸 IP 字面量直接解析；否则只要有任一解析出的地址被拦截，整个 host
+// 就被拦截——否则控制 DNS 的攻击者可以混合公网与私有应答来命中内网。
+// 解析失败一律保守视为拦截:无法证明 host 安全，就拒绝抓取。
 func isBlockedHost(host string) bool {
 	if host == "" {
 		return false
@@ -355,9 +329,8 @@ func isBlockedHost(host string) bool {
 	return false
 }
 
-// WallpaperFromURL downloads a wallpaper from a URL, processes it through
-// the same decode/scale/encode pipeline as WallpaperUpload, and saves it
-// with a UUID filename.
+// WallpaperFromURL 从 URL 下载壁纸，走与 WallpaperUpload 相同的
+// decode/scale/encode 管线处理，并以 UUID 文件名保存。
 func WallpaperFromURL(c *gin.Context) {
 	a := appFromCtx(c)
 
@@ -381,10 +354,9 @@ func WallpaperFromURL(c *gin.Context) {
 		return
 	}
 
-	// SSRF guard: block fetches to private / link-local / metadata ranges
-	// for the initial host.  Redirect targets are re-checked in
-	// CheckRedirect below (redirects can move the fetch to an internal
-	// host even when the original URL was public).
+	// SSRF 防护:对初始 host 拦截指向私有 / link-local / metadata 网段的抓取。
+	// 重定向目标在下方 CheckRedirect 中再次检查（即使原始 URL 是公网地址，
+	// 重定向也可能把抓取引向内网 host）。
 	if isBlockedHost(u.Hostname()) {
 		c.JSON(http.StatusBadRequest, gin.H{"err": errURLHostNotAllowed.Error()})
 		return
@@ -398,7 +370,7 @@ func WallpaperFromURL(c *gin.Context) {
 			if redirects > 5 {
 				return fmt.Errorf("too many redirects")
 			}
-			// Refuse to follow a redirect into a blocked range.
+			// 拒绝跟随重定向进入被封禁的网段。
 			if isBlockedHost(req.URL.Hostname()) {
 				return errURLHostNotAllowed
 			}
@@ -444,7 +416,6 @@ func WallpaperFromURL(c *gin.Context) {
 		return
 	}
 
-	// Stream to temp file with 50MB limit.
 	tmp, err := os.CreateTemp(dir, "upload-*")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"err": "failed to create temp file"})
@@ -469,7 +440,6 @@ func WallpaperFromURL(c *gin.Context) {
 		return
 	}
 
-	// Process the image (decode, scale, re-encode).
 	tmpFile, err := os.Open(tmpName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"err": "failed to open temp file"})

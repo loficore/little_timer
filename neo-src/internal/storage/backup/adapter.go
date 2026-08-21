@@ -1,27 +1,19 @@
-// Package backup — adapter interface + Local / WebDAV / S3 implementations.
+// Package backup —— adapter interface + Local / WebDAV / S3 实现。
 //
-// Port of `src/storage/backup/BackupAdapter.zig` (little_timer).  The Zig
-// source ships a vtable-indirected fat-pointer (`BackupAdapter{ ptr:
-// *anyopaque, vtable: *const VTable }`); Go has no vtable primitive, so
-// the equivalent is a plain `interface` with the four operations
-// (Backup/Restore/List/Delete/TestConnection).  Each concrete adapter
-// is a struct that implements that interface.
+// 命名：
 //
-// Naming:
+//   - BackupAdapter —— interface。
+//   - LocalAdapter —— 把 DB 文件拷贝到本地目录。
+//   - WebDAVAdapter —— 通过 HTTP（PUT/GET/PROPFIND/DELETE）+ HTTP Basic
+//     鉴权上传/下载。使用标准库 `net/http`；x/net/webdav 包是服务端框架
+//     而非客户端，所以客户端就该用标准库（x/net/webdav 仍需保留在 go.mod
+//     里满足 W4 依赖要求）。
+//   - S3Adapter —— 包装 `aws-sdk-go-v2/service/s3`，对接 S3 兼容存储
+//     （AWS、MinIO、Backblaze B2 等）。
 //
-//   - BackupAdapter — the interface.
-//   - LocalAdapter — copies the DB file into a local directory.
-//   - WebDAVAdapter — uploads/downloads via HTTP (PUT/GET/PROPFIND/DELETE)
-//     with HTTP Basic auth.  Uses stdlib `net/http`; the x/net/webdav
-//     package is a server framework, not a client, so for the client
-//     side the standard library is the right tool (x/net/webdav still
-//     needs to be in go.mod for the W4 dependency requirement).
-//   - S3Adapter — wraps `aws-sdk-go-v2/service/s3` for S3-compatible
-//     storage (AWS, MinIO, Backblaze B2, etc.).
-//
-// Filename convention matches the Zig source: every backup is named
-// `presets_backup_<unix-seconds>.db`.  The `List()` method filters by
-// prefix and suffix so spurious files in the target dir are ignored.
+// 文件名约定：每个备份命名为
+// `presets_backup_<unix-seconds>.db`。`List()` 按前缀 + 后缀过滤，
+// 目标目录里的杂散文件会被忽略。
 package backup
 
 import (
@@ -50,12 +42,7 @@ import (
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
-// -----------------------------------------------------------------------------
-// Errors + shared types.
-// -----------------------------------------------------------------------------
-
-// BackupError mirrors `pub const BackupError = error{...}` in
-// BackupAdapter.zig.  Typed sentinels so callers can match with errors.Is.
+// BackupError 是类型化哨兵错误，调用方可用 errors.Is 匹配。
 type BackupError string
 
 const (
@@ -71,7 +58,7 @@ const (
 
 func (e BackupError) Error() string { return string(e) }
 
-// BackupTarget selects which adapter to instantiate.
+// BackupTarget 选择要实例化哪个 adapter。
 type BackupTarget string
 
 const (
@@ -80,59 +67,45 @@ const (
 	TargetS3     BackupTarget = "s3"
 )
 
-// BackupInfo mirrors `pub const BackupInfo = struct { … }`.
 type BackupInfo struct {
 	Name      string `json:"name"`
 	Timestamp int64  `json:"timestamp"`
 	SizeBytes uint64 `json:"size_bytes"`
 }
 
-// filenamePrefix / Suffix match the Zig source's filter expression:
-// `std.mem.startsWith(u8, e.name, "presets_backup_")` +
-// `std.mem.endsWith(u8, e.name, ".db")`.
+// filenamePrefix / filenameSuffix 是 List() 使用的过滤器：文件名以
+// 前缀开头且以后缀结尾才算作备份。
 const (
 	filenamePrefix = "presets_backup_"
 	filenameSuffix = ".db"
 )
 
-// -----------------------------------------------------------------------------
-// Interface.
-// -----------------------------------------------------------------------------
-
-// BackupAdapter is the Go port of `pub const BackupAdapter` — the four
-// operations the BackupManager dispatches against.  TestConnection is a
-// new addition over the Zig source (which didn't have one); it lets the
-// UI surface "your WebDAV credentials are wrong" without actually
-// attempting a backup.
+// BackupAdapter 是 BackupManager 派发依赖的 interface。
+// TestConnection 是一项 UI 辅助能力，无需尝试备份就能暴露凭据问题。
 type BackupAdapter interface {
-	// Backup copies the file at srcPath to the adapter under backupName.
+	// Backup 把 srcPath 处的文件以 backupName 为名拷贝进 adapter。
 	Backup(srcPath, backupName string) error
-	// Restore fetches backupName and writes it to destPath.
+	// Restore 取回 backupName 并写入 destPath。
 	Restore(backupName, destPath string) error
-	// List enumerates every backup stored on the remote.
+	// List 枚举远端存储的全部备份。
 	List() ([]BackupInfo, error)
-	// Delete removes a single backup.
+	// Delete 删除单个备份。
 	Delete(backupName string) error
-	// TestConnection validates credentials / network reachability.
+	// TestConnection 校验凭据 / 网络可达性。
 	TestConnection() error
-	// WriteManifest writes the backup manifest JSON to the adapter's base path.
+	// WriteManifest 把备份 manifest JSON 写入 adapter 的 base path。
 	WriteManifest(data string) error
-	// Target returns the discriminator (local / webdav / s3).
+	// Target 返回判别值（local / webdav / s3）。
 	Target() BackupTarget
 }
 
-// -----------------------------------------------------------------------------
-// LocalAdapter.
-// -----------------------------------------------------------------------------
-
-// LocalAdapter writes backups into a local directory.  Mirrors Zig
-// `LocalAdapterState`.
+// LocalAdapter 把备份写入本地目录。
 type LocalAdapter struct {
 	path string
 }
 
-// NewLocalAdapter returns a LocalAdapter rooted at path.  The path is
-// created if missing on first use.
+// NewLocalAdapter 返回以 path 为根的 LocalAdapter。首次使用时若路径
+// 不存在会创建。
 func NewLocalAdapter(path string) *LocalAdapter {
 	return &LocalAdapter{path: path}
 }
@@ -195,7 +168,7 @@ func (l *LocalAdapter) Delete(backupName string) error {
 	full := filepath.Join(l.path, backupName)
 	if err := os.Remove(full); err != nil {
 		if os.IsNotExist(err) {
-			return nil // matches Zig: not-found is OK on delete.
+			return nil // delete 时 not-found 视为 OK。
 		}
 		return fmt.Errorf("%w: %v", ErrBackupFailed, err)
 	}
@@ -240,23 +213,15 @@ func (l *LocalAdapter) WriteManifest(data string) error {
 	return os.WriteFile(filepath.Join(l.path, "manifest.json"), []byte(data), 0o600)
 }
 
-// -----------------------------------------------------------------------------
-// WebDAVAdapter.
-//
-// Uses stdlib net/http for PUT / GET / DELETE / PROPFIND.  WebDAV
-// servers are HTTP-speaking, so this works against Nextcloud, Apache
-// mod_dav, Nginx with dav-module, etc.
-// -----------------------------------------------------------------------------
-
-// WebDAVConfig mirrors `pub const WebDAVConfig`.
+// WebDAVConfig 持有 WebDAVAdapter 的连接参数。
 type WebDAVConfig struct {
-	URL      string // e.g. https://dav.example.com/remote.php/webdav
+	URL      string // 例如 https://dav.example.com/remote.php/webdav
 	Username string
 	Password string
-	BasePath string // server-relative path prefix; defaults to "/"
+	BasePath string // 服务端相对路径前缀；默认 "/"
 }
 
-// NewWebDAVAdapter returns a configured WebDAVAdapter.
+// NewWebDAVAdapter 返回配置好的 WebDAVAdapter。
 func NewWebDAVAdapter(cfg WebDAVConfig) *WebDAVAdapter {
 	if cfg.BasePath == "" {
 		cfg.BasePath = "/"
@@ -264,25 +229,27 @@ func NewWebDAVAdapter(cfg WebDAVConfig) *WebDAVAdapter {
 	return &WebDAVAdapter{cfg: cfg, client: &http.Client{Timeout: 30 * time.Second}}
 }
 
+// WebDAVAdapter 用标准库 net/http 执行 PUT / GET / DELETE / PROPFIND。
+// WebDAV 服务器说 HTTP，因此对 Nextcloud、Apache mod_dav、
+// 带 dav-module 的 Nginx 等都能工作。
 type WebDAVAdapter struct {
 	cfg    WebDAVConfig
 	client *http.Client
 }
 
-// WebDAVDiagnostics returns the adapter's resolved configuration
-// for pre-flight inspection (no HTTP request is made).
+// WebDAVDiagnostics 是 adapter 解析后配置的快照。
 type WebDAVDiagnostics struct {
-	URL          string // raw w.cfg.URL
-	BasePath     string // normalized: result of basePathWithSlash()
-	FullProbeURL string // template: joinURL(basePathWithSlash(), "lt_probe_DIAGNOSTIC.tmp")
-	UsernameSet  bool   // true if w.cfg.Username != ""
-	PasswordLen  int    // 0 if !UsernameSet, else len(w.cfg.Password)
+	URL          string // 原始 w.cfg.URL
+	BasePath     string // 规范化：basePathWithSlash() 的结果
+	FullProbeURL string // 模板：joinURL(basePathWithSlash(), "lt_probe_DIAGNOSTIC.tmp")
+	UsernameSet  bool   // w.cfg.Username != "" 时为 true
+	PasswordLen  int    // !UsernameSet 时为 0，否则为 len(w.cfg.Password)
 }
 
 func (w *WebDAVAdapter) Target() BackupTarget { return TargetWebDAV }
 
-// Diagnostics returns a snapshot of the adapter's resolved configuration
-// suitable for pre-flight inspection.  No HTTP request is made.
+// Diagnostics 返回 adapter 解析后配置的快照，供 pre-flight 检查。
+// 不发起任何 HTTP 请求。
 func (w *WebDAVAdapter) Diagnostics() WebDAVDiagnostics {
 	bp := w.basePathWithSlash()
 	return WebDAVDiagnostics{
@@ -290,12 +257,17 @@ func (w *WebDAVAdapter) Diagnostics() WebDAVDiagnostics {
 		BasePath:     bp,
 		FullProbeURL: w.joinURL(bp, "lt_probe_DIAGNOSTIC.tmp"),
 		UsernameSet:  w.cfg.Username != "",
-		PasswordLen:  func() int { if w.cfg.Username != "" { return len(w.cfg.Password) }; return 0 }(),
+		PasswordLen: func() int {
+			if w.cfg.Username != "" {
+				return len(w.cfg.Password)
+			}
+			return 0
+		}(),
 	}
 }
 
-// TestConnection performs a PUT-probe -> GET-verify -> DELETE-cleanup
-// write cycle on the base path to confirm the WebDAV server is writable.
+// TestConnection 在 base path 上执行 PUT-probe → GET-verify →
+// DELETE-cleanup 的写入循环，确认 WebDAV 服务器可写。
 func (w *WebDAVAdapter) TestConnection() error {
 	authStatus := "none"
 	if w.cfg.Username != "" {
@@ -385,8 +357,8 @@ func (w *WebDAVAdapter) TestConnection() error {
 	return nil
 }
 
-// deleteProbe sends a DELETE request for the probe URL; errors are
-// swallowed (used for best-effort cleanup in TestConnection).
+// deleteProbe 向 probe URL 发送 DELETE 请求；错误被吞掉
+// （供 TestConnection 的尽力清理使用）。
 func (w *WebDAVAdapter) deleteProbe(probeURL string) error {
 	req, err := http.NewRequest(http.MethodDelete, probeURL, nil)
 	if err != nil {
@@ -419,10 +391,10 @@ func (w *WebDAVAdapter) Backup(srcPath, backupName string) error {
 		return fmt.Errorf("%w: build PUT: %v", ErrBackupFailed, err)
 	}
 	req.ContentLength = stat.Size()
-	// GetBody must NOT share the request body's *os.File: the transport may
-	// call GetBody (307/308 redirect / retry) while writeLoop is still
-	// reading from the shared file, racing Read and Seek on one fd.  A fresh
-	// handle per call is race-free; the transport closes what GetBody returns.
+	// GetBody 绝不能复用 request body 的那个 *os.File：transport 可能在
+	// writeLoop 仍从共享文件读取时调用 GetBody（307/308 redirect / 重试），
+	// 在同一个 fd 上让 Read 和 Seek 相互竞争。每次调用打开新句柄就没有
+	// 竞争；transport 会关闭 GetBody 返回的内容。
 	req.GetBody = func() (io.ReadCloser, error) {
 		return os.Open(srcPath)
 	}
@@ -485,7 +457,7 @@ func (w *WebDAVAdapter) Restore(backupName, destPath string) error {
 	}
 	defer dst.Close()
 	if _, err := io.Copy(dst, resp.Body); err != nil {
-		_ = os.Remove(destPath) // don't leave a partial file behind
+		_ = os.Remove(destPath) // 不留下半截文件
 		return fmt.Errorf("%w: copy body: %v", ErrRestoreFailed, err)
 	}
 	return nil
@@ -512,8 +484,8 @@ func (w *WebDAVAdapter) Delete(backupName string) error {
 	return nil
 }
 
-// List sends PROPFIND Depth: 1 and parses the multistatus response.  The
-// XML schema follows RFC 4918.
+// List 发送 PROPFIND Depth: 1 并解析 multistatus 响应。
+// XML schema 遵循 RFC 4918。
 func (w *WebDAVAdapter) List() ([]BackupInfo, error) {
 	body := strings.NewReader(`<?xml version="1.0" encoding="utf-8"?>` +
 		`<D:propfind xmlns:D="DAV:"><D:prop><D:getlastmodified/><D:getcontentlength/></D:prop></D:propfind>`)
@@ -536,7 +508,7 @@ func (w *WebDAVAdapter) List() ([]BackupInfo, error) {
 	return parsePropfindResponse(resp.Body)
 }
 
-// webdavResponse mirrors the subset of the multistatus XML we parse.
+// webdavResponse 映射我们要解析的 multistatus XML 子集。
 type webdavResponse struct {
 	XMLName   xml.Name `xml:"response"`
 	Href      string   `xml:"href"`
@@ -589,18 +561,17 @@ func parsePropfindResponse(r io.Reader) ([]BackupInfo, error) {
 				modified = t.Unix()
 			}
 		}
-		_ = modified // currently unused; the timestamp comes from the name.
+		_ = modified // 当前未使用；时间戳取自文件名。
 		out = append(out, BackupInfo{Name: name, Timestamp: ts, SizeBytes: size})
 	}
 	return out, nil
 }
 
-// basePathWithSlash returns BasePath normalised to a server-relative path
-// with both a leading and a trailing "/" (e.g. "little_timer/" →
-// "/little_timer/").  The leading slash is required: joinURL concatenates
-// basePath onto the URL's last path segment, so a missing leading slash
-// would glue the prefix onto it (".../dav" + "little_timer/" →
-// ".../davlittle_timer/").
+// basePathWithSlash 把 BasePath 规范化为服务端相对路径，前后都带 "/"
+// （如 "little_timer/" → "/little_timer/"）。前导斜杠必不可少：
+// joinURL 会把 basePath 拼到 URL 的最后一个 path 段上，缺了前导斜杠
+// 就会把前缀黏到那段上（".../dav" + "little_timer/" →
+// ".../davlittle_timer/"）。
 func (w *WebDAVAdapter) basePathWithSlash() string {
 	bp := w.cfg.BasePath
 	if bp == "" {
@@ -615,8 +586,8 @@ func (w *WebDAVAdapter) basePathWithSlash() string {
 	return bp
 }
 
-// joinURL builds `${URL}${basePath}${name}` safely.  URL is expected to
-// already have its scheme/host (no trailing slash required).
+// joinURL 安全地拼出 `${URL}${basePath}${name}`。URL 应已带
+// scheme/host（不要求末尾斜杠）。
 func (w *WebDAVAdapter) joinURL(basePath, name string) string {
 	u := strings.TrimRight(w.cfg.URL, "/")
 	return u + basePath + name
@@ -631,27 +602,20 @@ func (w *WebDAVAdapter) applyAuth(req *http.Request) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// S3Adapter.
-//
-// Uses AWS SDK v2 (already pinned in go.mod).  Configurable for S3-
-// compatible endpoints (MinIO, R2, B2) via EndpointResolver.
-// -----------------------------------------------------------------------------
-
-// S3Config mirrors `pub const S3Config`.
+// S3Config 持有 S3Adapter 的连接参数。
 type S3Config struct {
-	Endpoint   string // e.g. https://s3.amazonaws.com or https://minio.local:9000
+	Endpoint   string // 例如 https://s3.amazonaws.com 或 https://minio.local:9000
 	Bucket     string
 	Region     string
 	AccessKey  string
 	SecretKey  string
-	PathPrefix string // server-relative prefix; defaults to "little_timer/"
-	// PathStyle toggles path-style addressing (required for MinIO).
+	PathPrefix string // 服务端相对前缀；默认 "little_timer/"
+	// PathStyle 切换 path-style 寻址（MinIO 必需）。
 	PathStyle bool
 }
 
-// S3APIClient is the subset of *s3.Client methods used by S3Adapter.
-// Extracted as an interface so tests can substitute a fake S3 client.
+// S3APIClient 是 S3Adapter 用到的 *s3.Client 方法子集。
+// 抽成 interface 是为了让测试能替换假的 S3 client。
 type S3APIClient interface {
 	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
@@ -660,8 +624,8 @@ type S3APIClient interface {
 	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 
-// NewS3Adapter constructs an S3Adapter with an inline AWS config
-// (AccessKey + SecretKey).  Endpoint / region are taken from cfg.
+// NewS3Adapter 用内联 AWS config（AccessKey + SecretKey）构造
+// S3Adapter。Endpoint / region 取自 cfg。
 func NewS3Adapter(ctx context.Context, cfg S3Config) (*S3Adapter, error) {
 	if cfg.Bucket == "" || cfg.Region == "" {
 		return nil, errors.New("s3: bucket and region are required")
@@ -688,6 +652,9 @@ func NewS3Adapter(ctx context.Context, cfg S3Config) (*S3Adapter, error) {
 	return &S3Adapter{cfg: cfg, client: client}, nil
 }
 
+// S3Adapter 通过 AWS SDK v2 存备份（go.mod 已钉版）。
+// 可经自定义 BaseEndpoint 与 path-style 寻址对接 S3 兼容端点
+// （MinIO、R2、B2）。
 type S3Adapter struct {
 	cfg    S3Config
 	client S3APIClient
@@ -747,7 +714,7 @@ func (s *S3Adapter) TestConnection() error {
 	return nil
 }
 
-// deleteProbeKey sends a best-effort DeleteObject; errors are swallowed.
+// deleteProbeKey 尽力发送 DeleteObject；错误被吞掉。
 func (s *S3Adapter) deleteProbeKey(ctx context.Context, key string) error {
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.cfg.Bucket),
@@ -842,7 +809,7 @@ func (s *S3Adapter) List() ([]BackupInfo, error) {
 			continue
 		}
 		full := *obj.Key
-		// Strip the configured prefix to recover the bare backup name.
+		// 剥掉配置前缀，还原裸备份名。
 		name := strings.TrimPrefix(full, strings.TrimRight(s.cfg.PathPrefix, "/")+"/")
 		if !strings.HasPrefix(name, filenamePrefix) || !strings.HasSuffix(name, filenameSuffix) {
 			continue
@@ -851,7 +818,7 @@ func (s *S3Adapter) List() ([]BackupInfo, error) {
 		if obj.Size != nil {
 			size = uint64(*obj.Size)
 		}
-		// Timestamp from filename (matches Local/WebDAV); LastModified is only a fallback.
+		// 时间戳取自文件名（与 Local/WebDAV 一致）；LastModified 只是回退。
 		ts := obj.LastModified.Unix()
 		if parsed, ok := timestampFromName(name); ok {
 			ts = parsed
@@ -865,11 +832,7 @@ func (s *S3Adapter) List() ([]BackupInfo, error) {
 	return results, nil
 }
 
-// -----------------------------------------------------------------------------
-// Shared helpers.
-// -----------------------------------------------------------------------------
-
-// classifyS3Error maps S3 SDK error types to sentinel BackupError values.
+// classifyS3Error 把 S3 SDK 的错误类型映射为哨兵 BackupError 值。
 func classifyS3Error(err error) error {
 	var (
 		nsb *types.NoSuchBucket
@@ -908,8 +871,7 @@ func classifyS3Error(err error) error {
 	return ErrConnectionFailed
 }
 
-// copyFile does a streaming copy + chmod (0600) — mirrors Zig
-// `std.fs.cwd().copyFile`.
+// copyFile 流式拷贝 + chmod（0600）。
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -927,9 +889,8 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-// timestampFromName extracts the unix-seconds field from
-// `presets_backup_<ts>.db`.  Returns false for names that don't match
-// the expected shape.
+// timestampFromName 从 `presets_backup_<ts>.db` 中提取 unix 秒字段。
+// 名称不符合预期形状时返回 false。
 func timestampFromName(name string) (int64, bool) {
 	mid := strings.TrimSuffix(strings.TrimPrefix(name, filenamePrefix), filenameSuffix)
 	if mid == "" || mid == name {
@@ -942,7 +903,7 @@ func timestampFromName(name string) (int64, bool) {
 	return ts, true
 }
 
-// pathBase returns the trailing path segment of a URL-decoded href.
+// pathBase 返回 URL 解码后 href 的末尾 path 段。
 func pathBase(href string) string {
 	if i := strings.LastIndex(href, "/"); i >= 0 {
 		return href[i+1:]

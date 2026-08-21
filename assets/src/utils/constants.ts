@@ -3,14 +3,12 @@
  * 统一所有重复使用的常量
  */
 
-// 计时器默认值
 export const TIMER_DEFAULTS = {
-  WORK_DURATION: 25 * 60, // 25 分钟
-  REST_DURATION: 5 * 60,  // 5 分钟
+  WORK_DURATION: 25 * 60,
+  REST_DURATION: 5 * 60,
   LOOP_COUNT: 0,
 } as const;
 
-// 存储键名
 export const STORAGE_KEYS = {
   WALLPAPER: "global_wallpaper",
   WALLPAPER_DEBUG: "debug_wallpaper",
@@ -20,10 +18,8 @@ export const STORAGE_KEYS = {
   THEME_MODE: "lt_theme_mode",
 } as const;
 
-// API 默认 URL
 export const DEFAULT_API_URL = "http://localhost:8013";
 
-// 布局密度选项
 export type LayoutDensity = "compact" | "normal" | "spacious";
 
 export const LAYOUT_DENSITY_OPTIONS: { value: LayoutDensity; label: string }[] = [
@@ -32,7 +28,6 @@ export const LAYOUT_DENSITY_OPTIONS: { value: LayoutDensity; label: string }[] =
   { value: "spacious", label: "宽松" },
 ];
 
-// 时间显示风格
 export type TimeDisplayStyle = "classic" | "seven_segment";
 
 export const TIME_DISPLAY_STYLE_OPTIONS: { value: TimeDisplayStyle; label: string }[] = [
@@ -40,23 +35,19 @@ export const TIME_DISPLAY_STYLE_OPTIONS: { value: TimeDisplayStyle; label: strin
   { value: "seven_segment", label: "数码管" },
 ];
 
-// 计时模式
 export const TIMER_MODES = {
   COUNTDOWN: "countdown",
   STOPWATCH: "stopwatch",
 } as const;
 
-// 页面类型
-export type Page = "timer" | "habits" | "stats" | "settings" | "gallery";
+export type Page = "timer" | "habits" | "stats" | "settings";
 
-// 允许的壁纸域名白名单
 export const ALLOWED_WALLPAPER_DOMAINS = [
   "imgur.com",
   "unsplash.com",
   "picsum.photos",
 ] as const;
 
-// 壁纸回退
 export const WALLPAPER_FALLBACK_GRADIENT =
   "linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 50%, #0d0d0d 100%)";
 
@@ -77,17 +68,13 @@ export function resolveWallpaperUrl(value: string): string {
 
 /**
  * 校验壁纸 URL 是否安全
- * @param url wallpaper URL
+ * @param url 壁纸 URL
  * @returns 是否允许
  */
 export function isAllowedWallpaperUrl(url: string): boolean {
-    // 本地文件引用始终允许
     if (url.startsWith(WALLPAPER_LOCAL_PREFIX)) return true;
-    // 本地路径允许
     if (url.startsWith("/")) return true;
-    // 必须 http/https
     if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
-    // 域名白名单
     try {
         const hostname = new URL(url).hostname;
         return ALLOWED_WALLPAPER_DOMAINS.some(
@@ -98,7 +85,6 @@ export function isAllowedWallpaperUrl(url: string): boolean {
     }
 }
 
-// API 端点
 export const API_ENDPOINTS = {
   STATE: "/api/state",
   START: "/api/start",
@@ -116,19 +102,15 @@ export const API_ENDPOINTS = {
   WALLPAPERS: "/api/wallpapers",
 } as const;
 
-// 应用版本
 export const APP_VERSION = "1.0.0";
 
-// 默认时区
 export const DEFAULT_TIMEZONE = 8;
 
-// 语言选项
 export const LANGUAGE_OPTIONS = [
   { value: "ZH", label: "中文" },
   { value: "EN", label: "English" },
 ] as const;
 
-// 主题模式
 export const THEME_MODES = {
   LIGHT: "light",
   DARK: "dark",

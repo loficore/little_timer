@@ -175,8 +175,6 @@ export class APIClient {
         });
     }
 
-    // === 习惯集 API ===
-
     /**
      * 获取习惯集列表
      * @returns {Promise<HabitSet[]>} 返回一个 Promise，解析为习惯集列表
@@ -227,8 +225,6 @@ export class APIClient {
             method: "DELETE",
         });
     }
-
-    // === 习惯 API ===
 
     /**
      * 获取习惯列表
@@ -292,8 +288,6 @@ export class APIClient {
         });
     }
 
-    // === 记录 API ===
-
     /**
      * 创建记录
      * @param {number} habitId 习惯 ID
@@ -343,11 +337,9 @@ export class APIClient {
         return this.fetchJson<HabitDetail>(`${this.baseUrl}/api/habits/${habitId}/detail?${params.toString()}`);
     }
 
-    // === 备份 API ===
-
     /**
      * 创建数据库备份
-     * @returns Promise resolving to result object with success status, backup_path, or error message
+     * @returns 解析为结果对象的 Promise，含成功状态、backup_path 或错误信息
      */
     async createBackup(): Promise<BackupCreateResult> {
         return this.fetchJson<BackupCreateResult>(`${this.baseUrl}/api/backup/create`, { method: "POST" });
@@ -355,7 +347,7 @@ export class APIClient {
 
     /**
      * 获取备份列表
-     * @returns Promise resolving to array of backup info
+     * @returns 解析为备份信息数组的 Promise
      */
     async listBackups(): Promise<BackupListResult> {
         return this.fetchJson<BackupListResult>(`${this.baseUrl}/api/backup/list`);
@@ -363,8 +355,8 @@ export class APIClient {
 
     /**
      * 从备份恢复数据库
-     * @param name - Backup filename to restore from
-     * @returns Promise resolving to success status or error message
+     * @param name - 要从中恢复的备份文件名
+     * @returns 解析为成功状态或错误信息的 Promise
      */
     async restoreBackup(name: string): Promise<BackupRestoreResult> {
         return this.fetchJson<BackupRestoreResult>(`${this.baseUrl}/api/backup/restore`, {
@@ -376,8 +368,8 @@ export class APIClient {
 
     /**
      * 删除指定备份
-     * @param name - Backup filename to delete
-     * @returns Promise resolving to success status or error message
+     * @param name - 要删除的备份文件名
+     * @returns 解析为成功状态或错误信息的 Promise
      */
     async deleteBackup(name: string): Promise<BackupVerifyResult> {
         return this.fetchJson<BackupVerifyResult>(`${this.baseUrl}/api/backup/${encodeURIComponent(name)}`, {
@@ -387,7 +379,7 @@ export class APIClient {
 
     /**
      * 验证备份目标配置是否有效
-     * @returns Promise resolving to success status or error message
+     * @returns 解析为成功状态或错误信息的 Promise
      */
     async verifyBackup(): Promise<BackupVerifyResult> {
         return this.fetchJson<BackupVerifyResult>(`${this.baseUrl}/api/backup/verify`, { method: "POST" });
@@ -395,7 +387,7 @@ export class APIClient {
 
     /**
      * 获取主密码状态
-     * @returns Promise with has_password, unlocked, locked_until, unlock_time
+     * @returns 返回含 has_password、unlocked、locked_until、unlock_time 的 Promise
      */
     async getMasterPasswordStatus(): Promise<{
         has_password: boolean;
@@ -413,8 +405,8 @@ export class APIClient {
 
     /**
      * 设置主密码
-     * @param password - New master password
-     * @returns Promise with success status
+     * @param password - 新主密码
+     * @returns 返回含成功状态的 Promise
      */
     async setMasterPassword(password: string): Promise<{ success: boolean; error?: string }> {
         return this.fetchJson<{ success: boolean; error?: string }>(`${this.baseUrl}/api/backup/master-password`, {
@@ -426,8 +418,8 @@ export class APIClient {
 
     /**
      * 解锁凭证
-     * @param password - Master password
-     * @returns Promise with success status
+     * @param password - 主密码
+     * @returns 返回含成功状态的 Promise
      */
     async unlockCredentials(password: string): Promise<{ success: boolean; locked_until: number; error?: string }> {
         return this.fetchJson<{ success: boolean; locked_until: number; error?: string }>(`${this.baseUrl}/api/backup/unlock`, {
@@ -439,7 +431,7 @@ export class APIClient {
 
     /**
      * 锁定凭证
-     * @returns Promise with success status
+     * @returns 返回含成功状态的 Promise
      */
     async lockCredentials(): Promise<{ success: boolean }> {
         return this.fetchJson<{ success: boolean }>(`${this.baseUrl}/api/backup/lock`, {
@@ -449,7 +441,7 @@ export class APIClient {
 
     /**
      * 获取当前备份配置
-     * @returns Promise resolving to BackupConfig object
+     * @returns 解析为 BackupConfig 对象的 Promise
      */
     async getBackupConfig(): Promise<BackupConfig> {
         return this.fetchJson<BackupConfig>(`${this.baseUrl}/api/backup/config`);
@@ -457,8 +449,8 @@ export class APIClient {
 
     /**
      * 更新备份配置
-     * @param config - BackupConfig object with updated settings
-     * @returns Promise resolving to success status or error message
+     * @param config - 含更新后设置的 BackupConfig 对象
+     * @returns 解析为成功状态或错误信息的 Promise
      */
     async updateBackupConfig(config: BackupConfig): Promise<{ success: boolean; error?: string }> {
         return this.fetchJson<{ success: boolean; error?: string }>(`${this.baseUrl}/api/backup/config`, {
@@ -467,8 +459,6 @@ export class APIClient {
             body: JSON.stringify(config),
         });
     }
-
-    // === 壁纸 API ===
 
     /**
      * 上传壁纸图片

@@ -1,11 +1,7 @@
-// Package storage — settings row CRUD.
+// Package storage —— settings 行 CRUD。
 //
-// Port of `src/storage/storage_crud.zig` (little_timer), specifically the
-// saveSettings / loadSettings pair.  Backup-config encryption lives in
-// internal/storage/backup in this port — credential encryption needs the
-// secret-storage helper that hasn't been ported yet, so we leave the
-// encrypted-column handling for a later wave and keep this file focused on
-// the settings round-trip.
+// 覆盖 SaveSettings / LoadSettings 往返。备份配置的加密放在
+// internal/storage/backup，本文件专注纯 settings 行。
 package storage
 
 import (
@@ -29,7 +25,6 @@ const (
 func (e CrudError) Error() string { return string(e) }
 
 // SettingsRow 表示 settings 表中的一行底层数据。
-// higher-level domain.SettingsConfig is what callers actually pass in.
 type SettingsRow struct {
 	// ID 是设置行的固定主键。
 	ID int64
@@ -67,27 +62,19 @@ type CrudManager struct {
 }
 
 // NewCrudManager 构造一个空的 CrudManager，调用方需在之后通过 SetDB 注入数据库句柄。
-// `CrudManager.init(allocator, null)`.
 func NewCrudManager() *CrudManager {
 	return &CrudManager{}
 }
 
 // SetDB 为 CrudManager 注入 *sql.DB 句柄。
-// Zig SqliteManager.open.
 func (c *CrudManager) SetDB(db *sql.DB) { c.db = db }
 
-// saveSettingsSQL is the UPSERT statement, byte-for-byte from
-// storage_crud.zig:saveSettings.  Note the trailing space before `wallpaper`
-// — preserved from the Zig source.
+// saveSettingsSQL 是 settings 行的 UPSERT 语句。
 const saveSettingsSQL = `INSERT OR REPLACE INTO settings (id, timezone, language, default_mode, theme_mode, wallpaper, duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 // SaveSettings 将 SettingsConfig 持久化到 settings 表的单行记录中。
 //
-// Mirrors `pub fn saveSettings(self, config)`.  Translation notes:
-//
-//   - Zig DefaultMode enum → Go int constant + String() lookup.
-//   - Zig `bool` is stored as INTEGER 0/1 by SQLite; the column is BOOLEAN
-//     NOT NULL DEFAULT 0/1 in the schema.  We write 0/1 explicitly.
+// 布尔列以 INTEGER 0/1 存储；我们显式写入 0/1。
 func (c *CrudManager) SaveSettings(config domain.SettingsConfig) error {
 	if c.db == nil {
 		return ErrCrudNoDatabase
@@ -96,7 +83,7 @@ func (c *CrudManager) SaveSettings(config domain.SettingsConfig) error {
 	defaultModeStr := config.Basic.DefaultMode.String()
 	themeMode := config.Basic.ThemeMode
 	if themeMode == "" {
-		themeMode = "dark" // matches schema DEFAULT 'dark' and Zig defaults.
+		themeMode = "dark" // 与 schema DEFAULT 'dark' 一致
 	}
 	logLevel := config.Logging.Level
 	if logLevel == "" {
@@ -130,10 +117,8 @@ func (c *CrudManager) SaveSettings(config domain.SettingsConfig) error {
 
 // LoadSettings 读取 settings 行并返回填充好的 SettingsConfig。
 //
-// Mirrors `pub fn loadSettings(self, allocator)`.  When no row exists, the
-// Zig source returns `SettingsConfig{}` (zero-valued); we return
-// NewDefaultSettingsConfig() instead — same effect for any consumer that
-// only reads fields, and safer for callers that forget to apply defaults.
+// 无行时返回 NewDefaultSettingsConfig() 而非零值 —— 对只读字段的消费者
+// 效果相同，对忘记套默认值的调用方也更安全。
 const settingsSelectSQL = `SELECT timezone, language, default_mode, theme_mode, COALESCE(wallpaper, ''), duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval FROM settings WHERE id = 1;`
 
 const settingsSelectWithIDSQL = `SELECT id, timezone, language, default_mode, theme_mode, COALESCE(wallpaper, ''), duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval FROM settings WHERE id = 1;`

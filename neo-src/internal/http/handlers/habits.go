@@ -1,26 +1,4 @@
-// Package handlers — Habit / habit-set / session / timer-session CRUD.
-//
-// File `habits.go` ports the habit-related handlers from std_server.zig.
-// Routes (paths match Zig exactly):
-//
-//	GET    /api/habit-sets                   → handleHabitSetList
-//	POST   /api/habit-sets                   → handleHabitSetCreate
-//	PUT    /api/habit-sets/:id               → handleHabitSetUpdate
-//	DELETE /api/habit-sets/:id               → handleHabitSetDelete
-//
-//	GET    /api/habits                       → handleHabitList
-//	POST   /api/habits                       → handleHabitCreate
-//	PUT    /api/habits/:id                   → handleHabitUpdate
-//	DELETE /api/habits/:id                   → handleHabitDelete
-//	GET    /api/habits/:id/detail            → handleHabitDetail
-//
-//	POST   /api/sessions                     → handleSessionCreate
-//	GET    /api/sessions                     → handleSessionList
-//
-//	POST   /api/timer-sessions               → handleTimerSessionCreate
-//	GET    /api/timer-sessions               → handleTimerSessionList
-//	PUT    /api/timer-sessions/:id           → handleTimerSessionUpdate
-//	DELETE /api/timer-sessions/:id           → handleTimerSessionDelete
+// Package handlers —— Habit / habit-set / session / timer-session CRUD。
 package handlers
 
 import (
@@ -34,12 +12,8 @@ import (
 	"little-timer/internal/storage"
 )
 
-// -----------------------------------------------------------------------------
-// Helper: pagination parsing
-// -----------------------------------------------------------------------------
-
-// parsePagination extracts limit and offset from query params.
-// Default: limit=100, offset=0. Caps at 1000. Returns (limit, offset, valid).
+// parsePagination 从 query 参数提取 limit 和 offset。默认值：limit=100、
+// offset=0；limit 上限 1000。输入不可解析或为负时 valid=false。
 func parsePagination(c *gin.Context) (limit, offset int, valid bool) {
 	limitStr := c.DefaultQuery("limit", "100")
 	offsetStr := c.DefaultQuery("offset", "0")
@@ -58,12 +32,6 @@ func parsePagination(c *gin.Context) (limit, offset int, valid bool) {
 	return limit, offset, true
 }
 
-// -----------------------------------------------------------------------------
-// /api/habit-sets
-// -----------------------------------------------------------------------------
-
-// handleHabitSetCreate mirrors `handleCreateHabitSet`.
-// Body: {name, description?, color?}.
 func HabitSetCreate(c *gin.Context) {
 	a := appFromCtx(c)
 
@@ -97,7 +65,6 @@ func HabitSetCreate(c *gin.Context) {
 	})
 }
 
-// handleHabitSetList mirrors `handleGetHabitSets`.
 func HabitSetList(c *gin.Context) {
 	a := appFromCtx(c)
 	limit, offset, ok := parsePagination(c)
@@ -113,7 +80,6 @@ func HabitSetList(c *gin.Context) {
 	c.JSON(http.StatusOK, rows)
 }
 
-// handleHabitSetUpdate mirrors `handleUpdateHabitSet`.
 func HabitSetUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/habit-sets/")
@@ -152,7 +118,6 @@ func HabitSetUpdate(c *gin.Context) {
 	})
 }
 
-// handleHabitSetDelete mirrors `handleDeleteHabitSet`.
 func HabitSetDelete(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/habit-sets/")
@@ -167,12 +132,6 @@ func HabitSetDelete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// -----------------------------------------------------------------------------
-// /api/habits
-// -----------------------------------------------------------------------------
-
-// handleHabitCreate mirrors `handleCreateHabit`.
-// Body: {set_id, name, goal_seconds?, color?}.
 func HabitCreate(c *gin.Context) {
 	a := appFromCtx(c)
 
@@ -221,8 +180,7 @@ func HabitCreate(c *gin.Context) {
 	})
 }
 
-// handleHabitList mirrors `handleGetHabits`.  Optional `?set_id=N` query
-// narrows the list to a single habit set.
+// HabitList 可用 `?set_id=N` 限定到单个 habit set。
 func HabitList(c *gin.Context) {
 	a := appFromCtx(c)
 	limit, offset, ok := parsePagination(c)
@@ -252,7 +210,6 @@ func HabitList(c *gin.Context) {
 	c.JSON(http.StatusOK, rows)
 }
 
-// handleHabitUpdate mirrors `handleUpdateHabit`.
 func HabitUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/habits/")
@@ -311,7 +268,6 @@ func HabitUpdate(c *gin.Context) {
 	})
 }
 
-// handleHabitDelete mirrors `handleDeleteHabit`.
 func HabitDelete(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/habits/")
@@ -326,8 +282,7 @@ func HabitDelete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// handleHabitDetail mirrors `handleGetHabitDetail` — single habit with
-// today's accumulated seconds + progress percent.
+// HabitDetail 返回单个 habit，附今天累计秒数与进度百分比。
 func HabitDetail(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathIDWithSuffix(c, "/api/habits/", "/detail")
@@ -365,12 +320,6 @@ func HabitDetail(c *gin.Context) {
 	})
 }
 
-// -----------------------------------------------------------------------------
-// /api/sessions
-// -----------------------------------------------------------------------------
-
-// handleSessionCreate mirrors `handleCreateSession`.
-// Body: {habit_id, duration_seconds, count?}.
 func SessionCreate(c *gin.Context) {
 	a := appFromCtx(c)
 
@@ -400,7 +349,6 @@ func SessionCreate(c *gin.Context) {
 	})
 }
 
-// SessionDelete mirrors `handleDeleteSession`.
 func SessionDelete(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/sessions/")
@@ -415,7 +363,7 @@ func SessionDelete(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
-// handleHabitStats returns aggregated stats for a habit.
+// HabitStats 返回 habit 的聚合统计。
 func HabitStats(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathIDWithSuffix(c, "/api/habits/", "/stats")
@@ -424,7 +372,7 @@ func HabitStats(c *gin.Context) {
 		return
 	}
 
-	// Verify habit exists
+	// 先确认 habit 存在
 	_, err = a.SQLite.Habits().GetByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Habit not found"})
@@ -439,9 +387,8 @@ func HabitStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// handleSessionList mirrors `handleGetSessions`.  Supports three query
-// shapes (matching the Zig source): `?date=YYYY-MM-DD`,
-// `?start_date=…&end_date=…`, or no date → today.
+// SessionList 支持三种查询形态：`?date=YYYY-MM-DD`、
+// `?start_date=…&end_date=…`，或不带日期 → 今天。
 func SessionList(c *gin.Context) {
 	a := appFromCtx(c)
 	limit, offset, ok := parsePagination(c)
@@ -472,11 +419,6 @@ func SessionList(c *gin.Context) {
 	c.JSON(http.StatusOK, rows)
 }
 
-// -----------------------------------------------------------------------------
-// /api/timer-sessions
-// -----------------------------------------------------------------------------
-// Zig source uses the same body shape as `POST /api/start` minus the
-// paused/finished fields).
 func TimerSessionCreate(c *gin.Context) {
 	a := appFromCtx(c)
 
@@ -506,9 +448,8 @@ func TimerSessionCreate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"id": id})
 }
 
-// handleTimerSessionList mirrors the implicit `getTimerSessionById` /
-// list-all pattern.  Without a query, returns the active (unfinished)
-// session, mirroring the Zig behavior of returning one row.
+// TimerSessionList 返回 `?id=N` 对应的 session；未给 id 时返回活动
+// （未结束）session。
 func TimerSessionList(c *gin.Context) {
 	a := appFromCtx(c)
 	if idStr := c.Query("id"); idStr != "" {
@@ -533,7 +474,6 @@ func TimerSessionList(c *gin.Context) {
 	c.JSON(http.StatusOK, row)
 }
 
-// handleTimerSessionUpdate mirrors `updateTimerSession`.
 func TimerSessionUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/timer-sessions/")
@@ -570,7 +510,6 @@ func TimerSessionUpdate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// handleTimerSessionDelete mirrors `deleteTimerSession`.
 func TimerSessionDelete(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := pathID(c, "/api/timer-sessions/")

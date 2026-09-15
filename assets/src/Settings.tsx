@@ -118,6 +118,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
 }) => {
   const apiClientRef = useRef<ReturnType<typeof getAPIClient> | null>(null);
   const [config, setConfig] = useState<SettingsConfig>(DEFAULT_CONFIG);
+  const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState("basic");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -236,12 +237,14 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         defaultMode: loadedConfig.basic.default_mode,
         language: loadedConfig.basic.language,
       });
+      setIsSettingsLoaded(true);
     } catch (error) {
       console.error("加载设置失败:", error);
       setSaveMessage(t("errors.offline.message"));
       logPerf("Settings.load.error", {
         durationMs: Math.round(performance.now() - startAt),
       });
+      setIsSettingsLoaded(true);
     }
   };
 
@@ -250,6 +253,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   }, []);
 
   useEffect(() => {
+    if (!isSettingsLoaded) return;
     const startAt = performance.now();
     const themeMode: string = config.basic.theme_mode != null ? String(config.basic.theme_mode) : "dark";
     applyTheme(themeMode);
@@ -257,9 +261,10 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       themeMode,
       durationMs: Math.round(performance.now() - startAt),
     });
-  }, [config.basic.theme_mode]);
+  }, [config.basic.theme_mode, isSettingsLoaded]);
 
   useEffect(() => {
+    if (!isSettingsLoaded) return;
     const startAt = performance.now();
     const lightStyle: string = config.basic.light_style != null ? String(config.basic.light_style) : "paper";
     applyLightStyle(lightStyle);
@@ -267,7 +272,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       lightStyle,
       durationMs: Math.round(performance.now() - startAt),
     });
-  }, [config.basic.light_style]);
+  }, [config.basic.light_style, isSettingsLoaded]);
 
   useEffect(() => {
     const startAt = performance.now();
@@ -538,7 +543,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         </TabPanel>
 
         <div
-          className={`my-surface-panel flex gap-2 sm:gap-3 md:gap-4 items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 flex-wrap flex-shrink-0 ${
+          className={`my-surface-panel mx-4 sm:mx-6 flex gap-2 sm:gap-3 md:gap-4 items-center justify-center px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 flex-wrap flex-shrink-0 ${
             animationsEnabled ? "animate-slideUp" : ""
           }`}
           style={animationsEnabled ? { animationDelay: "0.3s", animationFillMode: "both" } : undefined}

@@ -32,6 +32,8 @@ interface DropdownSelectProps {
   dataTestId?: string;
   /** 选项按钮的 data-testid（保留字段） */
   optionDataTestId?: string;
+  /** 触发器文字是否水平居中（默认左对齐 + 右侧箭头） */
+  centered?: boolean;
 }
 
 export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
@@ -42,6 +44,7 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
   minWidth = "170px",
   dataTestId,
   optionDataTestId: _optionDataTestId,
+  centered = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -80,9 +83,9 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
       {/* 选择器按钮 */}
       <button
         data-testid={dataTestId}
-        className={`my-field-surface dropdown-select-btn flex items-center justify-between w-full h-11 px-4 py-3 rounded-xl transition-all duration-200 ${
+        className={`my-field-surface dropdown-select-btn flex items-center w-full h-11 px-4 py-3 rounded-xl transition-all duration-200 ${
           disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-        }`}
+        } ${centered ? "justify-center relative" : "justify-between"}`}
         style={{
           color: "var(--my-on-surface)",
           boxShadow: isOpen
@@ -92,14 +95,20 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
       >
-        <span className="flex-1 text-left text-base">
+        <span
+          className={`${
+            centered
+              ? "text-base leading-none pl-4 pr-4"
+              : "flex-1 text-left text-base"
+          }`}
+        >
           {selectedOption?.label || t("common.select")}
         </span>
         <svg
           xmlns="http://www.w3.org/2000/svg"
           className={`h-4 w-4 transition-transform duration-200 ${
-            isOpen ? "rotate-180" : ""
-          }`}
+            centered ? "absolute right-3" : ""
+          } ${isOpen ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"

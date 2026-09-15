@@ -421,6 +421,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                          ]}
                         onChange={(value) => setTimerConfig({...timerConfig, mode: value as TimerMode})}
                         disabled={isRunning}
+                        centered
                     />
                 </div>
 

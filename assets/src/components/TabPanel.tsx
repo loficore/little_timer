@@ -38,7 +38,7 @@ export const TabPanel = ({
   isAnimated = false,
 }: TabPanelProps) => {
   return (
-    <div className="flex flex-col flex-1 overflow-hidden">
+    <div className="flex flex-col flex-1 overflow-hidden px-4 sm:px-6">
       <div className={`my-tabs ${isAnimated ? "animate-slideUp" : ""}`}>
         {tabs.map((tab) => (
           <button
@@ -52,7 +52,7 @@ export const TabPanel = ({
         ))}
       </div>
       <div
-        className={`flex-1 overflow-y-auto p-4 flex flex-col gap-4 ${
+        className={`my-surface-panel flex-1 overflow-y-auto p-4 flex flex-col gap-4 rounded-2xl ${
           isAnimated ? "animate-slideUp" : ""
         }`}
         style={

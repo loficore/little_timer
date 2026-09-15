@@ -615,3 +615,90 @@ html.light-mode .apexcharts-yaxistooltip {
     }
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * DaisyUI v5 主题变量跟随项目主题（深色默认 / 浅色 light-mode）
+ * DaisyUI 组件（toggle/select/input/btn/alert…）依赖 --color-* 变量。
+ * 必须放在 @layer 之外（普通 CSS 优先级高于 @layer 内样式），
+ * 才能覆盖 DaisyUI 内建主题在 :root / [data-theme] 上的 --color-* 定义。
+ * ------------------------------------------------------------------------- */
+:root,
+html:not(.light-mode) {
+  color-scheme: dark;
+  --color-base-100: #1c1f26;
+  --color-base-200: #262a33;
+  --color-base-300: #303540;
+  --color-base-content: rgba(255, 255, 255, 0.92);
+  --color-primary: #515bd4;
+  --color-primary-content: #ffffff;
+  --color-secondary: #007aff;
+  --color-secondary-content: #ffffff;
+  --color-accent: #515bd4;
+  --color-accent-content: #ffffff;
+  --color-neutral: #3a3f4a;
+  --color-neutral-content: rgba(255, 255, 255, 0.92);
+  --color-info: #3abff8;
+  --color-info-content: #04121a;
+  --color-success: #36d399;
+  --color-success-content: #04160d;
+  --color-warning: #fbbd23;
+  --color-warning-content: #1a1204;
+  --color-error: #f87272;
+  --color-error-content: #1a0404;
+}
+
+html.light-mode {
+  color-scheme: light;
+  --color-base-100: #eee3cf;
+  --color-base-200: #e7dac3;
+  --color-base-300: #ddccb0;
+  --color-base-content: rgba(42, 31, 20, 0.94);
+  --color-primary: #8b6b42;
+  --color-primary-content: #ffffff;
+  --color-secondary: #8b6b42;
+  --color-secondary-content: #ffffff;
+  --color-accent: #8b6b42;
+  --color-accent-content: #ffffff;
+  --color-neutral: #b3a188;
+  --color-neutral-content: rgba(42, 31, 20, 0.94);
+  --color-info: #3abff8;
+  --color-info-content: #04121a;
+  --color-success: #36d399;
+  --color-success-content: #04160d;
+  --color-warning: #fbbd23;
+  --color-warning-content: #1a1204;
+  --color-error: #f87272;
+  --color-error-content: #1a0404;
+}
+
+/* DaisyUI select/input 的边框色统一走项目 --my-outline，避免边框过深。
+   放在 @layer 之外（普通 CSS 优先于 @layer），确保覆盖 DaisyUI 组件样式。 */
+.select,
+.input,
+.select-bordered,
+.input-bordered {
+  --input-color: color-mix(in oklab, var(--my-outline) 70%, var(--my-surface-strong));
+  border-color: var(--input-color);
+  box-shadow: none;
+}
+
+.select:focus,
+.input:focus,
+.select:focus-within,
+.input:focus-within,
+.select:open {
+  --input-color: var(--accent-color);
+  border-color: var(--input-color);
+  outline-color: var(--accent-color);
+}
+
+/* 未选中的 toggle：边框/滑块走浅色轮廓，避免深棕显得突兀 */
+input.toggle:not(:checked) {
+  --input-color: color-mix(in oklab, var(--my-on-surface) 55%, transparent);
+  color: color-mix(in oklab, var(--my-on-surface) 55%, transparent);
+}
+
+
+
+
+

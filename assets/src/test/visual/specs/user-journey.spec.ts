@@ -12,6 +12,8 @@ test.describe("完整用户旅程 (Habit → Timer → Stats)", () => {
   });
 
   test("完整用户旅程: 创建习惯 → 开始计时 → 完成 → 统计页验证", async ({ page }) => {
+    // 计时需真实跑满 ≥60s，统计页「总专注时间」才会显示为 1时/1分 而非 0时0分
+    test.setTimeout(180000);
     let confirmBtn, backdrop;
     await page.locator('[data-testid="create-habit-set"]').click();
     await page.waitForLoadState("networkidle");
@@ -74,19 +76,19 @@ test.describe("完整用户旅程 (Habit → Timer → Stats)", () => {
 
     const userTimerPage = new TimerPage(page);
     await userTimerPage.goto();
+    await userTimerPage.resetStaleTimer();
 
     await userTimerPage.selectMode("countdown");
 
-    await userTimerPage.setWorkDuration(5);
+    await userTimerPage.setCountdownSeconds(30);
     await page.waitForLoadState("networkidle");
 
     await userTimerPage.selectHabit();
 
     await userTimerPage.clickStart();
 
-    await page.waitForTimeout(6000);
-
-    await page.locator('[data-testid="timer-finish"]').waitFor({ state: "visible", timeout: 10000 });
+    // 让 rAF 至少跑 65 秒，统计页「总专注时间」才会显示为 1时/1分 而非 0时0分
+    await userTimerPage.waitRunning(65);
 
     await userTimerPage.clickFinish();
     await page.waitForLoadState("networkidle");

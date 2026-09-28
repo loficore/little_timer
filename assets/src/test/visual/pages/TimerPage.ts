@@ -85,6 +85,25 @@ export class TimerPage extends BasePage {
     await this.page.waitForTimeout(300);
   }
 
+  /**
+   * 计时器是后端进程级全局状态，用例之间会互相残留。
+   * 清理运行中/暂停中的过期计时器，回到「已停止」。
+   * 不重新导航，避免与 beforeEach 的加载竞争。
+   */
+  async resetStaleTimer() {
+    if (await this.isVisible(this.pauseButton)) {
+      await this.clickPause();
+    } else if (await this.isVisible(this.resumeButton)) {
+      // 已处于暂停态，直接 reset
+    } else if (await this.isVisible(this.startButton)) {
+      return; // 已是停止态
+    }
+    if (await this.isVisible(this.resetButton)) {
+      await this.clickReset();
+      await this.page.waitForTimeout(300);
+    }
+  }
+
   async getTimerDisplayText(): Promise<string> {
     return await this.getText(this.timerDisplay);
   }
@@ -102,16 +121,22 @@ export class TimerPage extends BasePage {
    * @param minutes 工作时长，单位为分钟（如 5 = 5 分钟 = 300 秒）
    */
   async setWorkDuration(minutes: number) {
-    await this.page.evaluate(async (mins) => {
-      const seconds = mins * 60;
-      await fetch("http://127.0.0.1:8080/api/timer/config", {
+    await this.setCountdownSeconds(minutes * 60);
+  }
+
+  /** 以秒为单位设置倒计时时长，便于旅程用例用短时长跑完整流程。 */
+  async setCountdownSeconds(seconds: number) {
+    const ok = await this.page.evaluate(async (secs) => {
+      const r = await fetch("http://127.0.0.1:8080/api/timer/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          countdown: { duration_seconds: seconds, loop: false, loop_count: 0, loop_interval_seconds: 0 },
+          countdown: { duration_seconds: secs, loop: false, loop_count: 0, loop_interval_seconds: 0 },
         }),
       });
-    }, minutes);
+      return r.ok;
+    }, seconds);
+    if (!ok) throw new Error(`设置倒计时时长失败 (duration=${seconds}s)`);
   }
 
   async setRestDuration(seconds: number) {
@@ -126,46 +151,23 @@ export class TimerPage extends BasePage {
     }
   }
 
-  /**
-   * 轮询后端状态直到计时结束（不依赖 SSE）。
-   * 当 SSE 可能不可靠时（如 CI 无头环境）用它替代 waitForTimerFinish。
-   */
-  async waitForTimerFinishPolling(timeoutMs: number = 30000, intervalMs: number = 500): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs;
-    let iterations = 0;
-    console.log(`[Polling] Waiting up to ${timeoutMs}ms for timer to finish...`);
-    while (Date.now() < deadline) {
-      iterations++;
-      const state = await this.page.evaluate(async () => {
-        const r = await fetch("http://127.0.0.1:8080/api/state");
-        return r.json();
-      });
-      const isFinished = state.is_finished || state.time <= 0;
-      if (isFinished) {
-        console.log(`[Polling] Timer finished in ${iterations * intervalMs}ms (is_finished=${state.is_finished}, time=${state.time})`);
-        return true;
-      }
-      if (iterations % 10 === 0) {
-        console.log(`[Polling] Timer not finished yet. Current time: ${state.time}s, is_finished: ${state.is_finished}`);
-      }
-      await this.page.waitForTimeout(intervalMs);
-    }
-    console.log(`[Polling] Timeout reached after ${timeoutMs}ms`);
-    return false;
-  }
-
   async selectMode(mode: "countdown" | "stopwatch") {
     await this.click(this.modeSelector, { timeout: 15000 });
     await this.page.waitForTimeout(300);
-    const option = this.page.locator(`[data-testid="mode-option-${mode}"]`);
-    if (await option.isVisible()) {
-      await option.click();
-    }
+    const option = this.page.locator(`[data-testid="mode-selector-option-${mode}"]`);
+    await option.waitFor({ state: "visible", timeout: 5000 });
+    await option.click();
+    await this.page.waitForTimeout(300);
   }
 
-  async waitForTimerFinish(timeoutMs: number = 30000) {
-    const finishButton = this.page.locator(this.finishButton);
-    await finishButton.waitFor({ state: "visible", timeout: timeoutMs });
+  /**
+   * 等待 rAF 至少推进 seconds 秒。
+   * 说明：倒计时 loop=false 时 useTimer 到 0 会回卷而不是设 isFinished，
+   * 产品的结束方式只有手动点击「完成」按钮（session.finish）。
+   * 因此测试里不再需要「等自然结束」，只需等 UI 已经跑起来、按钮已切换到运行态即可。
+   */
+  async waitRunning(seconds: number) {
+    await this.page.waitForTimeout(seconds * 1000);
   }
 
   async getTimerState(): Promise<{

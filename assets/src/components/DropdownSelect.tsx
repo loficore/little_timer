@@ -134,6 +134,7 @@ export const DropdownSelect: FunctionalComponent<DropdownSelectProps> = ({
           {options.map((option) => (
             <button
               key={option.value}
+              data-testid={dataTestId ? `${dataTestId}-option-${option.value}` : undefined}
               className={`w-full px-3.5 py-3 text-left text-sm transition-colors duration-150 border-b border-transparent ${
                 value === option.value
                   ? "bg-primary/20"

@@ -14,7 +14,7 @@
     "test": "vitest",
     "test:vrt:full": "playwright test",
     "test:vrt:update": "playwright test --update-snapshots",
-    "test:e2e": "playwright test --grep \"E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程\"",
+    "test:e2e": "playwright test --project=mobile-390 --project=mobile-412 --project=desktop-1280 --reporter=line",
     "test:vrt": "playwright test --project=vrt-mobile-390 --project=vrt-mobile-412 --project=vrt-desktop-1280 --workers=1",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage"

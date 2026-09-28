@@ -27,9 +27,21 @@ test.describe("移动端 viewport (iPhone 12) E2E 测试", () => {
   test("Timer 页面在移动端点击开始按钮正常响应", async ({ page }) => {
     await page.goto(baseURL);
     await page.waitForLoadState("networkidle");
-    const startBtn = page.locator(".btn.btn-primary.btn-lg").first();
+    // 未选习惯时点击「开始」会弹出习惯选择器而不是启动计时，测试前先选一个
+    const pickerBtn = page.locator('[data-testid="timer-habit-picker"]');
+    await pickerBtn.click();
+    await page.waitForSelector(".my-surface-modal", { state: "visible", timeout: 5000 });
+    await page.locator('[data-testid^="habit-option-"]').last().click();
+    await page.waitForSelector(".my-surface-modal", { state: "hidden", timeout: 5000 });
+
+    const startBtn = page.locator('[data-testid="timer-start"]');
     await expect(startBtn).toBeVisible();
     await startBtn.click();
-    await expect(startBtn).toBeVisible();
+    // 立即暂停并重置，避免污染后端全局计时器影响后续用例
+    const pauseBtn = page.locator('[data-testid="timer-pause"]');
+    await expect(pauseBtn).toBeVisible({ timeout: 5000 });
+    await pauseBtn.click();
+    await page.locator('[data-testid="timer-reset"]').click();
+    await expect(startBtn).toBeVisible({ timeout: 5000 });
   });
 });

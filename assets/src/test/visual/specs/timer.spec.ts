@@ -155,6 +155,10 @@ test.describe("TimerPage VRT 截图测试", () => {
 });
 
 test.describe("Timer 用户旅程 E2E", () => {
+  // 计时器旅程包含 selectMode(selectMode 内部 15s 超时) + 弹窗 + poll + clickPause(10s)
+  // 累计接近 30s 默认 test 超时；CI 上因为冷启动更慢，直接给 90s 兜底
+  test.describe.configure({ timeout: 90_000 });
+
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
     await page.waitForTimeout(1500);
@@ -163,29 +167,23 @@ test.describe("Timer 用户旅程 E2E", () => {
   test("stopwatch 完整旅程: start → pause → resume → reset", async ({ page }) => {
     const timerPage = new TimerPage(page);
 
-    // 1. 进入页面并选择正计时模式
+    // 1. 清理残留状态并显式切到正计时模式（后端模式是全局共享的）
     await timerPage.goto();
+    await timerPage.resetStaleTimer();
+    await timerPage.selectMode("stopwatch");
 
     // 2. 选择习惯
     await timerPage.selectHabit();
-
-    // 防护：清理 SSE 同步或此前运行残留的过期计时器状态
-    if (!(await timerPage.isTimerStopped())) {
-      await timerPage.clickPause();
-      await timerPage.clickReset();
-      await page.waitForTimeout(300);
-    }
 
     // 点击开始 —— 验证计时器正在运行
     await timerPage.clickStart();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
-    // 3. 等待 1 秒 —— 验证显示在跳动
+    // 3. 显示跳动 —— 用轮询而非固定 sleep，最小化 UI 状态漂移的窗口
     const displayBefore = await timerPage.getTimerDisplayText();
-    await page.waitForTimeout(1000);
-
-    const displayAfter = await timerPage.getTimerDisplayText();
-    expect(displayAfter).not.toBe(displayBefore);
+    await expect
+      .poll(() => timerPage.getTimerDisplayText(), { timeout: 5000 })
+      .not.toBe(displayBefore);
 
     // 4. 点击暂停 —— 验证已暂停（既非运行中也未完全停止）
     await timerPage.clickPause();
@@ -203,24 +201,23 @@ test.describe("Timer 用户旅程 E2E", () => {
   });
 
   test("countdown 流程: start → finish → 验证状态", async ({ page }) => {
-    test.setTimeout(180000); // 最长允许 3 分钟
+    test.setTimeout(180000);
 
     const timerPage = new TimerPage(page);
 
     await timerPage.goto();
+    await timerPage.resetStaleTimer();
     await timerPage.selectMode("countdown");
-    await timerPage.setWorkDuration(1); // 1 分钟
+    await timerPage.setCountdownSeconds(15);
 
     await timerPage.selectHabit();
     await timerPage.clickStart();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
-    await page.waitForTimeout(6000);
-
-    // 以较长间隔（1 秒）轮询，避免忙等
-    const finished = await timerPage.waitForTimerFinishPolling(120000, 1000);
-    expect(finished).toBe(true);
-    console.log("Timer finished successfully");
+    // 产品语义：loop=false 的倒计时到 0 会回卷而不是自然结束，
+    // 用户通过「完成」按钮手动结算 session.finish。
+    // 只需让 rAF 至少跑 2 秒，session 就有非零 elapsed_seconds。
+    await timerPage.waitRunning(2);
 
     await timerPage.clickFinish();
     expect(await timerPage.isTimerStopped()).toBe(true);
@@ -228,13 +225,14 @@ test.describe("Timer 用户旅程 E2E", () => {
   });
 
   test("countdown 完整旅程: start pause resume reset", async ({ page }) => {
-    test.setTimeout(180000); // 最长允许 3 分钟
+    test.setTimeout(180000);
 
     const timerPage = new TimerPage(page);
 
     await timerPage.goto();
+    await timerPage.resetStaleTimer();
     await timerPage.selectMode("countdown");
-    await timerPage.setWorkDuration(1); // 1 分钟
+    await timerPage.setCountdownSeconds(40);
 
     await timerPage.selectHabit();
     await timerPage.clickStart();
@@ -247,13 +245,7 @@ test.describe("Timer 用户旅程 E2E", () => {
     await timerPage.clickResume();
     expect(await timerPage.isTimerRunning()).toBe(true);
 
-    // 以较长间隔（1 秒）轮询，避免忙等
-    const finished = await timerPage.waitForTimerFinishPolling(120000, 1000);
-    if (!finished) {
-      // 回退：超时未结束时手动完成
-      await timerPage.clickFinish();
-    }
-
+    await timerPage.clickReset();
     expect(await timerPage.isTimerStopped()).toBe(true);
   });
 });

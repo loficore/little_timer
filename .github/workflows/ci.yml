@@ -99,7 +99,6 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -135,8 +134,14 @@ jobs:
         working-directory: assets
       - run: go build -o bin/server ./cmd/server
         working-directory: neo-src
-      - run: pnpm run test:e2e || true
+      - name: Ensure test_tmp exists for backend db path
+        run: mkdir -p assets/test_tmp
+      - run: pnpm exec playwright test --project=mobile-390 --project=mobile-412 --project=desktop-1280 --reporter=line
+        timeout-minutes: 20
         working-directory: assets
+      - name: Force cleanup lingering webServer processes
+        if: always()
+        run: pkill -9 -f "bin/server\|vite" 2>/dev/null || true
 
     # 视觉回归测试：仅在代码验证事件中运行
   vrt:

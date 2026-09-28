@@ -7,7 +7,7 @@ SSH_TARGET := env_var_or_default("MY_ACT_SSH_TARGET", "")
 REMOTE_PATH := env_var_or_default("MY_ACT_REMOTE_PATH", "")
 ROOT := justfile_directory()
 
-ci-run: go-build-check build-check
+ci-run: go-build-check frontend-check
 
 act:
         @if [ -n "{{SSH_TARGET}}" ]; then \
@@ -18,20 +18,11 @@ act:
             act --secret-file .act.env -P ubuntu-latest=catthehacker/ubuntu:act-latest; \
         fi
 
-frontend-dev:
-        @./scripts/dev.sh
-
-dev-webview:
-        @./scripts/dev.sh --webview
-
-build-check:
-        @zig build test && cd assets && pnpm run lint && pnpm run build:checkc
+frontend-check:
+        @cd assets && pnpm run lint && pnpm run build:check
 
 frontend-build:
         @cd assets && pnpm install && pnpm run build
-
-backend-dev:
-        @zig build -Dembed_ui=false -Doptimize=Debug run -- --webview
 
 go_src := justfile_directory() / "neo-src"
 

@@ -71,6 +71,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsqlite3-dev pkg-config
 
+      - name: Generate Wails bindings
+        # 与 ci.yml:57-58 对齐：package_go.sh 直接 pnpm build，但前端
+        # 通过 wailsApiClient.ts 引入 assets/src/bindings/ 下的生成产物，
+        # 该目录在 .gitignore 中，需在 build 前由 wails3 生成。
+        run: bash scripts/generate-bindings.sh
+
       - name: Run packaging script (Linux)
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}

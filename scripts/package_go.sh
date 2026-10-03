@@ -88,7 +88,7 @@ else
   echo "  - 嵌入 UI: false (仅提供 HTTP 服务)"
 fi
 
-go build -tags "$GO_TAGS" $GO_LDFLAGS -o bin/server ./cmd/server
+go build -tags "$GO_TAGS" -ldflags="$GO_LDFLAGS" -o bin/server ./cmd/server
 
 BIN_PATH="$NEO_SRC_DIR/bin/server"
 if [[ ! -f "$BIN_PATH" ]]; then

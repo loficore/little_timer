@@ -66,10 +66,19 @@ jobs:
         run: |
           chmod +x scripts/*.sh || true
 
-      - name: Install system dependencies (SQLite)
+      - name: Install system dependencies (SQLite + Wails GTK deps)
+        # SQLite 给 go-sqlite3 cgo；libgtk-4-dev/libwebkitgtk-6.0-dev 给
+        # scripts/generate-bindings.sh —— 虽然用 -tags=bindings，
+        # wails/v3/internal/operatingsystem 仍会拉 gtk4/webkitgtk-6.0
+        # pkg-config check，缺失即编译失败（与 ci.yml:46-53 对齐）。
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsqlite3-dev pkg-config
+          sudo apt-get install -y \
+            libsqlite3-dev \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            libgirepository1.0-dev \
+            pkg-config
 
       - name: Generate Wails bindings
         # 与 ci.yml:57-58 对齐：package_go.sh 直接 pnpm build，但前端

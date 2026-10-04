@@ -63,18 +63,15 @@ func TestFreshDatabaseCreatesSchema(t *testing.T) {
 	}
 }
 
-func TestSchemaVersionIs8(t *testing.T) {
+func TestSchemaVersionIsCurrent(t *testing.T) {
 	m := openTempSqlite(t)
 
 	var version int
 	if err := m.DB().QueryRow(`SELECT MAX(version) FROM schema_version;`).Scan(&version); err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if version != 8 {
-		t.Errorf("schema version: got %d, want 8", version)
-	}
 	if version != CurrentSchemaVersion {
-		t.Errorf("CurrentSchemaVersion constant: got %d, want 8", CurrentSchemaVersion)
+		t.Errorf("schema version: got %d, want %d", version, CurrentSchemaVersion)
 	}
 }
 
@@ -321,8 +318,8 @@ func TestSettingsSurvivesReopen(t *testing.T) {
 	if err := m.DB().QueryRow(`SELECT MAX(version) FROM schema_version;`).Scan(&v); err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if v != 8 {
-		t.Errorf("schema version after reopen: got %d, want 8", v)
+	if v != CurrentSchemaVersion {
+		t.Errorf("schema version after reopen: got %d, want %d", v, CurrentSchemaVersion)
 	}
 }
 
@@ -629,6 +626,8 @@ func TestSettingsColumnsMatchZigSchema(t *testing.T) {
 		"duration_seconds", "countdown_loop", "countdown_loop_count",
 		"countdown_loop_interval", "stopwatch_max_seconds",
 		"log_level", "log_enable_timestamp", "log_tick_interval", "updated_at",
+		"llm_provider", "llm_model", "llm_api_key_encrypted",
+		"llm_base_url", "llm_max_tokens", "llm_timeout_seconds",
 	}
 	got := make([]string, len(cols))
 	for i, c := range cols {

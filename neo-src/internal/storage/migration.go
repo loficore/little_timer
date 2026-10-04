@@ -5,13 +5,14 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 )
 
 // CurrentSchemaVersion 是本构建目标针对的 schema 版本。
-const CurrentSchemaVersion = 8
+const CurrentSchemaVersion = 9
 
 // MigrationError 是迁移失败的类型化哨兵错误。
 type MigrationError string
@@ -52,14 +53,74 @@ const habitSetsTableSQL = `CREATE TABLE IF NOT EXISTS habit_sets (
 
 const habitsTableSQL = `CREATE TABLE IF NOT EXISTS habits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    set_id INTEGER NOT NULL,
+    set_id INTEGER,
     name TEXT NOT NULL CHECK(length(name) > 0 AND length(name) <= 100),
     goal_seconds INTEGER NOT NULL DEFAULT 0 CHECK(goal_seconds >= 0),
     goal_count INTEGER NOT NULL DEFAULT 0 CHECK(goal_count >= 0),
     color TEXT NOT NULL DEFAULT '#6366f1',
     wallpaper TEXT DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (set_id) REFERENCES habit_sets(id) ON DELETE CASCADE
+    FOREIGN KEY (set_id) REFERENCES habit_sets(id) ON DELETE SET NULL
+);`
+
+// habitsRebuildV9SQL 是 v8 → v9 迁移时用来替换旧 habits 表的临时表。
+// 除了表名为 habits_new,列定义必须与 habitsTableSQL 保持一致:SQLite 无法
+// 用 ALTER COLUMN 去除 NOT NULL,只能建新表 → 拷数据 → 删旧表 → 改名。
+const habitsRebuildV9SQL = `CREATE TABLE habits_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    set_id INTEGER,
+    name TEXT NOT NULL CHECK(length(name) > 0 AND length(name) <= 100),
+    goal_seconds INTEGER NOT NULL DEFAULT 0 CHECK(goal_seconds >= 0),
+    goal_count INTEGER NOT NULL DEFAULT 0 CHECK(goal_count >= 0),
+    color TEXT NOT NULL DEFAULT '#6366f1',
+    wallpaper TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (set_id) REFERENCES habit_sets(id) ON DELETE SET NULL
+);`
+
+// tasksTableSQL 是 v9 引入的统一任务树(待办与日程合一),自引用 parent_id。
+const tasksTableSQL = `CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER,
+    raw_text TEXT DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    notes TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'inbox'
+        CHECK(status IN ('inbox','active','done','archived','rejected')),
+    due_date TEXT,
+    scheduled_start INTEGER,
+    scheduled_end INTEGER,
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),
+    estimated_minutes INTEGER NOT NULL DEFAULT 0,
+    order_index INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    ai_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(ai_status IN ('pending','processing','done','error')),
+    ai_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    parsed_at TIMESTAMP,
+    FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE
+);`
+
+// aiJobsTableSQL 追踪 AI 拆解异步任务(调试/重放/状态机)。
+const aiJobsTableSQL = `CREATE TABLE IF NOT EXISTS ai_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    status TEXT NOT NULL
+        CHECK(status IN ('queued','running','success','failed')),
+    request_payload TEXT NOT NULL,
+    response_payload TEXT,
+    error_message TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 1,
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );`
 
 const sessionsTableSQL = `CREATE TABLE IF NOT EXISTS sessions (
@@ -120,6 +181,8 @@ var requiredTables = []string{
 	"settings",
 	"schema_version",
 	"backup_config",
+	"tasks",
+	"ai_jobs",
 }
 
 // indexes 与 schema 一同创建，用于查询性能。
@@ -136,6 +199,11 @@ var indexes = []struct {
 	{"idx_health_check_status", "CREATE INDEX IF NOT EXISTS idx_health_check_status ON health_check(status);"},
 	{"idx_timer_sessions_habit_id", "CREATE INDEX IF NOT EXISTS idx_timer_sessions_habit_id ON timer_sessions(habit_id);"},
 	{"idx_timer_sessions_is_running", "CREATE INDEX IF NOT EXISTS idx_timer_sessions_is_running ON timer_sessions(is_running);"},
+	{"idx_tasks_parent", "CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id, order_index);"},
+	{"idx_tasks_status", "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);"},
+	{"idx_tasks_ai_status", "CREATE INDEX IF NOT EXISTS idx_tasks_ai_status ON tasks(ai_status, created_at);"},
+	{"idx_tasks_scheduled", "CREATE INDEX IF NOT EXISTS idx_tasks_scheduled ON tasks(scheduled_start);"},
+	{"idx_ai_jobs_task_id", "CREATE INDEX IF NOT EXISTS idx_ai_jobs_task_id ON ai_jobs(task_id, created_at);"},
 }
 
 // backupConfigTableSQL 是 v7 的 backup_config 表（带 v8 凭据列）。
@@ -223,7 +291,12 @@ func (m *MigrationManager) CheckAndMigrate() error {
 			ErrInvalidSchemaVersion, currentVersion, CurrentSchemaVersion)
 	}
 
-	return m.verifyTablesExist()
+	if err := m.verifyTablesExist(); err != nil {
+		return err
+	}
+	// 幂等的 v8 → v9 升级:重建 habits(set_id 可空)、补 settings llm 列、
+	// 创建 tasks/ai_jobs 索引。对全新 DB 这些检查全部 no-op。
+	return m.migrateV8ToV9()
 }
 
 // getSchemaVersion 读取 `SELECT MAX(version) FROM schema_version`。
@@ -264,6 +337,8 @@ func (m *MigrationManager) createTables() error {
 		{"sessions", sessionsTableSQL},
 		{"timer_sessions", timerSessionsTableSQL},
 		{"settings", settingsTableSQL},
+		{"tasks", tasksTableSQL},
+		{"ai_jobs", aiJobsTableSQL},
 	}
 	for _, s := range steps {
 		if _, err := m.db.Exec(s.sql); err != nil {
@@ -342,9 +417,154 @@ func (m *MigrationManager) recreateSingleTable(name string) error {
 	case "backup_config":
 		_, err := m.db.Exec(backupConfigTableSQL)
 		return err
+	case "tasks":
+		_, err := m.db.Exec(tasksTableSQL)
+		return err
+	case "ai_jobs":
+		_, err := m.db.Exec(aiJobsTableSQL)
+		return err
 	default:
 		return fmt.Errorf("%w: unknown table %s", ErrTableCreationFailed, name)
 	}
+}
+
+// v8 → v9 升级中要在既有数据库上追加的 settings 列。fresh DB 在 createTables
+// 里走 settingsTableSQL(本版本已包含这些列),所以这里只覆盖已有 settings 表。
+var v9SettingsColumns = []struct {
+	name string
+	def  string
+}{
+	{"llm_provider", "TEXT NOT NULL DEFAULT 'openai_compat'"},
+	{"llm_model", "TEXT NOT NULL DEFAULT 'deepseek-chat'"},
+	{"llm_api_key_encrypted", "BLOB"},
+	{"llm_base_url", "TEXT NOT NULL DEFAULT ''"},
+	{"llm_max_tokens", "INTEGER NOT NULL DEFAULT 2048"},
+	{"llm_timeout_seconds", "INTEGER NOT NULL DEFAULT 30"},
+}
+
+// migrateV8ToV9 把 v8 数据库带到 v9 状态。所有操作都是幂等的，fresh DB
+//(已经按 v9 schema 建表) 上调用也是 no-op。
+func (m *MigrationManager) migrateV8ToV9() error {
+	// 1. habits.set_id 由 NOT NULL 变为可空。SQLite 无法 ALTER COLUMN，
+	//    唯一办法是建新表 → 拷数据 → 改名。先检查是否需要。
+	nullable, err := m.columnIsNullable("habits", "set_id")
+	if err != nil {
+		return fmt.Errorf("%w: inspect habits: %w", ErrMigrationFailed, err)
+	}
+	if !nullable {
+		if err := m.rebuildHabitsNullable(); err != nil {
+			return err
+		}
+	}
+
+	// 2. settings 补 llm 列。fresh DB 上这些列已存在,addColumnIfMissing 会
+	//    自动跳过。
+	for _, c := range v9SettingsColumns {
+		if err := m.addColumnIfMissing("settings", c.name, c.def); err != nil {
+			return fmt.Errorf("%w: add settings.%s: %w", ErrMigrationFailed, c.name, err)
+		}
+	}
+
+	// 3. 兜底建索引(新表可能由 verifyTablesExist 重建,索引不会跟着重建)。
+	for _, idx := range indexes {
+		if _, err := m.db.Exec(idx.SQL); err != nil {
+			// 尽力而为,索引失败不致命。
+			_ = err
+		}
+	}
+
+	return nil
+}
+
+// columnIsNullable 报告表的指定列是否允许 NULL(notnull=0)。
+func (m *MigrationManager) columnIsNullable(table, column string) (bool, error) {
+	rows, err := m.db.Query(`PRAGMA table_info(` + table + `);`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return notnull == 0, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, fmt.Errorf("column %s.%s not found", table, column)
+}
+
+// addColumnIfMissing 在指定表上添加一列;若列已存在则 no-op。
+func (m *MigrationManager) addColumnIfMissing(table, column, def string) error {
+	rows, err := m.db.Query(`PRAGMA table_info(` + table + `);`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = m.db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s;`, table, column, def))
+	return err
+}
+
+// rebuildHabitsNullable 用 SQLite 的标准"建新表 → 拷数据 → 删旧表 → 改名"
+// 手法把 habits 表升级到 set_id 可空的 v9 形态。在单连接上执行,绕开外键
+// 约束检查。
+func (m *MigrationManager) rebuildHabitsNullable() error {
+	conn, err := m.db.Conn(context.Background())
+	if err != nil {
+		return fmt.Errorf("%w: acquire conn: %w", ErrMigrationFailed, err)
+	}
+	defer conn.Close()
+
+	stmts := []string{
+		`PRAGMA foreign_keys = OFF;`,
+		`BEGIN;`,
+		habitsRebuildV9SQL,
+		`INSERT INTO habits_new (id, set_id, name, goal_seconds, goal_count, color, wallpaper, created_at)
+		 SELECT id, set_id, name, goal_seconds, goal_count, color, wallpaper, created_at FROM habits;`,
+		`DROP TABLE habits;`,
+		`ALTER TABLE habits_new RENAME TO habits;`,
+		`CREATE INDEX IF NOT EXISTS idx_habits_set_id ON habits(set_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_habits_name ON habits(name);`,
+		`COMMIT;`,
+		`PRAGMA foreign_keys = ON;`,
+	}
+	for _, s := range stmts {
+		if _, err := conn.ExecContext(context.Background(), s); err != nil {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK;`)
+			return fmt.Errorf("%w: rebuild habits (%s): %w", ErrMigrationFailed, firstLine(s), err)
+		}
+	}
+	return nil
+}
+
+// firstLine 取 SQL 语句第一行(去掉前导空白),用于错误信息更易读。
+func firstLine(s string) string {
+	for i, r := range s {
+		if r == '\n' {
+			return s[:i]
+		}
+	}
+	return s
 }
 
 // IsMigrationFailed 是小辅助函数，让调用方无需为了比较而引入 errors.As，

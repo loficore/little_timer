@@ -164,6 +164,27 @@ func TestAllRoutesRegistered(t *testing.T) {
 	}
 }
 
+// TestAIGtdTestPromptRouteGated 确认 /api/aigtd/_test/prompt 仅在
+// LITTLE_TIMER_TEST_ENDPOINTS=1 时注册。默认情况下路由树应把它当 404
+// （防止被生产部署意外暴露）。
+func TestAIGtdTestPromptRouteGated(t *testing.T) {
+	t.Run("default-not-registered", func(t *testing.T) {
+		t.Setenv("LITTLE_TIMER_TEST_ENDPOINTS", "")
+		r, _ := newTestRouter(t)
+		if routeExists(r, http.MethodPost, "/api/aigtd/_test/prompt") {
+			t.Error("/api/aigtd/_test/prompt 应仅在 LITTLE_TIMER_TEST_ENDPOINTS=1 时注册")
+		}
+	})
+
+	t.Run("enabled-when-env-set", func(t *testing.T) {
+		t.Setenv("LITTLE_TIMER_TEST_ENDPOINTS", "1")
+		r, _ := newTestRouter(t)
+		if !routeExists(r, http.MethodPost, "/api/aigtd/_test/prompt") {
+			t.Error("/api/aigtd/_test/prompt 应在 LITTLE_TIMER_TEST_ENDPOINTS=1 时注册")
+		}
+	})
+}
+
 // TestEventsRouteExists 确认 /api/events 已注册而无需真的连上（该 handler
 // 会永远流下去）。检查方式：带 `Connection: close` 的 GET 请求返回 200 +
 // SSE 头而不是 404。我们用 httptest.NewServer，这样测试 client 一返回

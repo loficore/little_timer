@@ -51,6 +51,8 @@ export default defineConfig({
       url: "http://127.0.0.1:8080/api/state",
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
+      // 启用 /api/aigtd/_test/prompt（默认关闭，避免被生产部署意外暴露）。
+      env: { LITTLE_TIMER_TEST_ENDPOINTS: "1" },
     },
   ],
   projects: [

@@ -9,6 +9,7 @@ package http
 
 import (
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 
@@ -131,7 +132,11 @@ func registerAIGtd(r *gin.Engine) {
 	g.POST("/capture", handlers.AIGtdCapture)
 	g.POST("/reparse/:task_id", handlers.AIGtdReparse)
 	g.GET("/jobs", handlers.AIGtdJobs)
-	g.POST("/_test/prompt", handlers.AIGtdTestPrompt)
+	// 测试端点（注入固定 LLM 响应/模拟 5xx）只在显式开启时注册。
+	// e2e:Playwright webServer 启动时设置 LITTLE_TIMER_TEST_ENDPOINTS=1。
+	if os.Getenv("LITTLE_TIMER_TEST_ENDPOINTS") == "1" {
+		g.POST("/_test/prompt", handlers.AIGtdTestPrompt)
+	}
 }
 
 // 备份路由。

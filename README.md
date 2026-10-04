@@ -7,9 +7,25 @@ Little Timer 是一个基于 Go、Gin、SQLite 和 WebView 开发的跨平台定
 - 🎯 **跨平台**：支持 Linux 和 Windows，Android 提供实验性的 Wails 构建流程
 - ⚡ **可靠后端**：使用 Go、Gin 和 SQLite
 - 🖥️ **桌面运行时**：可选 WebView 窗口，也可使用 HTTP-only 模式
-- 🎨 **现代 UI**：基于 Preact + Tailwind CSS 的响应式界面
+- 🎨 **现代 UI**：基于 Preact + Tailwind CSS 的响应able 界面
 - 🔄 **模块化架构**：清晰的前后端分离设计
 - 📱 **移动友好**：支持触摸操作和移动端适配
+- 🤖 **AI GTD（实验）**：随手记 → LLM 拆解为可执行子任务；任务树 + 习惯 + 专注计时共用同一本地 SQLite
+
+## AI GTD（实验功能）
+
+侧边栏点击 **AI GTD** 进入随手记页面：
+
+1. 设置 → **AI / LLM** 填写 API Key（先在备份设置解锁主密码，Key 才入加密存储）。
+2. 回到 AI GTD 页面，输入一句话按 `Cmd/Ctrl+Enter`。
+3. 后台 worker 异步调用 LLM，2 秒轮询刷新；卡片显示子任务进度，可勾选完成。
+
+支持的 provider：
+
+- **云端** — OpenAI 兼容（默认 DeepSeek，含 OpenAI / OpenRouter / Azure OpenAI…）+ Anthropic。
+- **本地** — 走 OpenAI 兼容端点：Ollama / LM Studio / vLLM / llama.cpp server / LocalAI / llamafile 等。
+
+API Key 通过主密码加密落本地 SQLite，**不上传、不入日志**。LLM 配置与数据全部本地化。
 
 ## 开源协议
 

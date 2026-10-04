@@ -1,26 +1,27 @@
 import type {
-  TimerState,
-  Settings,
-  TimerProgress,
-  TimerStartOptions,
-  TimerStartResult,
-  TimerFinishResult,
-  RestResult,
-  ResumeResult,
-  HabitSet,
-  Habit,
-  HabitDetail,
-  Session,
-  CreateSessionResult,
-  BackupConfig,
-  BackupListResult,
-  BackupCreateResult,
-  BackupRestoreResult,
-  BackupVerifyResult,
-  WallpaperUploadResult,
-  WallpaperListResult,
-  WallpaperDeleteResult,
+    TimerState,
+    Settings,
+    TimerProgress,
+    TimerStartOptions,
+    TimerStartResult,
+    TimerFinishResult,
+    RestResult,
+    ResumeResult,
+    HabitSet,
+    Habit,
+    HabitDetail,
+    Session,
+    CreateSessionResult,
+    BackupConfig,
+    BackupListResult,
+    BackupCreateResult,
+    BackupRestoreResult,
+    BackupVerifyResult,
+    WallpaperUploadResult,
+    WallpaperListResult,
+    WallpaperDeleteResult,
 } from "../types/api";
+import type { TaskDTO, LLMSettingsDTO } from "../types/aigtd";
 
 /**
  * API 客户端，用于与后端 API 进行交互
@@ -507,6 +508,102 @@ export class APIClient {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url }),
+        });
+    }
+
+    // ===== AI GTD =====
+
+    /** 提交一条随手记 → 异步拆解。返回 task_id。 */
+    async captureAIGtd(rawText: string, source?: string): Promise<{ task_id: number }> {
+        return this.fetchJson<{ task_id: number }>(`${this.baseUrl}/api/aigtd/capture`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ raw_text: rawText, source: source ?? "manual" }),
+        });
+    }
+
+    /** 重新解析一个 task(可选覆盖原文)。 */
+    async reparseAIGtd(taskId: number, newRawText?: string): Promise<{ job_id: number }> {
+        return this.fetchJson<{ job_id: number }>(`${this.baseUrl}/api/aigtd/reparse/${taskId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newRawText ? { raw_text: newRawText } : {}),
+        });
+    }
+
+    /** 查询任务当前 AI 处理状态。 */
+    async getAIGtdJob(taskId: number): Promise<{
+        task_id: number;
+        ai_status: string;
+        ai_error?: string;
+        latest_job_id?: number;
+        attempts?: number;
+    }> {
+        return this.fetchJson(`${this.baseUrl}/api/aigtd/jobs?task_id=${taskId}`);
+    }
+
+    /** 列出顶层任务(可按状态过滤)。 */
+    async listTasks(status?: string): Promise<TaskDTO[]> {
+        const q = status ? `?status=${encodeURIComponent(status)}` : "";
+        return this.fetchJson<TaskDTO[]>(`${this.baseUrl}/api/tasks${q}`);
+    }
+
+    /** 取单条任务(含子任务)。 */
+    async getTask(id: number): Promise<TaskDTO> {
+        return this.fetchJson<TaskDTO>(`${this.baseUrl}/api/tasks/${id}`);
+    }
+
+    /** 直接创建任务(不经过 AI)。 */
+    async createTask(title: string, notes?: string): Promise<TaskDTO> {
+        return this.fetchJson<TaskDTO>(`${this.baseUrl}/api/tasks`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title, notes }),
+        });
+    }
+
+    /** 局部更新任务(指针语义)。 */
+    async updateTask(id: number, patch: Partial<TaskDTO>): Promise<TaskDTO> {
+        return this.fetchJson<TaskDTO>(`${this.baseUrl}/api/tasks/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+        });
+    }
+
+    /** 删除任务。 */
+    async deleteTask(id: number): Promise<void> {
+        await this.fetchJson<void>(`${this.baseUrl}/api/tasks/${id}`, { method: "DELETE" });
+    }
+
+    /** 切换子任务完成状态。 */
+    async toggleSubtask(taskId: number, subId: number, status: "pending" | "done"): Promise<void> {
+        await this.fetchJson<void>(`${this.baseUrl}/api/tasks/${taskId}/subtasks/${subId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status }),
+        });
+    }
+
+    /** 读 LLM 设置。 */
+    async getLLMSettings(): Promise<LLMSettingsDTO> {
+        return this.fetchJson<LLMSettingsDTO>(`${this.baseUrl}/api/settings/llm`);
+    }
+
+    /** 写 LLM 设置(任意字段可选)。 */
+    async updateLLMSettings(patch: {
+        provider?: "openai_compat" | "anthropic";
+        base_url?: string;
+        model?: string;
+        max_tokens?: number;
+        timeout_seconds?: number;
+        api_key?: string;
+        clear_key?: boolean;
+    }): Promise<LLMSettingsDTO> {
+        return this.fetchJson<LLMSettingsDTO>(`${this.baseUrl}/api/settings/llm`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
         });
     }
 }

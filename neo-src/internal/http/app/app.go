@@ -254,6 +254,12 @@ func (a *App) ensureSecrets() *crypto.SecretStorage {
 	return a.secrets
 }
 
+// Secrets 返回 SecretStorage(惰性初始化)。供需要存/取受主密码保护的 secret
+// 的处理器使用(例如 LLM API Key)。
+func (a *App) Secrets() *crypto.SecretStorage {
+	return a.ensureSecrets()
+}
+
 // HasMasterPassword 返回是否已设置主密码（基于磁盘上的凭据或 BackupConfig 标志）。
 func (a *App) HasMasterPassword() bool {
 	cfg := a.Settings.BackupConfig()

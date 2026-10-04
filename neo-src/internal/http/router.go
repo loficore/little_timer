@@ -31,6 +31,9 @@ func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	registerTimer(r)
 	registerHabits(r)
 	registerSettings(r)
+	registerLLMSettings(r)
+	registerTasks(r)
+	registerAIGtd(r)
 	registerBackup(r)
 	registerWallpapers(r)
 	registerEvents(r)
@@ -97,6 +100,37 @@ func registerSettings(r *gin.Engine) {
 	g := r.Group("/api")
 	g.GET("/settings", handlers.SettingsGet)
 	g.POST("/settings", handlers.SettingsUpdate)
+}
+
+// LLM 设置路由。
+
+func registerLLMSettings(r *gin.Engine) {
+	g := r.Group("/api/settings/llm")
+	g.GET("", handlers.LLMSettingsGet)
+	g.PUT("", handlers.LLMSettingsUpdate)
+}
+
+// 任务路由。
+
+func registerTasks(r *gin.Engine) {
+	g := r.Group("/api/tasks")
+	g.GET("", handlers.TaskList)
+	g.POST("", handlers.TaskCreate)
+	g.GET("/:id", handlers.TaskGet)
+	g.PATCH("/:id", handlers.TaskUpdate)
+	g.DELETE("/:id", handlers.TaskDelete)
+	g.POST("/:id/subtasks", handlers.SubtaskCreate)
+	g.PATCH("/:id/subtasks/:sub_id", handlers.SubtaskUpdate)
+	g.DELETE("/:id/subtasks/:sub_id", handlers.SubtaskDelete)
+}
+
+// AI GTD 路由。
+
+func registerAIGtd(r *gin.Engine) {
+	g := r.Group("/api/aigtd")
+	g.POST("/capture", handlers.AIGtdCapture)
+	g.POST("/reparse/:task_id", handlers.AIGtdReparse)
+	g.GET("/jobs", handlers.AIGtdJobs)
 }
 
 // 备份路由。

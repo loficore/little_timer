@@ -20,6 +20,7 @@ import (
 // 为 true 表示把对应列显式置 NULL(覆盖之前的值)。
 type TaskUpdateFields struct {
 	Title                *string
+	RawText              *string
 	Notes                *string
 	DueDate              *string
 	ClearDueDate         bool
@@ -162,6 +163,9 @@ func (c *AITasksCrud) UpdateTask(id int64, fields TaskUpdateFields) error {
 	}
 	if fields.Title != nil {
 		add("title", *fields.Title)
+	}
+	if fields.RawText != nil {
+		add("raw_text", *fields.RawText)
 	}
 	if fields.Notes != nil {
 		add("notes", *fields.Notes)

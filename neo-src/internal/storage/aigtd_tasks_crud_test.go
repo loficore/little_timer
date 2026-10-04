@@ -1,0 +1,205 @@
+package storage
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+
+	"little-timer/internal/domain"
+)
+
+func TestCreateAndGetTask_WithSubtasks(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	id, err := c.CreateTask("准备下周汇报 PPT", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 {
+		t.Fatal("task id should be non-zero")
+	}
+
+	subID, err := c.CreateSubtask(id, "收集业务数据", 20, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subID == 0 {
+		t.Fatal("subtask id should be non-zero")
+	}
+
+	task, subs, err := c.GetTask(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.RawText != "准备下周汇报 PPT" {
+		t.Errorf("raw_text mismatch: %q", task.RawText)
+	}
+	if task.Status != domain.TaskStatusInbox {
+		t.Errorf("default status should be inbox, got %q", task.Status)
+	}
+	if task.AIStatus != domain.AIStatusPending {
+		t.Errorf("default ai_status should be pending, got %q", task.AIStatus)
+	}
+	if len(subs) != 1 || subs[0].Title != "收集业务数据" {
+		t.Errorf("subtasks mismatch: %+v", subs)
+	}
+	if subs[0].EstimatedMinutes != 20 {
+		t.Errorf("subtask estimated_minutes = %d", subs[0].EstimatedMinutes)
+	}
+}
+
+func TestUpdateTask_PointerSemantics(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	id, _ := c.CreateTask("原文本", "manual")
+	if err := c.UpdateTask(id, TaskUpdateFields{
+		Title:    stringPtr("新标题"),
+		Notes:    stringPtr("备注"),
+		DueDate:  stringPtr("2026-12-01"),
+		Pinned:   boolPtr(true),
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	task, _, _ := c.GetTask(id)
+	if task.Title != "新标题" {
+		t.Errorf("title = %q", task.Title)
+	}
+	if task.Notes != "备注" {
+		t.Errorf("notes = %q", task.Notes)
+	}
+	if task.DueDate == nil || *task.DueDate != "2026-12-01" {
+		t.Errorf("due_date = %v", task.DueDate)
+	}
+	if !task.Pinned {
+		t.Errorf("pinned should be true")
+	}
+
+	// 局部更新:只改 Title → 其他字段不变。
+	if err := c.UpdateTask(id, TaskUpdateFields{
+		Title: stringPtr("再次更新"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task, _, _ = c.GetTask(id)
+	if task.Title != "再次更新" {
+		t.Errorf("title after partial = %q", task.Title)
+	}
+	if task.Notes != "备注" {
+		t.Errorf("notes changed unexpectedly: %q", task.Notes)
+	}
+
+	// ClearDueDate:true → due_date 变 NULL。
+	if err := c.UpdateTask(id, TaskUpdateFields{ClearDueDate: true}); err != nil {
+		t.Fatal(err)
+	}
+	task, _, _ = c.GetTask(id)
+	if task.DueDate != nil {
+		t.Errorf("due_date not cleared: %v", task.DueDate)
+	}
+}
+
+func TestClaimNextQueuedJob_FIFO(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+	id1, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":1}`)
+	time.Sleep(1100 * time.Millisecond) // 跨 1 秒,确保 created_at 不同
+	id2, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":2}`)
+	id3, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":3}`)
+
+	got1, err := c.ClaimNextQueuedJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got1 == nil {
+		t.Fatal("got1 = nil")
+	}
+	if got1.ID != id1 {
+		t.Errorf("first claim should be id1(%d), got %d", id1, got1.ID)
+	}
+	// claim 后状态应为 running
+	if got1.Status != domain.AIJobStatusRunning {
+		t.Errorf("after claim status = %q, want running", got1.Status)
+	}
+
+	got2, _ := c.ClaimNextQueuedJob()
+	if got2 == nil || got2.ID != id2 {
+		t.Errorf("second claim should be id2(%d), got %v", id1, got2)
+	}
+	got3, _ := c.ClaimNextQueuedJob()
+	if got3 == nil || got3.ID != id3 {
+		t.Errorf("third claim should be id3(%d), got %v", id3, got3)
+	}
+}
+
+func TestReclaimStuckRunningJobs(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+	_, _ = c.EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	j, _ := c.ClaimNextQueuedJob()
+	if j == nil {
+		t.Fatal("expected a job to claim")
+	}
+
+	// 把它的人工 started_at 倒回 10 分钟前。
+	if _, err := m.DB().Exec(
+		`UPDATE ai_jobs SET started_at = datetime('now','-10 minutes') WHERE id=?`, j.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	reclaimed, err := c.ReclaimStuckRunningJobs(300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reclaimed != 1 {
+		t.Errorf("reclaimed = %d, want 1", reclaimed)
+	}
+
+	// 再 Claim 应该拿到同一个 job(状态已被 reset 为 queued)。
+	got, _ := c.ClaimNextQueuedJob()
+	if got == nil || got.ID != j.ID {
+		t.Errorf("expected to reclaim id=%d, got %v", j.ID, got)
+	}
+}
+
+func stringPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool       { return &b }

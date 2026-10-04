@@ -9,10 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"little-timer/internal/aigtd"
 	"little-timer/internal/http/app"
 )
 
-const llmAPIKeySecret = "llm_api_key"
+const llmAPIKeySecret = aigtd.APIKeySecretName
 
 // LLMSettingsDTO 是 GET /api/settings/llm 的出参。
 type LLMSettingsDTO struct {

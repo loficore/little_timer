@@ -37,6 +37,7 @@ import (
 	"syscall"
 	"time"
 
+	"little-timer/internal/aigtd"
 	"little-timer/internal/cli"
 	"little-timer/internal/domain"
 	httpx "little-timer/internal/http"
@@ -75,6 +76,17 @@ func runServer(opts *cli.ServeOptions) error {
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	// AI GTD 异步 worker:启动 2 个 goroutine 从 ai_jobs 队列取任务。
+	// 用户在设置页配好 API Key 并解锁凭据后,worker 就能真实调用 LLM。
+	worker := aigtd.NewWorkerPool(app.SQLite.AITasks(), appSettingsAdapter{app: app}, 2)
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	worker.Start(workerCtx)
+	defer func() {
+		worker.Stop()
+		worker.Wait()
+		workerCancel()
+	}()
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -131,6 +143,52 @@ func runServer(opts *cli.ServeOptions) error {
 		return srvErr
 	}
 	return winErr
+}
+
+// appSettingsAdapter 把 httpapp.App 适配成 aigtd.SettingsGetter,
+// 让 worker 不直接依赖 settings 包。
+type appSettingsAdapter struct {
+	app *httpapp.App
+}
+
+func (s appSettingsAdapter) CurrentDate() string {
+	return domain.TodayString(s.app.Settings.Config().Basic.Timezone)
+}
+
+func (s appSettingsAdapter) LLMSettings() aigtd.LLMConfig {
+	cfg := aigtd.LLMConfig{
+		Provider:       "openai_compat",
+		BaseURL:        "https://api.deepseek.com/v1",
+		Model:          "deepseek-chat",
+		MaxTokens:      2048,
+		TimeoutSeconds: 30,
+	}
+	if s.app == nil || s.app.SQLite == nil || s.app.SQLite.DB() == nil {
+		return cfg
+	}
+	row := s.app.SQLite.DB().QueryRow(
+		`SELECT llm_provider, llm_base_url, llm_model, llm_max_tokens, llm_timeout_seconds
+		 FROM settings WHERE id = 1;`,
+	)
+	_ = row.Scan(&cfg.Provider, &cfg.BaseURL, &cfg.Model, &cfg.MaxTokens, &cfg.TimeoutSeconds)
+	if cfg.Provider == "" {
+		cfg.Provider = "openai_compat"
+	}
+	if cfg.Model == "" {
+		cfg.Model = "deepseek-chat"
+	}
+	if cfg.MaxTokens == 0 {
+		cfg.MaxTokens = 2048
+	}
+	if cfg.TimeoutSeconds == 0 {
+		cfg.TimeoutSeconds = 30
+	}
+	if !s.app.Secrets().IsLocked() {
+		if key, err := s.app.Secrets().Retrieve([]byte(aigtd.APIKeySecretName)); err == nil {
+			cfg.APIKey = string(key)
+		}
+	}
+	return cfg
 }
 
 // bootstrapApp 接线 SQLite → Settings → Clock → Backup → App 链。

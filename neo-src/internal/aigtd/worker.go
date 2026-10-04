@@ -14,6 +14,10 @@ import (
 // ErrProviderUnconfigured 标记用户尚未配置 LLM API Key。
 var ErrProviderUnconfigured = errors.New("aigtd: provider API key not configured")
 
+// APIKeySecretName 是 API Key 在 crypto.SecretStorage 里的键名。
+// handler 写入、worker 读取都必须用同一个常量。
+const APIKeySecretName = "llm_api_key"
+
 // ErrJobAlreadyRunning 标记任务已有 ai_status=processing 的活跃 job
 //(reparse 时 handler 检查这个避免重复入队)。
 var ErrJobAlreadyRunning = errors.New("aigtd: job already running")

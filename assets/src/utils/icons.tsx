@@ -20,6 +20,7 @@ import {
   ClipboardDocumentCheckIcon,
   PhotoIcon,
   ForwardIcon,
+  SparklesIcon,
 } from "@heroicons/react/24/outline";
 
 export const PlayIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
@@ -104,4 +105,7 @@ export const PhotoIconComponent: FunctionalComponent<{ className?: string }> = (
 
 export const ForwardIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
   <ForwardIcon className={className} />
+);
+export const SparklesIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
+  <SparklesIcon className={className} />
 );

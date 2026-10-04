@@ -6,8 +6,9 @@
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
 import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon } from "../utils/icons";
+import { SparklesIconComponent } from "../utils/icons";
 
-type Page = "timer" | "habits" | "stats" | "settings";
+type Page = "timer" | "habits" | "aigtd" | "stats" | "settings";
 
 interface SidebarProps {
     /** 当前所在页面 */
@@ -29,6 +30,13 @@ const navItems = [
         labelKey: "nav.habits",
         icon: (
             <HabitsIconComponent className="h-5 w-5" />
+        ),
+    },
+    {
+        id: "aigtd" as const,
+        labelKey: "aigtd.nav_label",
+        icon: (
+            <SparklesIconComponent className="h-5 w-5" />
         ),
     },
     {

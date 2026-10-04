@@ -4,6 +4,7 @@ import { TimerPage } from "./TimerPage";
 import { HabitsPage } from "./HabitsPage";
 import { SettingsPage } from "./Settings.tsx";
 import { StatsPage } from "./Stats.tsx";
+import { AIGtdPage } from "./AIGtdPage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastContainer, showToast } from "./components/common/Toast";
 import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, logLifecycle, logPerf } from "./utils/logger";
@@ -12,7 +13,7 @@ import { resolveWallpaperUrl, WALLPAPER_FALLBACK_GRADIENT } from "./utils/consta
 import { t } from "./utils/i18n";
 import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon } from "./utils/icons";
 
-type Page = "timer" | "habits" | "stats" | "settings";
+type Page = "timer" | "habits" | "aigtd" | "stats" | "settings";
 
 const formatUnknownError = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -222,6 +223,7 @@ export const App = () => {
             {page === "stats" && (
               <StatsPage onBackClick={() => navigateTo("timer")} />
             )}
+            {page === "aigtd" && <AIGtdPage />}
             {page === "settings" && (
               <SettingsPage
                 onBackClick={() => navigateTo("timer")}

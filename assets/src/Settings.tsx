@@ -7,13 +7,14 @@ import { WallpaperModal } from "./components/WallpaperModal";
 import { CountdownSettings } from "./components/CountdownSettings";
 import { StopwatchSettings } from "./components/StopwatchSettings";
 import { BackupTab } from "./components/settings/BackupTab";
+import { LLMSettings } from "./components/settings/LLMSettings";
 import { GalleryContent } from "./components/GalleryContent";
 import { MasterPasswordModal } from "./components/MasterPasswordModal";
 import { t, setLanguage } from "./utils/i18n";
 import { getAPIClient } from "./utils/apiClientSingleton";
 import type { BackupConfig } from "./types/api";
 import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
-import { ClockIconComponent, CheckIconComponent, ResetIcon, SettingsIcon, BackupIcon, PhotoIconComponent } from "./utils/icons";
+import { ClockIconComponent, CheckIconComponent, ResetIcon, SettingsIcon, BackupIcon, PhotoIconComponent, SparklesIconComponent } from "./utils/icons";
 import { loadAudioPreferences, normalizeAudioPreferences, saveAudioPreferences, DEFAULT_AUDIO_PREFERENCES } from "./utils/audio";
 import { STORAGE_KEYS } from "./utils/constants";
 import { applyTheme, applyLightStyle } from "./hooks/useAppSettings";
@@ -28,6 +29,7 @@ const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "basic", labelKey: "settings.tabs.basic", icon: <SettingsIcon /> },
   { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
   { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
+  { id: "llm", labelKey: "llm_settings.title", icon: <SparklesIconComponent /> },
   { id: "backup", labelKey: "settings.tabs.backup", icon: <BackupIcon /> },
   { id: "gallery", labelKey: "gallery.title", icon: <PhotoIconComponent /> },
 ];
@@ -540,6 +542,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
             />
           )}
           {activeTab === "gallery" && <GalleryContent />}
+          {activeTab === "llm" && <LLMSettings />}
         </TabPanel>
 
         <div

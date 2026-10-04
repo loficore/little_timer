@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"little-timer/internal/aigtd"
 	"little-timer/internal/domain"
 )
 
@@ -132,4 +133,24 @@ func AIGtdJobs(c *gin.Context) {
 		resp["attempts"] = job.Attempts
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// AIGtdTestPrompt POST /api/aigtd/_test/prompt —— 注入测试用 LLM 响应。
+// body { text?: string, fail_with?: number }
+// 设为空 text 或 fail_with>0 都清除覆盖。
+func AIGtdTestPrompt(c *gin.Context) {
+	var body struct {
+		Text     string `json:"text"`
+		FailWith int    `json:"fail_with"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid json"})
+		return
+	}
+	if body.Text == "" && body.FailWith == 0 {
+		aigtd.ClearTestOverride()
+	} else {
+		aigtd.SetTestOverride(body.Text, body.FailWith)
+	}
+	c.JSON(http.StatusOK, gin.H{"override": body.Text != "" || body.FailWith != 0})
 }

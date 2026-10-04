@@ -30,10 +30,12 @@ import (
 // 每当 serve 被调用（显式子命令或隐式根 RunE）时由根命令的
 // PersistentFlags 填充。
 type ServeOptions struct {
-	HTTPOnly   bool
-	Port       int
-	DBPath     string
-	CORSOrigin string
+	HTTPOnly          bool
+	Port              int
+	DBPath            string
+	CORSOrigin        string
+	AIGtdTestPrompt   string // 调试用:启动时把 LLM 响应设为固定 JSON(覆盖 aigtd 包)
+	AIGtdTestFailWith int    // 调试用:启动时让 worker 把每个 job 标 ErrRetryable(模拟 5xx)
 }
 
 // ServeFunc 是用户要启动 server 时 CLI 调用的回调。CLI 对存储和 HTTP
@@ -121,6 +123,10 @@ func addServeFlags(cmd *cobra.Command, opts *ServeOptions) {
 		"SQLite database file path")
 	cmd.PersistentFlags().StringVar(&opts.CORSOrigin, "cors-origin", opts.CORSOrigin,
 		"Access-Control-Allow-Origin value")
+	cmd.PersistentFlags().StringVar(&opts.AIGtdTestPrompt, "aigtd-test-prompt", "",
+		"DEBUG: fixed LLM response JSON to inject into AI GTD worker at startup")
+	cmd.PersistentFlags().IntVar(&opts.AIGtdTestFailWith, "aigtd-test-fail-with", 0,
+		"DEBUG: when non-zero, worker returns ErrRetryable for every job (simulates 5xx)")
 }
 
 // resolveHTTPOnly 把互斥的 --http-only / --webview flag 折叠为单个

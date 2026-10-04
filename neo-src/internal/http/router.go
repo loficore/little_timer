@@ -131,6 +131,7 @@ func registerAIGtd(r *gin.Engine) {
 	g.POST("/capture", handlers.AIGtdCapture)
 	g.POST("/reparse/:task_id", handlers.AIGtdReparse)
 	g.GET("/jobs", handlers.AIGtdJobs)
+	g.POST("/_test/prompt", handlers.AIGtdTestPrompt)
 }
 
 // 备份路由。

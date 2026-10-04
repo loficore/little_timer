@@ -88,6 +88,12 @@ func runServer(opts *cli.ServeOptions) error {
 		workerCancel()
 	}()
 
+	// 调试用:把固定响应注入 worker(覆盖真实 LLM 调用)。仅用于 e2e。
+	if opts.AIGtdTestPrompt != "" || opts.AIGtdTestFailWith != 0 {
+		aigtd.SetTestOverride(opts.AIGtdTestPrompt, opts.AIGtdTestFailWith)
+		defer aigtd.ClearTestOverride()
+	}
+
 	serverErr := make(chan error, 1)
 	go func() {
 		fmt.Fprintf(os.Stdout, "HTTP server listening on :%d (db=%s, cors-origin=%s)\n", opts.Port, opts.DBPath, opts.CORSOrigin)

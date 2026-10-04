@@ -165,3 +165,48 @@ func TestWorkerPool_UnconfiguredProviderMarksError(t *testing.T) {
 		t.Error("unconfigured provider should set ai_error")
 	}
 }
+
+func TestWorkerPool_TestOverride_BypassesFactory(t *testing.T) {
+	m := newTestDB(t)
+	taskID, _ := m.AITasks().CreateTask("x", "manual")
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+
+	aigtd.SetTestOverride(
+		`{"title":"overridden","is_complex":false,"estimated_minutes":12,"subtasks":[]}`,
+		0,
+	)
+	defer aigtd.ClearTestOverride()
+
+	s := &fakeSettings{date: "2026-10-04", provider: "openai_compat", model: "m", apiKey: ""}
+	// 注意:apiKey 为空,真实工厂会返 ErrProviderUnconfigured;但 override 优先,
+	// 所以任务仍然应成功。
+	wp := aigtd.NewWorkerPool(m.AITasks(), s, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wp.Start(ctx)
+	defer func() { wp.Stop(); wp.Wait() }()
+
+	task := waitTaskStatus(t, m.AITasks(), taskID, domain.AIStatusDone, 5*time.Second)
+	if task.Title != "overridden" {
+		t.Errorf("title = %q, want overridden", task.Title)
+	}
+}
+
+func TestWorkerPool_TestOverride_FailWithMarksError(t *testing.T) {
+	m := newTestDB(t)
+	taskID, _ := m.AITasks().CreateTask("x", "manual")
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+
+	aigtd.SetTestOverride("", 500) // 不返回有效响应 → ErrRetryable
+	defer aigtd.ClearTestOverride()
+
+	s := &fakeSettings{date: "2026-10-04", provider: "openai_compat", model: "m", apiKey: ""}
+	wp := aigtd.NewWorkerPool(m.AITasks(), s, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wp.Start(ctx)
+	defer func() { wp.Stop(); wp.Wait() }()
+
+	// fail_with=500 触发 ErrRetryable + 重试 3 次后失败
+	waitTaskStatus(t, m.AITasks(), taskID, domain.AIStatusError, 5*time.Second)
+}

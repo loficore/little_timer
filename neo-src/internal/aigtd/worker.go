@@ -152,10 +152,16 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 	}
 
 	cfg := w.settings.LLMSettings()
-	provider, err := w.factory(cfg)
-	if err != nil {
-		w.fail(job, task.ID, "provider 不可用:"+err.Error())
-		return
+	var provider Provider
+	if ov := currentTestOverride(); ov != nil {
+		provider = &staticProvider{text: ov.text, failWith: ov.failWith}
+	} else {
+		var err error
+		provider, err = w.factory(cfg)
+		if err != nil {
+			w.fail(job, task.ID, "provider 不可用:"+err.Error())
+			return
+		}
 	}
 
 	req := CompletionRequest{

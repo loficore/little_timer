@@ -312,11 +312,12 @@ func (c *AITasksCrud) EnqueueJob(taskID int64, provider, model, reqPayload strin
 }
 
 // ClaimNextQueuedJob 原子地取出最早一个 queued 任务,标记为 running。
-// 用 SQLite 的 UPDATE...RETURNING(3.35+) 单条 SQL 实现。
+// 用 SQLite 的 UPDATE...RETURNING(3.35+) 单条 SQL 实现。attempts 不在此处
+// 自增 —— 重试语义由 worker 在 RequeueJob 里增加,避免"claim = 一次尝试"的双计。
 func (c *AITasksCrud) ClaimNextQueuedJob() (*domain.AIJobRow, error) {
 	row := c.db.QueryRow(
 		`UPDATE ai_jobs
-		 SET status = 'running', started_at = CURRENT_TIMESTAMP, attempts = attempts + 1
+		 SET status = 'running', started_at = CURRENT_TIMESTAMP
 		 WHERE id = (
 		   SELECT id FROM ai_jobs WHERE status = 'queued'
 		   ORDER BY created_at ASC LIMIT 1
@@ -324,6 +325,18 @@ func (c *AITasksCrud) ClaimNextQueuedJob() (*domain.AIJobRow, error) {
 		 RETURNING `+aiJobCols+`;`,
 	)
 	return scanAIJobRow(row)
+}
+
+// RequeueJob 把 running 的 job 退回 queued,attempts 自增,started_at 清空。
+// 供 Worker 在遇到可重试错误(ErrRetryable)且未达上限时调用。
+func (c *AITasksCrud) RequeueJob(jobID int64) error {
+	_, err := c.db.Exec(
+		`UPDATE ai_jobs
+		 SET status='queued', started_at=NULL, attempts=attempts+1
+		 WHERE id=? AND status='running';`,
+		jobID,
+	)
+	return err
 }
 
 // MarkJobRunning 显式标记 running(当前实现由 ClaimNextQueuedJob 自动置位,

@@ -71,7 +71,57 @@ async function waitForBackend(): Promise<void> {
   throw new Error("Backend not ready after 30 seconds");
 }
 
+async function findHabitSetIdByName(name: string): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    http.get("http://127.0.0.1:8080/api/habit-sets", (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`HabitSet list returned ${res.statusCode}`));
+          return;
+        }
+        try {
+          const list = JSON.parse(body) as Array<{ id: number; name: string }>;
+          const found = list.find((s) => s.name === name);
+          resolve(found ? found.id : null);
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }).on("error", reject);
+  });
+}
+
+async function habitExistsInSet(setId: number, name: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    http.get(
+      `http://127.0.0.1:8080/api/habits?set_id=${setId}`,
+      (res) => {
+        let body = "";
+        res.on("data", (chunk) => (body += chunk));
+        res.on("end", () => {
+          if (res.statusCode !== 200) {
+            reject(new Error(`Habit list returned ${res.statusCode}`));
+            return;
+          }
+          try {
+            const list = JSON.parse(body) as Array<{ name: string }>;
+            resolve(list.some((h) => h.name === name));
+          } catch (err) {
+            reject(err);
+          }
+        });
+      },
+    ).on("error", reject);
+  });
+}
+
 async function createTestHabitSet(): Promise<void> {
+  const existingId = await findHabitSetIdByName("Test Habit Set");
+  if (existingId !== null) {
+    return;
+  }
   const habitSetPayload = JSON.stringify({
     name: "Test Habit Set",
     description: "Default set for E2E tests",
@@ -109,8 +159,15 @@ async function createTestHabitSet(): Promise<void> {
 }
 
 async function createTestHabit(): Promise<void> {
+  const setId = await findHabitSetIdByName("Test Habit Set");
+  if (setId === null) {
+    throw new Error("Test Habit Set not found; createTestHabitSet must run first");
+  }
+  if (await habitExistsInSet(setId, "Test Habit")) {
+    return;
+  }
   const habitPayload = JSON.stringify({
-    set_id: 1,
+    set_id: setId,
     name: "Test Habit",
     goal_seconds: 3600, // 默认 1 小时
     color: "#FF5733",

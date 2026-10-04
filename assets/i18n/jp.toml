@@ -371,6 +371,7 @@ message = "バックエンドサービスが一時的に利用できません。
 [aigtd]
 title = "AI GTD"
 nav_label = "AI GTD"
+nav_label_short = "AI"
 capture_placeholder = "ふと思いついたことを入力、Enterで送信…"
 capture_hint = "Cmd/Ctrl + Enter で送信"
 status_inbox = "受信箱"

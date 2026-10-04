@@ -370,6 +370,7 @@ message = "Backend service is unavailable. Some features may be limited. Please 
 [aigtd]
 title = "AI GTD"
 nav_label = "AI GTD"
+nav_label_short = "AI"
 capture_placeholder = "Capture a thought, press Enter to submit…"
 capture_hint = "Cmd/Ctrl + Enter to submit"
 status_inbox = "Inbox"

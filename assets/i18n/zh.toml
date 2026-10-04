@@ -370,6 +370,7 @@ delete = "删除"
 [aigtd]
 title = "AI GTD"
 nav_label = "AI GTD"
+nav_label_short = "AI"
 capture_placeholder = "随手记一件事，回车提交…"
 capture_hint = "Cmd/Ctrl + Enter 提交"
 status_inbox = "收件箱"

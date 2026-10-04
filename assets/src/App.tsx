@@ -11,7 +11,7 @@ import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, lo
 import { useAppSettings, logWallpaperDebug } from "./hooks/useAppSettings";
 import { resolveWallpaperUrl, WALLPAPER_FALLBACK_GRADIENT } from "./utils/constants";
 import { t } from "./utils/i18n";
-import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon } from "./utils/icons";
+import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, SparklesIconComponent } from "./utils/icons";
 
 type Page = "timer" | "habits" | "aigtd" | "stats" | "settings";
 
@@ -259,6 +259,15 @@ export const App = () => {
         >
           <HabitsIconComponent className="h-5 w-5" />
           <span className="btm-nav-label">{t("nav.habits")}</span>
+        </button>
+        <button
+          type="button"
+          data-testid="nav-aigtd"
+          className={`my-bottom-nav-item ${page === "aigtd" ? "active" : ""}`}
+          onClick={() => navigateTo("aigtd")}
+        >
+          <SparklesIconComponent className="h-5 w-5" />
+          <span className="btm-nav-label">{t("aigtd.nav_label_short")}</span>
         </button>
         <button
           type="button"

@@ -20,7 +20,11 @@ test.describe("AI GTD E2E", () => {
     await ctx.dispose();
   });
 
-  test("随手记 → AI 拆解 → 子任务出现在卡片里", async ({ page }) => {
+  test("随手记 → AI 拆解 → 子任务出现在卡片里", async ({ page, viewport }) => {
+    test.skip(
+      (viewport?.width ?? 0) < 1024,
+      "AI GTD 测试仅桌面端跑(侧边栏入口);移动端底部 nav 5-tab 布局属子项目 2 范畴",
+    );
     const ctx = await request.newContext({ baseURL: apiURL });
     await ctx.post("/api/aigtd/_test/prompt", { data: { text: fixedLLMResponse } });
     await ctx.dispose();
@@ -28,27 +32,29 @@ test.describe("AI GTD E2E", () => {
     await page.goto(baseURL);
     await page.waitForLoadState("networkidle");
 
-    // 通过侧边栏切到 AI GTD 页
-    await page.locator('[data-testid="nav-aigtd"]').click();
+    // 桌面侧边栏入口(底部 nav 在 lg 隐藏,但 DOM 仍在 → 用 aside 选择器限定)
+    await page.locator('aside [data-testid="nav-aigtd"]').click();
     await expect(page.getByPlaceholder(/随手记一件事/)).toBeVisible();
 
-    // 提交随手记
     await page.getByPlaceholder(/随手记一件事/).fill("准备下周汇报 PPT");
     await page.getByPlaceholder(/随手记一件事/).press("Enter");
 
-    // 等待子任务出现(worker 用 test_override,≤2s)
     await expect(page.getByText("列大纲")).toBeVisible({ timeout: 10000 });
     await expect(page.getByText("填数据")).toBeVisible({ timeout: 10000 });
   });
 
-  test("LLM 5xx → 卡片显示解析失败 + 重新解析按钮", async ({ page }) => {
+  test("LLM 5xx → 卡片显示解析失败 + 重新解析按钮", async ({ page, viewport }) => {
+    test.skip(
+      (viewport?.width ?? 0) < 1024,
+      "AI GTD 测试仅桌面端跑(侧边栏入口);移动端底部 nav 5-tab 布局属子项目 2 范畴",
+    );
     const ctx = await request.newContext({ baseURL: apiURL });
     await ctx.post("/api/aigtd/_test/prompt", { data: { fail_with: 500 } });
     await ctx.dispose();
 
     await page.goto(baseURL);
     await page.waitForLoadState("networkidle");
-    await page.locator('[data-testid="nav-aigtd"]').click();
+    await page.locator('aside [data-testid="nav-aigtd"]').click();
 
     await page.getByPlaceholder(/随手记一件事/).fill("test error path");
     await page.getByPlaceholder(/随手记一件事/).press("Enter");

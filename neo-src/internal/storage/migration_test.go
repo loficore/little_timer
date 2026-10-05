@@ -314,6 +314,57 @@ func TestMigrateV9ToV10_AddsColumns(t *testing.T) {
 	}
 }
 
+// TestMigrateV10ToV11_AddsAllColumns 验证 v10 → v11 升级:
+//   - tasks 表新增 6 列(version / priority_score / urgency_score /
+//     energy_required / context_tag / blocked_by),且各自 DEFAULT/CHECK
+//     生效;
+//   - schema_version 被推进到 11(CurrentSchemaVersion)。
+//
+// 引导方式:用 schema_version IF NOT EXISTS 建表后调 Migrate(),让 fresh
+// 路径跑 createTables(CurrentSchemaVersion);再 INSERT OR REPLACE version=10
+// 模拟"已是 v10",第二次 Migrate 走 v10→v11 升级 + setSchemaVersion(11)。
+func TestMigrateV10ToV11_AddsAllColumns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	// 先建 schema_version 占位,让后续 Migrate 走 currentVersion==0 → createTables 分支。
+	if _, err := m.DB().Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, description TEXT);`); err != nil {
+		t.Fatalf("seed schema_version: %v", err)
+	}
+	if err := m.Migrate(); err != nil {
+		t.Fatalf("首次 Migrate: %v", err)
+	}
+	// 把 schema_version 拨回到 10,让下一轮 Migrate 走 v10→v11 升级分支。
+	if _, err := m.DB().Exec(`INSERT OR REPLACE INTO schema_version (version, description) VALUES (10, 'v10');`); err != nil {
+		t.Fatalf("seed version=10: %v", err)
+	}
+
+	if err := m.Migrate(); err != nil {
+		t.Fatalf("Migrate to v11: %v", err)
+	}
+
+	// 6 列必须都在 tasks 表上。
+	cols := []string{"version", "priority_score", "urgency_score", "energy_required", "context_tag", "blocked_by"}
+	for _, col := range cols {
+		if !hasColumn(m.DB(), "tasks", col) {
+			t.Errorf("tasks.%s 缺失", col)
+		}
+	}
+
+	// schema_version 已被推进到 11。
+	var v int
+	if err := m.DB().QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != 11 {
+		t.Errorf("schema_version.max = %d, want 11", v)
+	}
+}
+
 // hasColumn 通过 PRAGMA table_info 检查列是否存在。
 func hasColumn(db *sql.DB, table, column string) bool {
 	rows, err := db.Query(`PRAGMA table_info(` + table + `);`)

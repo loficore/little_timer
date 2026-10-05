@@ -13,7 +13,7 @@ import (
 )
 
 // CurrentSchemaVersion 是本构建目标针对的 schema 版本。
-const CurrentSchemaVersion = 10
+const CurrentSchemaVersion = 11
 
 // MigrationError 是迁移失败的类型化哨兵错误。
 type MigrationError string
@@ -99,6 +99,13 @@ const tasksTableSQL = `CREATE TABLE IF NOT EXISTS tasks (
         CHECK(ai_status IN ('pending','processing','done','error')),
     ai_error TEXT,
     user_edited_title INTEGER NOT NULL DEFAULT 0 CHECK(user_edited_title IN (0,1)),
+    -- v11:乐观锁 + 5 维调度评分(见 scheduler 设计 §3.1)
+    version INTEGER NOT NULL DEFAULT 0,
+    priority_score INTEGER NOT NULL DEFAULT 3 CHECK(priority_score BETWEEN 1 AND 5),
+    urgency_score INTEGER NOT NULL DEFAULT 5 CHECK(urgency_score BETWEEN 1 AND 10),
+    energy_required INTEGER NOT NULL DEFAULT 2 CHECK(energy_required BETWEEN 1 AND 3),
+    context_tag TEXT NOT NULL DEFAULT 'general',
+    blocked_by TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(blocked_by)),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     parsed_at TIMESTAMP,
@@ -311,6 +318,11 @@ func (m *MigrationManager) CheckAndMigrate() error {
 	if err := m.migrateV9ToV10(); err != nil {
 		return err
 	}
+	// 幂等的 v10 → v11 升级:tasks 补 version + 5 维评分列(fresh DB 走
+	// tasksTableSQL 已含,addColumnIfMissing 会自动跳过)。
+	if err := m.migrateV10ToV11(); err != nil {
+		return err
+	}
 
 	// 旧 DB 升级后必须把 schema_version 推进到 CurrentSchemaVersion,
 	// 否则它永远停留在旧版本号,下次启动重复走升级分支(当前幂等所以安全,
@@ -336,6 +348,41 @@ func (m *MigrationManager) migrateV9ToV10() error {
 	if err := m.addColumnIfMissing("ai_jobs", "mode",
 		"TEXT NOT NULL DEFAULT 'append'"); err != nil {
 		return fmt.Errorf("%w: add ai_jobs.mode: %w", ErrMigrationFailed, err)
+	}
+	return nil
+}
+
+// migrateV10ToV11 把 v10 DB 幂等地带到 v11:tasks 补 version 乐观锁列 +
+// 5 维调度评分列(priority_score / urgency_score / energy_required /
+// context_tag / blocked_by)。fresh DB 走 tasksTableSQL 已含这些列,
+// addColumnIfMissing 会自动跳过,故为 no-op。
+//
+// 注:此处 ADD COLUMN 带 CHECK 约束(SQLite ≥3.25 支持在 ADD COLUMN 上声明
+// CHECK);fresh 与 upgrade 路径的 tasks 表定义保持一致。
+func (m *MigrationManager) migrateV10ToV11() error {
+	if err := m.addColumnIfMissing("tasks", "version",
+		"INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("%w: add tasks.version: %w", ErrMigrationFailed, err)
+	}
+	if err := m.addColumnIfMissing("tasks", "priority_score",
+		"INTEGER NOT NULL DEFAULT 3 CHECK(priority_score BETWEEN 1 AND 5)"); err != nil {
+		return fmt.Errorf("%w: add tasks.priority_score: %w", ErrMigrationFailed, err)
+	}
+	if err := m.addColumnIfMissing("tasks", "urgency_score",
+		"INTEGER NOT NULL DEFAULT 5 CHECK(urgency_score BETWEEN 1 AND 10)"); err != nil {
+		return fmt.Errorf("%w: add tasks.urgency_score: %w", ErrMigrationFailed, err)
+	}
+	if err := m.addColumnIfMissing("tasks", "energy_required",
+		"INTEGER NOT NULL DEFAULT 2 CHECK(energy_required BETWEEN 1 AND 3)"); err != nil {
+		return fmt.Errorf("%w: add tasks.energy_required: %w", ErrMigrationFailed, err)
+	}
+	if err := m.addColumnIfMissing("tasks", "context_tag",
+		"TEXT NOT NULL DEFAULT 'general'"); err != nil {
+		return fmt.Errorf("%w: add tasks.context_tag: %w", ErrMigrationFailed, err)
+	}
+	if err := m.addColumnIfMissing("tasks", "blocked_by",
+		"TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(blocked_by))"); err != nil {
+		return fmt.Errorf("%w: add tasks.blocked_by: %w", ErrMigrationFailed, err)
 	}
 	return nil
 }

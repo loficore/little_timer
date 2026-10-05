@@ -62,9 +62,18 @@ type TaskRow struct {
 	AIStatus         AIStatus   `json:"ai_status"`
 	AIError          string     `json:"ai_error,omitempty"`
 	UserEditedTitle  bool       `json:"user_edited_title"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
-	ParsedAt         *time.Time `json:"parsed_at,omitempty"`
+	// v11:乐观锁版本号,server 在每次 UpdateTask 时 ++;int64 与 DB INTEGER 对齐。
+	Version int64 `json:"version"`
+	// v11:5 维调度评分(见 scheduler 设计 §3.1)。blocked_by 由用户显式标,
+	// 不经 LLM;其它 4 维 LLM 预填 + 用户可改。omitempty 让空切片不出现在 JSON 里。
+	PriorityScore  int        `json:"priority_score"`
+	UrgencyScore   int        `json:"urgency_score"`
+	EnergyRequired int        `json:"energy_required"`
+	ContextTag     string     `json:"context_tag"`
+	BlockedBy      []int64    `json:"blocked_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	ParsedAt       *time.Time `json:"parsed_at,omitempty"`
 }
 
 // SubtaskRow 是一行 `task_subtasks` 语义的 tasks 子任务(通过 parent_id 关联)。

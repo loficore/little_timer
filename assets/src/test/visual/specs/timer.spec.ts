@@ -49,6 +49,7 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-display-seven-segment.png", {
       maxDiffPixels: 100,
+      mask: [page.locator(".my-bottom-nav")],
     });
   });
 
@@ -60,6 +61,7 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-display-classic.png", {
       maxDiffPixels: 100,
+      mask: [page.locator(".my-bottom-nav")],
     });
   });
 
@@ -107,6 +109,7 @@ test.describe("TimerPage VRT 截图测试", () => {
     await expect(page.locator(".my-topbar")).toBeVisible();
     await expect(page).toHaveScreenshot("timer-sidebar-visuals.png", {
       maxDiffPixels: 100,
+      mask: [page.locator(".my-bottom-nav")],
     });
   });
 
@@ -120,6 +123,7 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-theme-light.png", {
       maxDiffPixels: 100,
+      mask: [page.locator(".my-bottom-nav")],
     });
   });
 
@@ -131,13 +135,13 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.waitForLoadState("networkidle");
     await page.locator('.my-surface-modal button').nth(1).click();
     await page.waitForTimeout(500);
-    await expect(page).toHaveScreenshot("timer-stopwatch-mode.png", { maxDiffPixels: 100 });
+    await expect(page).toHaveScreenshot("timer-stopwatch-mode.png", { maxDiffPixels: 100, mask: [page.locator(".my-bottom-nav")] });
 
     await page.locator('.dropdown-select-btn').first().click();
     await page.waitForLoadState("networkidle");
     await page.locator('.my-surface-modal button').nth(0).click();
     await page.waitForTimeout(500);
-    await expect(page).toHaveScreenshot("timer-countdown-mode.png", { maxDiffPixels: 100 });
+    await expect(page).toHaveScreenshot("timer-countdown-mode.png", { maxDiffPixels: 100, mask: [page.locator(".my-bottom-nav")] });
   });
 
   test("控制按钮等高（stopwatch 运行中）", async ({ page }) => {

@@ -40,22 +40,22 @@ func (e AITaskError) Error() string { return string(e) }
 // TaskUpdateFields 携带可选的更新字段。指针为 nil 表示不动;Clear* 标志
 // 为 true 表示把对应列显式置 NULL(覆盖之前的值)。
 type TaskUpdateFields struct {
-	Title                *string
-	RawText              *string
-	Notes                *string
-	DueDate              *string
-	ClearDueDate         bool
-	Status               *domain.TaskStatus
-	ParentID             *int64
-	ClearParentID        bool
-	ScheduledStart       *int64
-	ClearScheduledStart  bool
-	ScheduledEnd         *int64
-	ClearScheduledEnd    bool
-	Pinned               *bool
-	OrderIndex           *int64
-	EstimatedMinutes     *int64
-	UserEditedTitle       *bool
+	Title               *string
+	RawText             *string
+	Notes               *string
+	DueDate             *string
+	ClearDueDate        bool
+	Status              *domain.TaskStatus
+	ParentID            *int64
+	ClearParentID       bool
+	ScheduledStart      *int64
+	ClearScheduledStart bool
+	ScheduledEnd        *int64
+	ClearScheduledEnd   bool
+	Pinned              *bool
+	OrderIndex          *int64
+	EstimatedMinutes    *int64
+	UserEditedTitle     *bool
 }
 
 // SubtaskUpdateFields 是子任务的更新字段集合。
@@ -354,38 +354,6 @@ func (c *AITasksCrud) HasInFlightJob(taskID int64) (bool, error) {
 	return n > 0, nil
 }
 
-// ReplaceSubtasksStrict 在一个事务里清空 task 的旧 subtasks 并写入新子任务。
-// 已 done 的子任务也被删——本方法仅用于显式接受全量替换的路径(目前无调用方,
-// 保留以便以后扩展 use cases)。reparse 默认走 ReplaceSubtasksKeepDone。
-func (c *AITasksCrud) ReplaceSubtasksStrict(taskID int64, subs []SubtaskInput) error {
-	tx, err := c.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.Exec(
-		`DELETE FROM tasks WHERE parent_id = ?;`, taskID,
-	); err != nil {
-		return err
-	}
-	for i, s := range subs {
-		var due any
-		if s.DueDate != nil {
-			due = *s.DueDate
-		}
-		if _, err := tx.Exec(
-			`INSERT INTO tasks (parent_id, title, estimated_minutes, due_date, order_index, source, status, ai_status)
-			 VALUES (?, ?, ?, ?, ?, 'ai', ?, 'done');`,
-			taskID, s.Title, s.EstimatedMinutes, due, i,
-			string(domain.SubtaskStatusActive),
-		); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
 // AppendSubtasks 仅向 task 追加新子任务,不删除/不修改任何已有行。
 // order_index 接在现有同 task 子任务最大值之后。不做 title 去重
 // (spec §3.3 / Q2:LLM 偶发重复由 UI 处理,worker 端不主动去重)。
@@ -516,7 +484,7 @@ func (c *AITasksCrud) ClaimNextQueuedJob() (*domain.AIJobRow, error) {
 		   SELECT id FROM ai_jobs WHERE status = 'queued'
 		   ORDER BY created_at ASC LIMIT 1
 		 )
-		 RETURNING `+aiJobCols+`;`,
+		 RETURNING ` + aiJobCols + `;`,
 	)
 	return scanAIJobRow(row)
 }

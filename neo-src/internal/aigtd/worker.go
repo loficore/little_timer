@@ -49,10 +49,10 @@ const idlePollInterval = 200 * time.Millisecond
 // WorkerPool 从 ai_jobs 队列里取任务,调用 Provider 拆解,把结果写回 tasks。
 // 线程安全,可启停。
 type WorkerPool struct {
-	aiTasks   *storage.AITasksCrud
-	settings  SettingsGetter
-	maxConc   int
-	factory   ProviderFactory
+	aiTasks  *storage.AITasksCrud
+	settings SettingsGetter
+	maxConc  int
+	factory  ProviderFactory
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -160,7 +160,7 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		}
 	}
 
-		// 决定合并模式 + 构造 prompt 上下文。append 模式把已有子任务注入 prompt;
+	// 决定合并模式 + 构造 prompt 上下文。append 模式把已有子任务注入 prompt;
 	// replace 模式不传 hints(避免 LLM 因"不要重复"规则主动省略未完成子任务
 	// 而被 worker 当作"可删除"——见 reviewer M1)。
 	mode := job.Mode

@@ -232,12 +232,12 @@ func TestSchedule_TableDriven(t *testing.T) {
 		},
 
 		{
-			"18-单个 task 块大于窗口 → unscheduled + 时间不够",
+			"18-estimated_minutes=999 默认窗口 clamp 180 后可装",
 			[]Task{{ID: 1, EstimatedMin: 999, Scores: Score{3, 5, 2, "g"}}},
 			nil, Options{},
-			// clamp 到 180,但仍超过单一 free interval?实际 17h 内 180min 可装。
-			// 改用 block=180 仍可装,改测试:用 custom options 窗口 < 180。
-			want{placementIDs: []int64{1}}, // 17h window fits 180
+			// EstimatedMin 999 被 clamp 到 180;默认窗口 17h 足以容纳,故任务正常排入。
+			// 「块大于窗口 → unscheduled + 时间不够」由 case 18b 用 <180min 窗口覆盖。
+			want{placementIDs: []int64{1}},
 		},
 
 		{

@@ -302,6 +302,58 @@ func (c *AITasksCrud) DeleteSubtask(id int64) error {
 	return err
 }
 
+// HasInFlightJob 返回某 task 是否有 ai_jobs 行处于 queued/running 状态。
+// reparse 等端点用它阻止重复入队。
+func (c *AITasksCrud) HasInFlightJob(taskID int64) (bool, error) {
+	var n int
+	err := c.db.QueryRow(
+		`SELECT COUNT(*) FROM ai_jobs WHERE task_id = ? AND status IN ('queued', 'running');`,
+		taskID,
+	).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// ReplaceSubtasks 在一个事务里清空 task 的旧 subtasks 并写入新子任务。
+// reparse 时 Worker 用它替换 LLM 解析出的新子任务集,避免重复累积。
+func (c *AITasksCrud) ReplaceSubtasks(taskID int64, subs []SubtaskInput) error {
+	tx, err := c.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(
+		`DELETE FROM tasks WHERE parent_id = ?;`, taskID,
+	); err != nil {
+		return err
+	}
+	for i, s := range subs {
+		var due any
+		if s.DueDate != nil {
+			due = *s.DueDate
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO tasks (parent_id, title, estimated_minutes, due_date, order_index, source, status, ai_status)
+			 VALUES (?, ?, ?, ?, ?, 'ai', ?, 'done');`,
+			taskID, s.Title, s.EstimatedMinutes, due, i,
+			string(domain.SubtaskStatusActive),
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// SubtaskInput 是 ReplaceSubtasks 接受的子任务描述。
+type SubtaskInput struct {
+	Title            string
+	EstimatedMinutes int
+	DueDate          *string
+}
+
 // EnqueueJob 入队一个 ai_jobs 行(状态 queued)。
 func (c *AITasksCrud) EnqueueJob(taskID int64, provider, model, reqPayload string) (int64, error) {
 	res, err := c.db.Exec(

@@ -75,7 +75,13 @@ func AIGtdReparse(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "task not found"})
 		return
 	}
-	if task.AIStatus == domain.AIStatusProcessing {
+	// 已有 queued/running job 时拒绝重复入队(可能来自快速双击或重试风暴)。
+	inFlight, err := a.SQLite.AITasks().HasInFlightJob(taskID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "job lookup failed"})
+		return
+	}
+	if inFlight || task.AIStatus == domain.AIStatusProcessing {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "code": "aigtd.processing", "error": "task is being processed"})
 		return
 	}
@@ -85,6 +91,7 @@ func AIGtdReparse(c *gin.Context) {
 		RawText *string `json:"raw_text"`
 	}
 	_ = c.ShouldBindJSON(&req)
+	rawText := task.RawText
 	if req.RawText != nil {
 		raw := strings.TrimSpace(*req.RawText)
 		if raw == "" || len([]rune(raw)) > maxRawTextLen {
@@ -95,6 +102,7 @@ func AIGtdReparse(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
 			return
 		}
+		rawText = raw
 	}
 
 	if err := a.SQLite.AITasks().SetAIStatus(taskID, domain.AIStatusPending, ""); err != nil {
@@ -102,7 +110,7 @@ func AIGtdReparse(c *gin.Context) {
 		return
 	}
 	cfg := aiConfigFromApp(a)
-	jobID, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, task.RawText)
+	jobID, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, rawText)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "enqueue failed"})
 		return

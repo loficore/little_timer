@@ -208,5 +208,97 @@ func TestReclaimStuckRunningJobs(t *testing.T) {
 	}
 }
 
+func TestReplaceSubtasks_AtomicSwap(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+
+	// 第一次 parse → 写一组 subtasks
+	if _, err := c.CreateSubtask(taskID, "旧1", 10, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateSubtask(taskID, "旧2", 20, nil, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	// reparse → 替换为新一组
+	newSubs := []SubtaskInput{
+		{Title: "新1", EstimatedMinutes: 30},
+		{Title: "新2", EstimatedMinutes: 40},
+		{Title: "新3", EstimatedMinutes: 50},
+	}
+	if err := c.ReplaceSubtasks(taskID, newSubs); err != nil {
+		t.Fatalf("ReplaceSubtasks: %v", err)
+	}
+
+	// 验证旧 subtasks 被清空、新 subtasks 到位
+	_, subs, err := c.GetTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subs) != 3 {
+		t.Fatalf("替换后数量 = %d, 期望 3", len(subs))
+	}
+	wantTitles := []string{"新1", "新2", "新3"}
+	for i, st := range subs {
+		if st.Title != wantTitles[i] {
+			t.Errorf("subtask[%d].Title = %q, want %q", i, st.Title, wantTitles[i])
+		}
+	}
+}
+
+func TestHasInFlightJob(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+
+	// 初始无 job
+	got, _ := c.HasInFlightJob(taskID)
+	if got {
+		t.Error("空任务不应有 in-flight job")
+	}
+
+	// queued → true
+	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = c.HasInFlightJob(taskID)
+	if !got {
+		t.Error("queued job 应当算 in-flight")
+	}
+
+	// 标 success → false
+	var j *domain.AIJobRow
+	j, _ = c.LatestJobForTask(taskID)
+	if j == nil {
+		t.Fatal("expected a job")
+	}
+	if err := c.MarkJobSuccess(j.ID, "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = c.HasInFlightJob(taskID)
+	if got {
+		t.Error("success job 不应再算 in-flight")
+	}
+}
+
 func stringPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool       { return &b }

@@ -196,11 +196,17 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		w.fail(job, task.ID, "update task:"+err.Error())
 		return
 	}
-	for i, st := range res.Subtasks {
-		if _, err := w.aiTasks.CreateSubtask(task.ID, st.Title, st.EstimatedMinutes, st.DueDate, i); err != nil {
-			w.fail(job, task.ID, "create subtask:"+err.Error())
-			return
-		}
+	subs := make([]storage.SubtaskInput, 0, len(res.Subtasks))
+	for _, st := range res.Subtasks {
+		subs = append(subs, storage.SubtaskInput{
+			Title:            st.Title,
+			EstimatedMinutes: st.EstimatedMinutes,
+			DueDate:          st.DueDate,
+		})
+	}
+	if err := w.aiTasks.ReplaceSubtasks(task.ID, subs); err != nil {
+		w.fail(job, task.ID, "replace subtasks:"+err.Error())
+		return
 	}
 	if err := w.aiTasks.SetAIStatus(task.ID, domain.AIStatusDone, ""); err != nil {
 		log.Warn("worker.mark done failed", "task_id", task.ID, "error", err.Error())

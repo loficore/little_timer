@@ -64,7 +64,9 @@ func AIGtdCapture(c *gin.Context) {
 	// "卡片永远停在 Parsing 状态"的孤儿记录。
 	cfg := aiConfigFromApp(a)
 	if _, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, raw, domain.AIJobModeAppend); err != nil {
-		_ = a.SQLite.AITasks().DeleteTask(taskID)
+		// 刚 CreateTask 的行 version=0,rollback 时显式带 0(内部调用不走
+		// ConflictGuard 的 context,这里必须自带版本)。
+		_ = a.SQLite.AITasks().DeleteTask(taskID, 0)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": "aigtd.enqueue_failed", "error": "enqueue failed"})
 		return
 	}

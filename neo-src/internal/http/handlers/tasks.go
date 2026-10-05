@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -287,6 +288,15 @@ func TaskUpdate(c *gin.Context) {
 	}
 
 	if err := a.SQLite.AITasks().UpdateTask(id, fields, middleware.GetVersion(c)); err != nil {
+		// C3 fix:乐观锁冲突 → 409(与 TaskScoresUpdate / ScheduleApply 一致),
+		// 其它错误才是 500。
+		if errors.Is(err, storage.ErrVersionConflict) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "version conflict",
+				"code":  "version_conflict",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
 		return
 	}
@@ -302,7 +312,16 @@ func TaskDelete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid id"})
 		return
 	}
-	if err := a.SQLite.AITasks().DeleteTask(id); err != nil {
+	// C1 fix:删除也走乐观锁 —— 用 ConflictGuard 解析出的期望版本,
+	// 0 行受影响(版本不符/task 不存在)→ 409。
+	if err := a.SQLite.AITasks().DeleteTask(id, middleware.GetVersion(c)); err != nil {
+		if errors.Is(err, storage.ErrVersionConflict) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "version conflict",
+				"code":  "version_conflict",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "delete failed"})
 		return
 	}
@@ -381,7 +400,16 @@ func SubtaskUpdate(c *gin.Context) {
 		o := int64(v)
 		fields.OrderIndex = &o
 	}
-	if err := a.SQLite.AITasks().UpdateSubtask(subID, fields); err != nil {
+	// C2 fix:子任务也走乐观锁。子任务本身是 tasks 行(带 parent_id 与
+	// version),与 UpdateTask 同源同语义。
+	if err := a.SQLite.AITasks().UpdateSubtask(subID, fields, middleware.GetVersion(c)); err != nil {
+		if errors.Is(err, storage.ErrVersionConflict) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "version conflict",
+				"code":  "version_conflict",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
 		return
 	}

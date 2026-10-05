@@ -366,10 +366,27 @@ func (c *AITasksCrud) SetTaskStatus(id int64, status domain.TaskStatus) error {
 	return err
 }
 
-// DeleteTask 删除一条任务(级联到子任务与 ai_jobs)。
-func (c *AITasksCrud) DeleteTask(id int64) error {
-	_, err := c.db.Exec(`DELETE FROM tasks WHERE id = ?;`, id)
-	return err
+// DeleteTask 删除一条任务(级联到子任务与 ai_jobs),带乐观锁。
+//
+// `version` 为调用方期望的 server 端版本(handler 通过 middleware.GetVersion
+// 拿,内部 rollback 通过 GetTaskVersion 取)。0 行受影响 → ErrVersionConflict
+// 并附当前 server 版本(handler 据此返 409,UI 据此提示用户刷新)。
+//
+// `version < 0` 是非法值 —— ConflictGuard 已保证请求层 >= 0。
+func (c *AITasksCrud) DeleteTask(id int64, version int64) error {
+	res, err := c.db.Exec(
+		`DELETE FROM tasks WHERE id = ? AND version = ?;`,
+		id, version,
+	)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrAITaskDeleteFailed, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		cur, _ := c.GetTaskVersion(id)
+		return fmt.Errorf("%w (current=%d)", ErrVersionConflict, cur)
+	}
+	return nil
 }
 
 // MarkParsedAt 设置 parsed_at。
@@ -397,35 +414,76 @@ func (c *AITasksCrud) CreateSubtask(taskID int64, title string, estMin int, dueD
 	return res.LastInsertId()
 }
 
-// UpdateSubtask 按指针语义更新子任务。
-func (c *AITasksCrud) UpdateSubtask(id int64, fields SubtaskUpdateFields) error {
-	sets := []string{}
-	args := []any{}
+// buildSubtaskUpdateSets 把 SubtaskUpdateFields 翻译成 SET clause 片段与对应
+// 参数。集中函数保证无字段遗漏;updateSubtaskWithVersion 与未来其它变体
+// 共享同一拼装逻辑。
+func buildSubtaskUpdateSets(fields SubtaskUpdateFields) (sets []string, args []any) {
+	add := func(col string, v any) {
+		sets = append(sets, col+" = ?")
+		args = append(args, v)
+	}
 	if fields.Title != nil {
-		sets = append(sets, "title = ?")
-		args = append(args, *fields.Title)
+		add("title", *fields.Title)
 	}
 	if fields.Status != nil {
-		sets = append(sets, "status = ?")
-		args = append(args, string(*fields.Status))
+		add("status", string(*fields.Status))
 	}
 	if fields.EstimatedMinutes != nil {
-		sets = append(sets, "estimated_minutes = ?")
-		args = append(args, *fields.EstimatedMinutes)
+		add("estimated_minutes", *fields.EstimatedMinutes)
 	}
 	if fields.OrderIndex != nil {
-		sets = append(sets, "order_index = ?")
-		args = append(args, *fields.OrderIndex)
+		add("order_index", *fields.OrderIndex)
 	}
+	return sets, args
+}
+
+// updateSubtaskWithVersion 是 UpdateSubtask / UpdateSubtaskTx 共享的中心函数:
+//
+//   - 拼装 SubtaskUpdateFields → SET ... clause;
+//   - SET 自增 version,WHERE 子句带 `id = ? AND parent_id IS NOT NULL AND version = ?`
+//     —— parent_id IS NOT NULL 防止误把 id 当顶层 task 改掉;
+//   - 0 行受影响 → ErrVersionConflict(带当前 server 版本,handler 据此返 409)。
+//
+// 子任务本身也是 tasks 表的一行(带 parent_id 与 version),所以乐观锁与
+// 顶层 task 走的是同一列(version);冲突判定语义完全一致。
+func (c *AITasksCrud) updateSubtaskWithVersion(exec dbExecer, id int64, fields SubtaskUpdateFields, version int64) error {
+	sets, args := buildSubtaskUpdateSets(fields)
 	if len(sets) == 0 {
+		// 空操作:不写 version(避免客户端传空 body 也算"成功并 bump 版本")。
 		return nil
 	}
+	sets = append(sets, "version = ?")
+	args = append(args, version+1, id, version)
 	sets = append(sets, "updated_at = CURRENT_TIMESTAMP")
-	args = append(args, id)
-	_, err := c.db.Exec(
-		"UPDATE tasks SET "+joinComma(sets)+" WHERE id = ? AND parent_id IS NOT NULL;", args...,
-	)
-	return err
+
+	q := "UPDATE tasks SET " + joinComma(sets) +
+		" WHERE id = ? AND parent_id IS NOT NULL AND version = ?"
+	res, err := exec.Exec(q, args...)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrAITaskUpdateFailed, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		// 子任务也是 tasks 行,GetTaskVersion 在这里复用(列同源)。
+		cur, _ := c.GetTaskVersion(id)
+		return fmt.Errorf("%w (current=%d)", ErrVersionConflict, cur)
+	}
+	return nil
+}
+
+// UpdateSubtask 按指针语义更新子任务,带乐观锁。语义与 UpdateTask 对齐:
+// 调用前 caller 必须取到当前 server 端 version(handler 通过
+// middleware.GetVersion(c),内部 helper 通过 GetTaskVersion),落库后 version
+// 自增;0 行受影响 → ErrVersionConflict + 当前 version。
+func (c *AITasksCrud) UpdateSubtask(id int64, fields SubtaskUpdateFields, version int64) error {
+	return c.updateSubtaskWithVersion(c.db, id, fields, version)
+}
+
+// UpdateSubtaskTx 是 UpdateSubtask 的事务变体,语义完全一致 —— 共享
+// updateSubtaskWithVersion 中心函数,无 SQL 分叉。供未来在事务里批量
+// 更新子任务的调用方使用(目前未引用,作为对称 API 暴露)。
+func (c *AITasksCrud) UpdateSubtaskTx(tx *sql.Tx, id int64, fields SubtaskUpdateFields, version int64) error {
+	return c.updateSubtaskWithVersion(tx, id, fields, version)
 }
 
 // DeleteSubtask 删除一条子任务(必须 parent_id 非空,误删顶层有 FK 兜底)。

@@ -86,7 +86,7 @@ func TestWorkerPool_AppendKeepsDoneAndUserTitle(t *testing.T) {
 	// 加一个未完成的子任务:append 必须保留它(与 replace 区分的关键)。
 	_, _ = c.CreateSubtask(taskID, "未完成B", 15, nil, 1)
 	done := domain.SubtaskStatusDone
-	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}); err != nil {
+	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}, 0); err != nil {
 		t.Fatal(err)
 	}
 	// 用户改标题
@@ -138,7 +138,7 @@ func TestWorkerPool_ReplaceKeepsDoneAndOverwritesTitle(t *testing.T) {
 	keep, _ := c.CreateSubtask(taskID, "已完成A", 10, nil, 0)
 	drop, _ := c.CreateSubtask(taskID, "未完成B", 20, nil, 1)
 	done := domain.SubtaskStatusDone
-	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}); err != nil {
+	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}, 0); err != nil {
 		t.Fatal(err)
 	}
 	edited := "用户标题"

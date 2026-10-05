@@ -160,16 +160,25 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		}
 	}
 
-		// 取已有子任务作为 prompt 上下文(append 模式下让 LLM 知道已有内容)。
-	_, existingSubs, _ := w.aiTasks.GetTask(task.ID)
-	hints := make([]SubtaskHint, 0, len(existingSubs))
-	for _, x := range existingSubs {
-		hints = append(hints, SubtaskHint{Title: x.Title, Status: string(x.Status)})
+		// 决定合并模式 + 构造 prompt 上下文。append 模式把已有子任务注入 prompt;
+	// replace 模式不传 hints(避免 LLM 因"不要重复"规则主动省略未完成子任务
+	// 而被 worker 当作"可删除"——见 reviewer M1)。
+	mode := job.Mode
+	if mode == "" {
+		mode = domain.AIJobModeAppend
+	}
+	var hints []SubtaskHint
+	if mode != domain.AIJobModeReplace {
+		_, existingSubs, _ := w.aiTasks.GetTask(task.ID)
+		hints = make([]SubtaskHint, 0, len(existingSubs))
+		for _, x := range existingSubs {
+			hints = append(hints, SubtaskHint{Title: x.Title, Status: string(x.Status)})
+		}
 	}
 
 	req := CompletionRequest{
 		SystemPrompt: SystemPrompt(w.settings.CurrentDate()),
-		UserPrompt:   BuildUserPrompt(task.RawText, hints),
+		UserPrompt:   BuildUserPrompt(task.RawText, hints, mode),
 		Model:        cfg.Model,
 		MaxTokens:    cfg.MaxTokens,
 	}
@@ -199,12 +208,6 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		return
 	}
 	res := outcome.Result
-
-	// 决定合并模式:append(默认,只追加)/ replace(显式,重建非 done)。
-	mode := job.Mode
-	if mode == "" {
-		mode = domain.AIJobModeAppend
-	}
 
 	// 成功:把解析结果写回 task + 子任务。逐项 best-effort;出错就 fail 整个 job。
 	status := domain.TaskStatusActive

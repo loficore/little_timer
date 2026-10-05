@@ -3,6 +3,8 @@ package aigtd
 import (
 	"fmt"
 	"strings"
+
+	"little-timer/internal/domain"
 )
 
 // systemPromptTemplate 是发给 LLM 的系统提示词模板。`%s` 注入当前日期。
@@ -33,15 +35,21 @@ type SubtaskHint struct {
 	Status string // active | done | archived
 }
 
-// BuildUserPrompt 把用户随手记包成一次拆解请求。existing 非空时,prompt
-// 末尾追加已有子任务清单(标题+状态),并明确告知 LLM 只能产出新增。
-func BuildUserPrompt(rawText string, existing []SubtaskHint) string {
+// BuildUserPrompt 把用户随手记包成一次拆解请求。
+//   - existing 非空且 mode 允许(append):prompt 末尾追加已有子任务清单,并告知
+//     LLM 只能产出新增。
+//   - replace 模式:即使有 existing 也不带 hints,改为"全量重新分解"指令,避免
+//     LLM 因"不要重复"规则主动省略未完成子任务而被 worker 当作"可删除"。
+func BuildUserPrompt(rawText string, existing []SubtaskHint, mode domain.AIJobMode) string {
 	base := `请把下面的随手记整理为结构化任务。
 ---
 ` + rawText + `
 ---
 严格按照系统约束的 JSON Schema 输出,不要附加任何解释。`
-	if len(existing) == 0 {
+	if len(existing) == 0 || mode == domain.AIJobModeReplace {
+		if mode == domain.AIJobModeReplace {
+			base += "\n\n这是一个完整重新分解(replace)请求:请根据随手记从头输出整个子任务集;系统会保留 status='done' 的子任务,其余将被替换。务必给出完整的 2-4 个子任务。"
+		}
 		return base
 	}
 	var b strings.Builder

@@ -83,6 +83,8 @@ func TestWorkerPool_AppendKeepsDoneAndUserTitle(t *testing.T) {
 	c := m.AITasks()
 	taskID, _ := c.CreateTask("原始", "manual")
 	keep, _ := c.CreateSubtask(taskID, "已完成A", 10, nil, 0)
+	// 加一个未完成的子任务:append 必须保留它(与 replace 区分的关键)。
+	_, _ = c.CreateSubtask(taskID, "未完成B", 15, nil, 1)
 	done := domain.SubtaskStatusDone
 	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}); err != nil {
 		t.Fatal(err)
@@ -121,11 +123,10 @@ func TestWorkerPool_AppendKeepsDoneAndUserTitle(t *testing.T) {
 	for _, x := range subs {
 		titles = append(titles, x.Title)
 	}
-	if !containsStr(titles, "已完成A") {
-		t.Errorf("append 删了 done 子任务: %v", titles)
-	}
-	if !containsStr(titles, "新1") || !containsStr(titles, "新2") {
-		t.Errorf("未追加新子任务: %v", titles)
+	// append 应保留全部已有(含 done 与未完成)+ 追加新;共 4 条。
+	want := []string{"已完成A", "未完成B", "新1", "新2"}
+	if !equalTitles(titles, want) {
+		t.Errorf("append 结果 = %v, want %v", titles, want)
 	}
 }
 

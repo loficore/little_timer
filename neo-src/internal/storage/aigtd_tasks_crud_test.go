@@ -131,7 +131,7 @@ func TestClaimNextQueuedJob_FIFO(t *testing.T) {
 	c := m.AITasks()
 
 	taskID, _ := c.CreateTask("t", "manual")
-	id1, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":1}`)
+	id1, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":1}`, domain.AIJobModeAppend)
 	got1, err := c.ClaimNextQueuedJob()
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestClaimNextQueuedJob_FIFO(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(1100 * time.Millisecond) // 跨 1 秒,确保 created_at 不同
-	id2, err := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":2}`)
+	id2, err := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":2}`, domain.AIJobModeAppend)
 	if err != nil {
 		t.Fatalf("enqueue id2: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestClaimNextQueuedJob_FIFO(t *testing.T) {
 	if err := c.MarkJobSuccess(id2, "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	id3, err := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":3}`)
+	id3, err := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":3}`, domain.AIJobModeAppend)
 	if err != nil {
 		t.Fatalf("enqueue id3: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestReclaimStuckRunningJobs(t *testing.T) {
 	c := m.AITasks()
 
 	taskID, _ := c.CreateTask("t", "manual")
-	_, _ = c.EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	_, _ = c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 	j, _ := c.ClaimNextQueuedJob()
 	if j == nil {
 		t.Fatal("expected a job to claim")
@@ -290,7 +290,7 @@ func TestHasInFlightJob(t *testing.T) {
 	}
 
 	// queued → true
-	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`); err != nil {
+	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = c.HasInFlightJob(taskID)
@@ -435,11 +435,11 @@ func TestEnqueueJob_RejectsSecondInFlightJob(t *testing.T) {
 	c := m.AITasks()
 
 	taskID, _ := c.CreateTask("t", "manual")
-	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`); err != nil {
+	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend); err != nil {
 		t.Fatalf("first enqueue: %v", err)
 	}
 	// 第二条同 task 的 queued → 被部分 UNIQUE 索引拒
-	_, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	_, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 	if !errors.Is(err, ErrJobInFlight) {
 		t.Fatalf("second enqueue err = %v, want ErrJobInFlight", err)
 	}
@@ -449,7 +449,7 @@ func TestEnqueueJob_RejectsSecondInFlightJob(t *testing.T) {
 	if err := c.MarkJobSuccess(job.ID, "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`); err != nil {
+	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend); err != nil {
 		t.Fatalf("enqueue after terminal: %v", err)
 	}
 }

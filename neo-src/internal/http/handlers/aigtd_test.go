@@ -119,6 +119,37 @@ func TestAIGtdReparse_SecondInFlight409(t *testing.T) {
 	}
 }
 
+func TestAIGtdReparse_ModeValidation(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "t1", "raw_text": "r"})
+	var task TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	path := "/api/aigtd/reparse/" + strconv.FormatInt(task.ID, 10)
+
+	// 非法 mode → 400
+	w = doJSON(t, r, http.MethodPost, path, map[string]any{"mode": "bogus"})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("bogus mode: code=%d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// 合法 replace → 202
+	w = doJSON(t, r, http.MethodPost, path, map[string]any{"mode": "replace"})
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("replace mode: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 默认 append(不传 mode)+ 新 task(上面 task 已 in-flight)
+	w = doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "t2", "raw_text": "r2"})
+	var t2 TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &t2)
+	w = doJSON(t, r, http.MethodPost, "/api/aigtd/reparse/"+strconv.FormatInt(t2.ID, 10), map[string]any{})
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("default mode: code=%d", w.Code)
+	}
+}
+
 func TestTaskUpdate_UserEditedTitleFlips(t *testing.T) {
 	a := newTestApp(t)
 	r := setupAIGtdRouter(t, a)

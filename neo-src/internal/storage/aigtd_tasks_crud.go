@@ -470,12 +470,16 @@ type SubtaskInput struct {
 	DueDate          *string
 }
 
-// EnqueueJob 入队一个 ai_jobs 行(状态 queued)。
-func (c *AITasksCrud) EnqueueJob(taskID int64, provider, model, reqPayload string) (int64, error) {
+// EnqueueJob 入队一个 ai_jobs 行(状态 queued)。mode 为空时按 append 处理。
+// 同一 task 已有 queued/running job 时返回 ErrJobInFlight(部分 UNIQUE 索引)。
+func (c *AITasksCrud) EnqueueJob(taskID int64, provider, model, reqPayload string, mode domain.AIJobMode) (int64, error) {
+	if mode == "" {
+		mode = domain.AIJobModeAppend
+	}
 	res, err := c.db.Exec(
-		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload)
-		 VALUES (?, ?, ?, 'queued', ?);`,
-		taskID, provider, model, reqPayload,
+		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload, mode)
+		 VALUES (?, ?, ?, 'queued', ?, ?);`,
+		taskID, provider, model, reqPayload, string(mode),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {

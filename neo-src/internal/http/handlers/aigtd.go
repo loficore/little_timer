@@ -54,7 +54,7 @@ func AIGtdCapture(c *gin.Context) {
 	// 立即入队(worker 在后台处理)。失败时回滚 CreateTask,避免出现
 	// "卡片永远停在 Parsing 状态"的孤儿记录。
 	cfg := aiConfigFromApp(a)
-	if _, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, raw); err != nil {
+	if _, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, raw, domain.AIJobModeAppend); err != nil {
 		_ = a.SQLite.AITasks().DeleteTask(taskID)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": "aigtd.enqueue_failed", "error": "enqueue failed"})
 		return
@@ -90,11 +90,23 @@ func AIGtdReparse(c *gin.Context) {
 		return
 	}
 
-	// 可选改写原文。
+	// 可选改写原文 + 处理 mode。
 	var req struct {
 		RawText *string `json:"raw_text"`
+		Mode    string  `json:"mode"`
 	}
 	_ = c.ShouldBindJSON(&req)
+	mode := domain.AIJobMode(req.Mode)
+	if req.Mode == "" {
+		mode = domain.AIJobModeAppend
+	}
+	switch mode {
+	case domain.AIJobModeAppend, domain.AIJobModeReplace:
+		// ok
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid mode (allowed: append|replace)"})
+		return
+	}
 	rawText := task.RawText
 	if req.RawText != nil {
 		raw := strings.TrimSpace(*req.RawText)
@@ -114,7 +126,7 @@ func AIGtdReparse(c *gin.Context) {
 		return
 	}
 	cfg := aiConfigFromApp(a)
-	jobID, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, rawText)
+	jobID, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, rawText, mode)
 	if err != nil {
 		if errors.Is(err, storage.ErrJobInFlight) {
 			c.JSON(http.StatusConflict, gin.H{"success": false, "code": "aigtd.processing", "error": "task is being processed"})

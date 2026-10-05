@@ -97,7 +97,7 @@ func TestWorkerPool_AppendKeepsDoneAndUserTitle(t *testing.T) {
 	aigtd.SetTestOverride(`{"title":"LLM新标题","is_complex":true,"estimated_minutes":30,"subtasks":[{"title":"新1","estimated_minutes":15},{"title":"新2","estimated_minutes":15}]}`, 0)
 	defer aigtd.ClearTestOverride()
 
-	jobID, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	jobID, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestWorkerPool_ReplaceKeepsDoneAndOverwritesTitle(t *testing.T) {
 	aigtd.SetTestOverride(`{"title":"LLM新标题","is_complex":true,"estimated_minutes":30,"subtasks":[{"title":"新1","estimated_minutes":15},{"title":"新2","estimated_minutes":15}]}`, 0)
 	defer aigtd.ClearTestOverride()
 
-	jobID, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	jobID, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func containsStr(xs []string, want string) bool {
 func TestWorkerPool_ProcessesQueuedJob(t *testing.T) {
 	m := newTestDB(t)
 	taskID, _ := m.AITasks().CreateTask("准备下周汇报 PPT", "manual")
-	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{"raw":"x"}`)
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{"raw":"x"}`, domain.AIJobModeAppend)
 
 	mock := &mockProvider{responses: []string{
 		`{"title":"准备 PPT","is_complex":true,"estimated_minutes":60,
@@ -231,7 +231,7 @@ func TestWorkerPool_ProcessesQueuedJob(t *testing.T) {
 func TestWorkerPool_ParseFailureMarksError(t *testing.T) {
 	m := newTestDB(t)
 	taskID, _ := m.AITasks().CreateTask("x", "manual")
-	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 
 	mock := &mockProvider{responses: []string{`bad`, `also bad`}}
 	s := &fakeSettings{date: "2026-10-04", provider: "openai_compat", model: "m", apiKey: "k"}
@@ -251,7 +251,7 @@ func TestWorkerPool_ParseFailureMarksError(t *testing.T) {
 func TestWorkerPool_ReclaimStuckJob(t *testing.T) {
 	m := newTestDB(t)
 	taskID, _ := m.AITasks().CreateTask("x", "manual")
-	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 
 	// 先 claim 一次(变 running),再倒回 started_at,模拟 worker 崩溃后残留。
 	stuck, err := m.AITasks().ClaimNextQueuedJob()
@@ -281,7 +281,7 @@ func TestWorkerPool_ReclaimStuckJob(t *testing.T) {
 func TestWorkerPool_UnconfiguredProviderMarksError(t *testing.T) {
 	m := newTestDB(t)
 	taskID, _ := m.AITasks().CreateTask("x", "manual")
-	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 
 	// apiKey 为空 → 默认工厂应返 ErrProviderUnconfigured。
 	s := &fakeSettings{date: "2026-10-04", provider: "openai_compat", model: "m", apiKey: ""}
@@ -300,7 +300,7 @@ func TestWorkerPool_UnconfiguredProviderMarksError(t *testing.T) {
 func TestWorkerPool_TestOverride_BypassesFactory(t *testing.T) {
 	m := newTestDB(t)
 	taskID, _ := m.AITasks().CreateTask("x", "manual")
-	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 
 	aigtd.SetTestOverride(
 		`{"title":"overridden","is_complex":false,"estimated_minutes":12,"subtasks":[]}`,
@@ -326,7 +326,7 @@ func TestWorkerPool_TestOverride_BypassesFactory(t *testing.T) {
 func TestWorkerPool_TestOverride_FailWithMarksError(t *testing.T) {
 	m := newTestDB(t)
 	taskID, _ := m.AITasks().CreateTask("x", "manual")
-	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 
 	aigtd.SetTestOverride("", 500) // 不返回有效响应 → ErrRetryable
 	defer aigtd.ClearTestOverride()
@@ -354,7 +354,7 @@ func TestWorkerPool_ReparsePreservesUserEditedTitle(t *testing.T) {
 	defer aigtd.ClearTestOverride()
 
 	taskID, _ := m.AITasks().CreateTask("原始随手记", "manual")
-	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 
 	s := &fakeSettings{date: "2026-10-04", provider: "openai_compat", model: "m", apiKey: ""}
 	wp := aigtd.NewWorkerPool(m.AITasks(), s, 1)
@@ -381,7 +381,7 @@ func TestWorkerPool_ReparsePreservesUserEditedTitle(t *testing.T) {
 		`{"title":"REPARSE 改写的标题","is_complex":true,"estimated_minutes":45,"subtasks":[{"title":"b","estimated_minutes":20},{"title":"b2","estimated_minutes":20}]}`,
 		0,
 	)
-	reparseJobID, err := m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	reparseJobID, err := m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
 	if err != nil {
 		t.Fatal(err)
 	}

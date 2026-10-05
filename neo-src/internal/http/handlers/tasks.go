@@ -18,26 +18,34 @@ import (
 
 // TaskDTO 是出参形状,与前端 bindings 对齐。
 type TaskDTO struct {
-	ID               int64        `json:"id"`
-	ParentID         *int64       `json:"parent_id,omitempty"`
-	RawText          string       `json:"raw_text,omitempty"`
-	Title            string       `json:"title"`
-	Notes            string       `json:"notes,omitempty"`
-	Status           string       `json:"status"`
-	DueDate          *string      `json:"due_date,omitempty"`
-	ScheduledStart   *int64       `json:"scheduled_start,omitempty"`
-	ScheduledEnd     *int64       `json:"scheduled_end,omitempty"`
-	Pinned           bool         `json:"pinned"`
-	EstimatedMinutes int64        `json:"estimated_minutes"`
-	OrderIndex       int64        `json:"order_index"`
-	Source           string       `json:"source"`
-	AIStatus         string       `json:"ai_status"`
-	AIError          string       `json:"ai_error,omitempty"`
-	UserEditedTitle  bool         `json:"user_edited_title"`
-	Subtasks         []SubtaskDTO `json:"subtasks,omitempty"`
-	CreatedAt        string       `json:"created_at"`
-	UpdatedAt        string       `json:"updated_at"`
-	ParsedAt         *string      `json:"parsed_at,omitempty"`
+	ID               int64   `json:"id"`
+	ParentID         *int64  `json:"parent_id,omitempty"`
+	RawText          string  `json:"raw_text,omitempty"`
+	Title            string  `json:"title"`
+	Notes            string  `json:"notes,omitempty"`
+	Status           string  `json:"status"`
+	DueDate          *string `json:"due_date,omitempty"`
+	ScheduledStart   *int64  `json:"scheduled_start,omitempty"`
+	ScheduledEnd     *int64  `json:"scheduled_end,omitempty"`
+	Pinned           bool    `json:"pinned"`
+	EstimatedMinutes int64   `json:"estimated_minutes"`
+	OrderIndex       int64   `json:"order_index"`
+	Source           string  `json:"source"`
+	AIStatus         string  `json:"ai_status"`
+	AIError          string  `json:"ai_error,omitempty"`
+	UserEditedTitle  bool    `json:"user_edited_title"`
+	// v11:5 维调度评分 + 乐观锁版本号(见 scheduler 设计 §3.1)。BlockedBy
+	// 为空切片时 omitempty 不出现在 JSON 里,与 domain.TaskRow 对齐。
+	Version        int64        `json:"version"`
+	PriorityScore  int          `json:"priority_score"`
+	UrgencyScore   int          `json:"urgency_score"`
+	EnergyRequired int          `json:"energy_required"`
+	ContextTag     string       `json:"context_tag"`
+	BlockedBy      []int64      `json:"blocked_by,omitempty"`
+	Subtasks       []SubtaskDTO `json:"subtasks,omitempty"`
+	CreatedAt      string       `json:"created_at"`
+	UpdatedAt      string       `json:"updated_at"`
+	ParsedAt       *string      `json:"parsed_at,omitempty"`
 }
 
 // SubtaskDTO 是子任务的出参形状。
@@ -68,6 +76,12 @@ func toTaskDTO(t *domain.TaskRow, subs []domain.SubtaskRow) TaskDTO {
 		AIStatus:         string(t.AIStatus),
 		AIError:          t.AIError,
 		UserEditedTitle:  t.UserEditedTitle,
+		Version:          t.Version,
+		PriorityScore:    t.PriorityScore,
+		UrgencyScore:     t.UrgencyScore,
+		EnergyRequired:   t.EnergyRequired,
+		ContextTag:       t.ContextTag,
+		BlockedBy:        t.BlockedBy,
 		CreatedAt:        t.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:        t.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -86,6 +100,12 @@ func toTaskDTO(t *domain.TaskRow, subs []domain.SubtaskRow) TaskDTO {
 		})
 	}
 	return dto
+}
+
+// taskDTOFromRow 把单行 task 转成 DTO(不带子任务)。供 /scores 等只需要
+// task 本身的分支复用,避免每次都拉取子任务。
+func taskDTOFromRow(t *domain.TaskRow) TaskDTO {
+	return toTaskDTO(t, nil)
 }
 
 // TaskList GET /api/tasks?status=&parent_id=

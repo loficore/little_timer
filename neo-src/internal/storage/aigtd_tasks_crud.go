@@ -661,7 +661,9 @@ func (c *AITasksCrud) LatestJobForTask(taskID int64) (*domain.AIJobRow, error) {
 
 const taskCols = `id, parent_id, raw_text, title, notes, status, due_date,
 	scheduled_start, scheduled_end, pinned, estimated_minutes, order_index,
-	source, ai_status, ai_error, user_edited_title, created_at, updated_at, parsed_at`
+	source, ai_status, ai_error, user_edited_title, version, priority_score,
+	urgency_score, energy_required, context_tag, blocked_by, created_at,
+	updated_at, parsed_at`
 
 const subtaskCols = `id, parent_id, title, estimated_minutes, order_index, status, created_at`
 
@@ -683,10 +685,15 @@ func scanTask(row rowScanner) (*domain.TaskRow, error) {
 	var pinned, userEditedTitle int
 	var aiStatus, aiError sql.NullString
 	var parsedAt sql.NullTime
+	// v11:乐观锁 + 5 维评分列。blocked_by 是 JSON 文本(CHECK json_valid)。
+	var blockedBy sql.NullString
 	err := row.Scan(
 		&t.ID, &parent, &rawText, &t.Title, &notes, &status, &dueDate,
 		&schedStart, &schedEnd, &pinned, &t.EstimatedMinutes, &t.OrderIndex,
-		&t.Source, &aiStatus, &aiError, &userEditedTitle, &t.CreatedAt, &t.UpdatedAt, &parsedAt,
+		&t.Source, &aiStatus, &aiError, &userEditedTitle,
+		&t.Version, &t.PriorityScore, &t.UrgencyScore, &t.EnergyRequired,
+		&t.ContextTag, &blockedBy,
+		&t.CreatedAt, &t.UpdatedAt, &parsedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
@@ -719,6 +726,12 @@ func scanTask(row rowScanner) (*domain.TaskRow, error) {
 	t.AIStatus = domain.AIStatus(aiStatus.String)
 	if aiError.Valid {
 		t.AIError = aiError.String
+	}
+	if blockedBy.Valid {
+		var ids []int64
+		if jerr := json.Unmarshal([]byte(blockedBy.String), &ids); jerr == nil {
+			t.BlockedBy = ids
+		}
 	}
 	if parsedAt.Valid {
 		v := parsedAt.Time

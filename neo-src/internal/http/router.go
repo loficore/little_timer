@@ -124,6 +124,7 @@ func registerTasks(g *gin.RouterGroup) {
 	tg.POST("", handlers.TaskCreate)
 	tg.GET("/:id", handlers.TaskGet)
 	tg.PATCH("/:id", handlers.TaskUpdate)
+	tg.PATCH("/:id/scores", handlers.TaskScoresUpdate)
 	tg.DELETE("/:id", handlers.TaskDelete)
 	tg.POST("/:id/subtasks", handlers.SubtaskCreate)
 	tg.PATCH("/:id/subtasks/:sub_id", handlers.SubtaskUpdate)

@@ -168,6 +168,94 @@ func TestMigrateV8ToV9_HabitsSetIdNullable(t *testing.T) {
 	}
 }
 
+// v9TasksAiJobsSQL 是 v9 版(不含 v10 新列)的 tasks / ai_jobs 建表语句。
+// 用于 TestMigrateV9ToV10_AddsColumns 模拟"已是 v9 但缺新列"的 DB。
+const v9TasksAiJobsSQL = `
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER,
+    raw_text TEXT DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    notes TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'inbox'
+        CHECK(status IN ('inbox','active','done','archived','rejected')),
+    due_date TEXT,
+    scheduled_start INTEGER,
+    scheduled_end INTEGER,
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),
+    estimated_minutes INTEGER NOT NULL DEFAULT 0,
+    order_index INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    ai_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(ai_status IN ('pending','processing','done','error')),
+    ai_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    parsed_at TIMESTAMP,
+    FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS ai_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    status TEXT NOT NULL
+        CHECK(status IN ('queued','running','success','failed')),
+    request_payload TEXT NOT NULL,
+    response_payload TEXT,
+    error_message TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 1,
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+`
+
+func TestMigrateV9ToV10_AddsColumns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	// 引导到"已是 v9 但缺 v10 新列"的状态:建 habit 相关 + v9 tasks/ai_jobs,
+	// 写 schema_version=9。
+	if _, err := m.DB().Exec(v8SchemaSQL); err != nil {
+		t.Fatalf("seed v8: %v", err)
+	}
+	if _, err := m.DB().Exec(v9TasksAiJobsSQL); err != nil {
+		t.Fatalf("seed v9 tasks/ai_jobs: %v", err)
+	}
+	if _, err := m.DB().Exec(`INSERT INTO schema_version (version, description) VALUES (9,'v9');`); err != nil {
+		t.Fatalf("seed version: %v", err)
+	}
+	if hasColumn(m.DB(), "tasks", "user_edited_title") {
+		t.Fatal("前置: v9 tasks 不应含 user_edited_title")
+	}
+
+	if err := m.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	if !hasColumn(m.DB(), "tasks", "user_edited_title") {
+		t.Error("tasks.user_edited_title 缺失")
+	}
+	if !hasColumn(m.DB(), "ai_jobs", "mode") {
+		t.Error("ai_jobs.mode 缺失")
+	}
+	var maxVersion int
+	if err := m.DB().QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
+		t.Fatal(err)
+	}
+	if maxVersion != CurrentSchemaVersion {
+		t.Errorf("schema_version = %d, want %d", maxVersion, CurrentSchemaVersion)
+	}
+}
+
 // hasColumn 通过 PRAGMA table_info 检查列是否存在。
 func hasColumn(db *sql.DB, table, column string) bool {
 	rows, err := db.Query(`PRAGMA table_info(` + table + `);`)

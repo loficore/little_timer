@@ -12,7 +12,7 @@ import (
 )
 
 // CurrentSchemaVersion 是本构建目标针对的 schema 版本。
-const CurrentSchemaVersion = 9
+const CurrentSchemaVersion = 10
 
 // MigrationError 是迁移失败的类型化哨兵错误。
 type MigrationError string
@@ -97,6 +97,7 @@ const tasksTableSQL = `CREATE TABLE IF NOT EXISTS tasks (
     ai_status TEXT NOT NULL DEFAULT 'pending'
         CHECK(ai_status IN ('pending','processing','done','error')),
     ai_error TEXT,
+    user_edited_title INTEGER NOT NULL DEFAULT 0 CHECK(user_edited_title IN (0,1)),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     parsed_at TIMESTAMP,
@@ -117,6 +118,7 @@ const aiJobsTableSQL = `CREATE TABLE IF NOT EXISTS ai_jobs (
     input_tokens INTEGER,
     output_tokens INTEGER,
     attempts INTEGER NOT NULL DEFAULT 1,
+    mode TEXT NOT NULL DEFAULT 'append' CHECK(mode IN ('append','replace','review')),
     started_at TIMESTAMP,
     finished_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -303,12 +305,36 @@ func (m *MigrationManager) CheckAndMigrate() error {
 	if err := m.migrateV8ToV9(); err != nil {
 		return err
 	}
+	// 幂等的 v9 → v10 升级:为 tasks/ai_jobs 补 v10 新列(fresh DB 已通过
+	// tasksTableSQL/aiJobsTableSQL 包含这些列,addColumnIfMissing 会自动跳过)。
+	if err := m.migrateV9ToV10(); err != nil {
+		return err
+	}
 
 	// 旧 DB 升级后必须把 schema_version 推进到 CurrentSchemaVersion,
 	// 否则它永远停留在旧版本号,下次启动重复走升级分支(当前幂等所以安全,
 	// 但未来按版本分派的迁移会误分类)。fresh DB 已在上面写过,不重复写。
 	if currentVersion != 0 && currentVersion < CurrentSchemaVersion {
 		return m.setSchemaVersion(CurrentSchemaVersion)
+	}
+	return nil
+}
+
+// migrateV9ToV10 把 v9 DB 幂等地带到 v10:补 tasks.user_edited_title
+// 与 ai_jobs.mode 两列。fresh DB 走 tasksTableSQL/aiJobsTableSQL 已含
+// 这些列,addColumnIfMissing 会自动跳过。
+//
+// 注:SQLite 不允许 ADD COLUMN 含列级 CHECK 约束(只允许 NULL/NOT NULL/DEFAULT
+// 等表约束);upgrade DB 仅加列 + DEFAULT,不补 CHECK。fresh DB 的建表语句含
+// CHECK,值由应用层保证。
+func (m *MigrationManager) migrateV9ToV10() error {
+	if err := m.addColumnIfMissing("tasks", "user_edited_title",
+		"INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("%w: add tasks.user_edited_title: %w", ErrMigrationFailed, err)
+	}
+	if err := m.addColumnIfMissing("ai_jobs", "mode",
+		"TEXT NOT NULL DEFAULT 'append'"); err != nil {
+		return fmt.Errorf("%w: add ai_jobs.mode: %w", ErrMigrationFailed, err)
 	}
 	return nil
 }

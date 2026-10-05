@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -116,6 +117,50 @@ func TestAIGtdReparse_SecondInFlight409(t *testing.T) {
 	w = doJSON(t, r, http.MethodPost, path, map[string]any{})
 	if w.Code != http.StatusConflict {
 		t.Fatalf("second reparse: code=%d body=%s, want 409", w.Code, w.Body.String())
+	}
+}
+
+// TestAIGtdReparse_ConcurrentRaceOnlyOne202 用并发请求逼出 TOCTOU 窗口:
+// 两个 goroutine 同时 reparse 同一 task。无论命中 HasInFlightJob 预检还是
+// DB 层部分 UNIQUE 索引兜底,最终必须恰好一个 202、一个 409。
+func TestAIGtdReparse_ConcurrentRaceOnlyOne202(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "t", "raw_text": "r"})
+	var task TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	path := "/api/aigtd/reparse/" + strconv.FormatInt(task.ID, 10)
+
+	const n = 2
+	codes := make([]int, n)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			rr := doJSON(t, r, http.MethodPost, path, map[string]any{})
+			codes[idx] = rr.Code
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	accepted, conflict := 0, 0
+	for _, c := range codes {
+		switch c {
+		case http.StatusAccepted:
+			accepted++
+		case http.StatusConflict:
+			conflict++
+		default:
+			t.Fatalf("unexpected status %d (codes=%v)", c, codes)
+		}
+	}
+	if accepted != 1 || conflict != 1 {
+		t.Fatalf("want exactly one 202 + one 409, got %v", codes)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/http/middleware"
 	"little-timer/internal/storage"
 )
 
@@ -26,6 +28,8 @@ func setupAIGtdRouter(t *testing.T, a *app.App) *gin.Engine {
 		c.Set("app", a)
 		c.Next()
 	})
+	// 与生产 router 对齐:所有 mutation 路由强制带 version(乐观锁 plumbing)。
+	r.Use(middleware.RequireVersionForMutation())
 
 	r.GET("/api/tasks", TaskList)
 	r.POST("/api/tasks", TaskCreate)
@@ -42,9 +46,21 @@ func setupAIGtdRouter(t *testing.T, a *app.App) *gin.Engine {
 
 	r.GET("/api/settings/llm", LLMSettingsGet)
 	r.PUT("/api/settings/llm", LLMSettingsUpdate)
+	testRouterApp = a
+	t.Cleanup(func() { testRouterApp = nil })
 	return r
 }
 
+// testRouterApp 由 setupAIGtdRouter 记录,供 doJSON 根据路径查 task 当前
+// version 用。测试串行执行,单包内不并发访问这个变量即可。
+var testRouterApp *app.App
+
+// doJSON 发请求并返回 recorder。
+//
+// 与生产对齐:所有 mutation 必带 version(ConflictGuard)。乐观锁 plumbing
+// (Task 4) 让 handler 用 middleware.GetVersion(c);为避免每条用例手动跟踪
+// 每次 mutation 后的 version,这里从 /api/tasks/{id}* 路径解析 task ID,
+// 查 DB 拿当前 server 端 version 作为 If-Match;其余路径回退 "0"。
 func doJSON(t *testing.T, r *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer
@@ -55,9 +71,35 @@ func doJSON(t *testing.T, r *gin.Engine, method, path string, body any) *httptes
 	}
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", currentVersionForPath(method, path))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w
+}
+
+// currentVersionForPath 读 path 中 task ID 对应的当前 DB version。
+// 读方法(GET/HEAD/OPTIONS)中间件放行,不需要版本,返 "0"。
+func currentVersionForPath(method, path string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return "0"
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) >= 3 && parts[0] == "api" && parts[1] == "tasks" {
+		id, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			return "0"
+		}
+		if testRouterApp == nil || testRouterApp.SQLite == nil {
+			return "0"
+		}
+		v, err := testRouterApp.SQLite.AITasks().GetTaskVersion(id)
+		if err != nil {
+			return "0"
+		}
+		return strconv.FormatInt(v, 10)
+	}
+	return "0"
 }
 
 func TestSubtaskUpdate_StatusValidation(t *testing.T) {

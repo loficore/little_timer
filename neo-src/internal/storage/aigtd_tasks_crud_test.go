@@ -2,6 +2,7 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -76,7 +77,7 @@ func TestUpdateTask_PointerSemantics(t *testing.T) {
 		Notes:   stringPtr("备注"),
 		DueDate: stringPtr("2026-12-01"),
 		Pinned:  boolPtr(true),
-	}); err != nil {
+	}, 0); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 
@@ -94,10 +95,10 @@ func TestUpdateTask_PointerSemantics(t *testing.T) {
 		t.Errorf("pinned should be true")
 	}
 
-	// 局部更新:只改 Title → 其他字段不变。
+	// 局部更新:只改 Title → 其他字段不变。(version 已由上一次 update 增到 1)
 	if err := c.UpdateTask(id, TaskUpdateFields{
 		Title: stringPtr("再次更新"),
-	}); err != nil {
+	}, 1); err != nil {
 		t.Fatal(err)
 	}
 	task, _, _ = c.GetTask(id)
@@ -108,8 +109,8 @@ func TestUpdateTask_PointerSemantics(t *testing.T) {
 		t.Errorf("notes changed unexpectedly: %q", task.Notes)
 	}
 
-	// ClearDueDate:true → due_date 变 NULL。
-	if err := c.UpdateTask(id, TaskUpdateFields{ClearDueDate: true}); err != nil {
+	// ClearDueDate:true → due_date 变 NULL。(此时 version=2)
+	if err := c.UpdateTask(id, TaskUpdateFields{ClearDueDate: true}, 2); err != nil {
 		t.Fatal(err)
 	}
 	task, _, _ = c.GetTask(id)
@@ -373,6 +374,126 @@ func containsStr(xs []string, want string) bool {
 
 func stringPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool       { return &b }
+func intPtr(i int) *int          { return &i }
+
+// TestUpdateTask_VersionConflict_ReturnsErrVersionConflict 验证乐观锁:
+// 第一次 UpdateTask(version=0) 成功并把 version 自增到 1;
+// 用旧 version=0 再次 UpdateTask → 必须返回 ErrVersionConflict,且错误
+// 消息携带当前 server 版本(便于 UI 重新拉取后回写)。
+func TestUpdateTask_VersionConflict_ReturnsErrVersionConflict(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+	// 新建 task 的 version=0 -> 第一次 update 用 version=0 应成功。
+	title := "new"
+	if err := c.UpdateTask(taskID, TaskUpdateFields{Title: &title}, 0); err != nil {
+		t.Fatalf("first update with version=0: %v", err)
+	}
+	// version 现在是 1;再用 version=0 旧版本应被拒。
+	err := c.UpdateTask(taskID, TaskUpdateFields{Title: &title}, 0)
+	if err == nil {
+		t.Fatal("expected ErrVersionConflict, got nil")
+	}
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("want errors.Is(err, ErrVersionConflict), got %v", err)
+	}
+	// 错误应携带 server 端当前 version(=1)用于客户端刷新。
+	var ver int64
+	_, scanErr := fmt.Sscanf(err.Error(), "task version conflict (current=%d)", &ver)
+	if scanErr != nil || ver != 1 {
+		t.Errorf("ErrVersionConflict 应携带 current=%d, got %q", 1, err.Error())
+	}
+}
+
+// TestUpdateTask_GetTaskVersion 验证 GetTaskVersion 返回当前 server 版本,
+// 后续 UpdateTask 用这个版本应能成功。
+func TestUpdateTask_GetTaskVersion(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+	v, err := c.GetTaskVersion(taskID)
+	if err != nil {
+		t.Fatalf("GetTaskVersion: %v", err)
+	}
+	if v != 0 {
+		t.Errorf("fresh task version = %d, want 0", v)
+	}
+	title := "x"
+	if err := c.UpdateTask(taskID, TaskUpdateFields{Title: &title}, v); err != nil {
+		t.Fatalf("update with fresh version: %v", err)
+	}
+	v2, _ := c.GetTaskVersion(taskID)
+	if v2 != 1 {
+		t.Errorf("after update version = %d, want 1", v2)
+	}
+}
+
+// TestUpdateTaskTx_VersionConflict_ReturnsErrVersionConflict 验证事务变体:
+// 同样走 updateWithVersion 集中函数,语义与非-tx 一致。该测试刻意 rollback
+// 事务,只验证乐观锁分支不影响外部状态。
+func TestUpdateTaskTx_VersionConflict_ReturnsErrVersionConflict(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+	// 直接把 version 推到 1,然后用 version=0 在事务中更新应被拒。
+	if _, err := m.DB().Exec(`UPDATE tasks SET version=1 WHERE id=?`, taskID); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := m.DB().Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	title := "tx"
+	err = c.UpdateTaskTx(tx, taskID, TaskUpdateFields{Title: &title}, 0)
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("tx variant want ErrVersionConflict, got %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	// 回滚了 → DB 上 title 未变,version 仍为 1(我们刚推的)。
+	var gotTitle string
+	var ver int64
+	if err := m.DB().QueryRow(`SELECT title, version FROM tasks WHERE id=?`, taskID).
+		Scan(&gotTitle, &ver); err != nil {
+		t.Fatal(err)
+	}
+	if gotTitle == "tx" {
+		t.Error("tx 回滚后 title 不应被更新")
+	}
+	if ver != 1 {
+		t.Errorf("tx 回滚后 version = %d, want 1", ver)
+	}
+}
 
 func TestEnqueueJob_RejectsSecondInFlightJob(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "lt.db")

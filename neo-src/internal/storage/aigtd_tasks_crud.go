@@ -11,6 +11,7 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -37,6 +38,11 @@ const (
 
 func (e AITaskError) Error() string { return string(e) }
 
+// ErrVersionConflict 标记乐观锁 WHERE id=? AND version=? 命中 0 行;
+// 错误通过 fmt.Errorf("%w (current=%d)", ...) 包裹当前 server 端 version
+// (便于客户端重新拉取并回写),handler 据此返 409 Conflict。
+var ErrVersionConflict = errors.New("task version conflict")
+
 // TaskUpdateFields 携带可选的更新字段。指针为 nil 表示不动;Clear* 标志
 // 为 true 表示把对应列显式置 NULL(覆盖之前的值)。
 type TaskUpdateFields struct {
@@ -56,6 +62,15 @@ type TaskUpdateFields struct {
 	OrderIndex          *int64
 	EstimatedMinutes    *int64
 	UserEditedTitle     *bool
+	// v11:5 维调度评分字段(见 scheduler 设计 §3.1)。nil = 不动。
+	PriorityScore  *int
+	UrgencyScore   *int
+	EnergyRequired *int
+	ContextTag     *string
+	// BlockedBy / ClearBlockedBy: blocked_by 列是 JSON 数组;Pointer 设置
+	// 时把切片 marshal 为 JSON 写入;ClearBlockedBy=true 显式重置为 '[]'。
+	BlockedBy      *[]int64
+	ClearBlockedBy bool
 }
 
 // SubtaskUpdateFields 是子任务的更新字段集合。
@@ -188,10 +203,75 @@ func (c *AITasksCrud) ListSubtasks(taskID int64) ([]domain.SubtaskRow, error) {
 	return out, rows.Err()
 }
 
-// UpdateTask 按指针语义更新 fields 中显式给出的列。空操作。
-func (c *AITasksCrud) UpdateTask(id int64, fields TaskUpdateFields) error {
-	sets := []string{}
-	args := []any{}
+// GetTaskVersion 返回某 task 当前的乐观锁 version(读 tasks.version 单列)。
+// 供 worker / 内部 helper 在写之前取当前 server 版本。sql.ErrNoRows 在 task
+// 不存在时返回(由 caller 决定如何处理)。
+func (c *AITasksCrud) GetTaskVersion(id int64) (int64, error) {
+	var v int64
+	err := c.db.QueryRow(`SELECT version FROM tasks WHERE id = ?;`, id).Scan(&v)
+	return v, err
+}
+
+// dbExecer 是 *sql.DB 与 *sql.Tx 都满足的方法集合,作为 updateWithVersion
+// 集中函数的入参,避免在事务 / 非事务路径上复制 SQL。
+type dbExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// updateWithVersion 是 UpdateTask / UpdateTaskTx 共享的中心函数:
+//
+//   - 把 TaskUpdateFields 拼成 SET ...,version=?,updated_at=CURRENT_TIMESTAMP
+//     WHERE id = ? AND version = ? 的 SQL,version 自增 version+1;
+//   - 0 行受影响 → 用 fmt.Errorf("%w (current=%d)", ErrVersionConflict, cur)
+//     包裹当前 server 版本(handler 据此返 409,UI 据此提示用户刷新);
+//   - task 不存在时 GetTaskVersion 返 sql.ErrNoRows → current=0,仍以
+//     ErrVersionConflict 形式返回(上层只关心乐观锁语义)。
+//
+// 集中化的目的是 review focus #1 —— 任何"修改 tasks 行"的 SQL 都应走这条;
+//
+//	无 SQL 重复 / 无遗漏挂载新字段。
+func (c *AITasksCrud) updateWithVersion(exec dbExecer, id int64, fields TaskUpdateFields, version int64) error {
+	sets, args := buildTaskUpdateSets(fields)
+	if len(sets) == 0 {
+		// 空操作:不写 version(避免客户端传空 body 也算"成功并 bump 版本")。
+		return nil
+	}
+	// SET clause 自增 version;WHERE 子句用 caller 提供的期望版本。
+	sets = append(sets, "version = ?")
+	args = append(args, version+1, id, version)
+	sets = append(sets, "updated_at = CURRENT_TIMESTAMP")
+
+	q := "UPDATE tasks SET " + joinComma(sets) + " WHERE id = ? AND version = ?"
+	res, err := exec.Exec(q, args...)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrAITaskUpdateFailed, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		cur, _ := c.GetTaskVersion(id)
+		return fmt.Errorf("%w (current=%d)", ErrVersionConflict, cur)
+	}
+	return nil
+}
+
+// UpdateTask 按指针语义更新 fields 中显式给出的列,带乐观锁(version 入参)。
+//
+// 调用前 caller 必须取到当前 server 端 version(handler 通过
+// middleware.GetVersion(c) 拿到,worker / 内部 helper 通过 GetTaskVersion
+// 取);落库后 version 自增;0 行受影响 → ErrVersionConflict + 当前 version。
+func (c *AITasksCrud) UpdateTask(id int64, fields TaskUpdateFields, version int64) error {
+	return c.updateWithVersion(c.db, id, fields, version)
+}
+
+// UpdateTaskTx 是 UpdateTask 的事务变体,语义完全一致 —— 共享 updateWithVersion
+// 中心函数,无 SQL 分叉。供 Task 6 在 scheduler 事务里调用。
+func (c *AITasksCrud) UpdateTaskTx(tx *sql.Tx, id int64, fields TaskUpdateFields, version int64) error {
+	return c.updateWithVersion(tx, id, fields, version)
+}
+
+// buildTaskUpdateSets 把 TaskUpdateFields 翻译成 SET clause 片段与对应参数。
+// 单独抽出便于 review & 复用,集中函数保证无字段遗漏。
+func buildTaskUpdateSets(fields TaskUpdateFields) (sets []string, args []any) {
 	add := func(col string, v any) {
 		sets = append(sets, col+" = ?")
 		args = append(args, v)
@@ -240,18 +320,32 @@ func (c *AITasksCrud) UpdateTask(id int64, fields TaskUpdateFields) error {
 	if fields.UserEditedTitle != nil {
 		add("user_edited_title", boolToInt(*fields.UserEditedTitle))
 	}
-	if len(sets) == 0 {
-		return nil
+	if fields.PriorityScore != nil {
+		add("priority_score", *fields.PriorityScore)
 	}
-	sets = append(sets, "updated_at = CURRENT_TIMESTAMP")
-	args = append(args, id)
-	_, err := c.db.Exec(
-		"UPDATE tasks SET "+joinComma(sets)+" WHERE id = ?;", args...,
-	)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrAITaskUpdateFailed, err)
+	if fields.UrgencyScore != nil {
+		add("urgency_score", *fields.UrgencyScore)
 	}
-	return nil
+	if fields.EnergyRequired != nil {
+		add("energy_required", *fields.EnergyRequired)
+	}
+	if fields.ContextTag != nil {
+		add("context_tag", *fields.ContextTag)
+	}
+	if fields.ClearBlockedBy {
+		// 显式重置为 '[]',保证 CHECK(json_valid) 约束始终成立。
+		add("blocked_by", "[]")
+	} else if fields.BlockedBy != nil {
+		b, err := json.Marshal(*fields.BlockedBy)
+		if err != nil {
+			// 编码失败(应不会发生 —— []int64 序列化为 JSON 数组总是合法),
+			// 仍以 NULL 写入避免 CHECK 约束触发 panic。
+			add("blocked_by", nil)
+		} else {
+			add("blocked_by", string(b))
+		}
+	}
+	return sets, args
 }
 
 // SetAIStatus 只更新 ai_status / ai_error / updated_at。

@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"little-timer/internal/domain"
+	"little-timer/internal/http/middleware"
 	"little-timer/internal/storage"
 )
 
@@ -155,14 +156,18 @@ func TaskCreate(c *gin.Context) {
 		return
 	}
 	// 手动创建时,把入参 title 写到 title 列;notes 也直接写入。
+	// TaskCreate 走的是刚 CreateTask 的 task(version=0);两次顺序写,第二次
+	// 用第一次写入后的新 version(GetTaskVersion)。乐观锁 plumbing 已在
+	// middleware 层校验过 mutation version,这里只关心 task 行的实际版本。
 	title := req.Title
-	if err := a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &title}); err != nil {
+	if err := a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &title}, 0); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "set title failed"})
 		return
 	}
 	if req.Notes != "" {
 		notes := req.Notes
-		_ = a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Notes: &notes})
+		ver, _ := a.SQLite.AITasks().GetTaskVersion(taskID)
+		_ = a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Notes: &notes}, ver)
 	}
 	// 直接进入 active 状态(不需 AI 处理)。
 	_ = a.SQLite.AITasks().SetTaskStatus(taskID, domain.TaskStatusActive)
@@ -261,7 +266,7 @@ func TaskUpdate(c *gin.Context) {
 		fields.EstimatedMinutes = &e
 	}
 
-	if err := a.SQLite.AITasks().UpdateTask(id, fields); err != nil {
+	if err := a.SQLite.AITasks().UpdateTask(id, fields, middleware.GetVersion(c)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
 		return
 	}

@@ -13,6 +13,7 @@ import (
 
 	"little-timer/internal/aigtd"
 	"little-timer/internal/domain"
+	"little-timer/internal/http/middleware"
 	"little-timer/internal/storage"
 )
 
@@ -124,7 +125,7 @@ func AIGtdReparse(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid raw_text"})
 			return
 		}
-		if err := a.SQLite.AITasks().UpdateTask(taskID, taskRawUpdate(raw)); err != nil {
+		if err := a.SQLite.AITasks().UpdateTask(taskID, taskRawUpdate(raw), middleware.GetVersion(c)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
 			return
 		}

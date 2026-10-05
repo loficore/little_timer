@@ -92,7 +92,8 @@ func TestWorkerPool_AppendKeepsDoneAndUserTitle(t *testing.T) {
 	// 用户改标题
 	edited := "用户标题"
 	editedFlag := true
-	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &editedFlag}); err != nil {
+	ver, _ := c.GetTaskVersion(taskID)
+	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &editedFlag}, ver); err != nil {
 		t.Fatal(err)
 	}
 
@@ -142,7 +143,8 @@ func TestWorkerPool_ReplaceKeepsDoneAndOverwritesTitle(t *testing.T) {
 	}
 	edited := "用户标题"
 	flag := true
-	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}); err != nil {
+	ver, _ := c.GetTaskVersion(taskID)
+	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}, ver); err != nil {
 		t.Fatal(err)
 	}
 	_ = drop
@@ -373,7 +375,8 @@ func TestWorkerPool_ReparsePreservesUserEditedTitle(t *testing.T) {
 	// 用户编辑 title(handler 实际行为:同时翻 user_edited_title=true)
 	edited := "用户改过的标题"
 	flag := true
-	if err := m.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}); err != nil {
+	ver, _ := m.AITasks().GetTaskVersion(taskID)
+	if err := m.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}, ver); err != nil {
 		t.Fatal(err)
 	}
 

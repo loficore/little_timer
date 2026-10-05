@@ -43,6 +43,7 @@ func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	registerLLMSettings(api)
 	registerTasks(api)
 	registerAIGtd(api)
+	registerSchedule(api)
 	registerBackup(api)
 	registerWallpapers(api)
 	registerEvents(api)
@@ -143,6 +144,16 @@ func registerAIGtd(g *gin.RouterGroup) {
 	if os.Getenv("LITTLE_TIMER_TEST_ENDPOINTS") == "1" {
 		ag.POST("/_test/prompt", handlers.AIGtdTestPrompt)
 	}
+}
+
+// Scheduler 路由(Task 6):挂在 /api 路由组,继承 ConflictGuard。
+//
+// /run 接受 preview|apply;preview 不落库,apply 在事务里写
+// scheduled_start/end 并乐观锁校验。/apply 接受显式 placements 集合,
+// 用于 UI 拖拽后批量落库。
+func registerSchedule(g *gin.RouterGroup) {
+	g.POST("/schedule/run", handlers.ScheduleRun)
+	g.POST("/schedule/apply", handlers.ScheduleApply)
 }
 
 // 备份路由。

@@ -16,7 +16,7 @@ const DecompositionJSONSchema = `{
   "required": ["title", "is_complex", "estimated_minutes", "subtasks"],
   "properties": {
     "title": {"type": "string", "maxLength": 100},
-    "notes": {"type": "string"},
+    "notes": {"type": "string", "maxLength": 2000},
     "is_complex": {"type": "boolean"},
     "due_date": {"type": ["string", "null"], "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$"},
     "estimated_minutes": {"type": "integer", "minimum": 5, "maximum": 180},
@@ -80,6 +80,9 @@ func ValidateDecomposition(raw string) (*domain.AIDecompositionResult, []string,
 	}
 	if len([]rune(title)) > 100 {
 		errs = append(errs, "title 超过 100 字符")
+	}
+	if len([]rune(d.Notes)) > 2000 {
+		errs = append(errs, "notes 超过 2000 字符")
 	}
 
 	if d.EstimatedMinutes < 5 || d.EstimatedMinutes > 180 {

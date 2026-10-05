@@ -16,6 +16,21 @@ import (
 	"little-timer/internal/domain"
 )
 
+// AITaskError 是 AI GTD 任务/子任务/作业持久化层的错误哨兵。
+type AITaskError string
+
+const (
+	ErrAITaskInsertFailed AITaskError = "ai task insert failed"
+	ErrAITaskUpdateFailed AITaskError = "ai task update failed"
+	ErrAITaskQueryFailed  AITaskError = "ai task query failed"
+	ErrAITaskDeleteFailed AITaskError = "ai task delete failed"
+
+	// Error 让 AITaskError 实现 error 接口(与其他 sentinel 类型一致)。
+	// (HabitError 用的是同构写法,详见 habit.go。)
+)
+
+func (e AITaskError) Error() string { return string(e) }
+
 // TaskUpdateFields 携带可选的更新字段。指针为 nil 表示不动;Clear* 标志
 // 为 true 表示把对应列显式置 NULL(覆盖之前的值)。
 type TaskUpdateFields struct {
@@ -62,7 +77,7 @@ func (c *AITasksCrud) CreateTask(rawText, source string) (int64, error) {
 		rawText, source,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrHabitInsertFailed, err)
+		return 0, fmt.Errorf("%w: %v", ErrAITaskInsertFailed, err)
 	}
 	return res.LastInsertId()
 }
@@ -99,18 +114,31 @@ func (c *AITasksCrud) GetTask(id int64) (*domain.TaskRow, []domain.SubtaskRow, e
 //
 // `status` 为空表示不过滤;默认隐藏 archived/rejected。
 func (c *AITasksCrud) ListTopLevel(status string, limit, offset int) ([]domain.TaskRow, error) {
+	return c.ListTasks(status, nil, limit, offset)
+}
+
+// ListTasks 列出任务。parentID 为 nil 时相当于 ListTopLevel(顶层);
+// 非 nil 时过滤到指定父任务的直接子任务。`status` 为空表示不过滤;
+// 顶层默认隐藏 archived/rejected。
+func (c *AITasksCrud) ListTasks(status string, parentID *int64, limit, offset int) ([]domain.TaskRow, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
 	if offset < 0 {
 		offset = 0
 	}
-	q := `SELECT ` + taskCols + ` FROM tasks WHERE parent_id IS NULL`
+	q := `SELECT ` + taskCols + ` FROM tasks WHERE `
 	args := []any{}
+	if parentID != nil {
+		q += `parent_id = ?`
+		args = append(args, *parentID)
+	} else {
+		q += `parent_id IS NULL`
+	}
 	if status != "" {
 		q += ` AND status = ?`
 		args = append(args, status)
-	} else {
+	} else if parentID == nil {
 		q += ` AND status NOT IN ('archived','rejected')`
 	}
 	q += ` ORDER BY created_at DESC LIMIT ? OFFSET ?;`
@@ -118,7 +146,7 @@ func (c *AITasksCrud) ListTopLevel(status string, limit, offset int) ([]domain.T
 
 	rows, err := c.db.Query(q, args...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrHabitQueryFailed, err)
+		return nil, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
 	}
 	defer rows.Close()
 	var out []domain.TaskRow
@@ -211,7 +239,7 @@ func (c *AITasksCrud) UpdateTask(id int64, fields TaskUpdateFields) error {
 		"UPDATE tasks SET "+joinComma(sets)+" WHERE id = ?;", args...,
 	)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrHabitUpdateFailed, err)
+		return fmt.Errorf("%w: %v", ErrAITaskUpdateFailed, err)
 	}
 	return nil
 }
@@ -260,7 +288,7 @@ func (c *AITasksCrud) CreateSubtask(taskID int64, title string, estMin int, dueD
 		taskID, title, estMin, due, orderIndex,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrHabitInsertFailed, err)
+		return 0, fmt.Errorf("%w: %v", ErrAITaskInsertFailed, err)
 	}
 	return res.LastInsertId()
 }
@@ -416,12 +444,14 @@ func (c *AITasksCrud) MarkJobSuccess(jobID int64, respPayload string, inTok, out
 	return err
 }
 
-// MarkJobFailed 写入失败原因 + 终态。
-func (c *AITasksCrud) MarkJobFailed(jobID int64, errMsg string) error {
+// MarkJobFailed 写入失败原因 + 终态。可选 audit 字段(respText/inTok/outTok)
+// 即使解析失败也保留最后一次 LLM 响应,便于排查。
+func (c *AITasksCrud) MarkJobFailed(jobID int64, errMsg, respText string, inTok, outTok int) error {
 	_, err := c.db.Exec(
-		`UPDATE ai_jobs SET status='failed', finished_at=CURRENT_TIMESTAMP, error_message=?
+		`UPDATE ai_jobs SET status='failed', finished_at=CURRENT_TIMESTAMP,
+		    error_message=?, response_payload=?, input_tokens=?, output_tokens=?
 		 WHERE id=?;`,
-		errMsg, jobID,
+		errMsg, respText, inTok, outTok, jobID,
 	)
 	return err
 }
@@ -487,7 +517,7 @@ func scanTask(row rowScanner) (*domain.TaskRow, error) {
 		&t.Source, &aiStatus, &aiError, &t.CreatedAt, &t.UpdatedAt, &parsedAt,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrHabitQueryFailed, err)
+		return nil, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
 	}
 	if parent.Valid {
 		v := parent.Int64
@@ -533,7 +563,7 @@ func scanSubtaskRow(rows rowScanner) (domain.SubtaskRow, error) {
 		&s.ID, &parent, &s.Title, &s.EstimatedMinutes, &s.OrderIndex,
 		&status, &s.CreatedAt,
 	); err != nil {
-		return s, fmt.Errorf("%w: %v", ErrHabitQueryFailed, err)
+		return s, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
 	}
 	if parent.Valid {
 		s.TaskID = parent.Int64
@@ -556,7 +586,7 @@ func scanAIJobRow(row rowScanner) (*domain.AIJobRow, error) {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("%w: %v", ErrHabitQueryFailed, err)
+		return nil, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
 	}
 	j.Status = domain.AIJobStatus(status)
 	if resp.Valid {

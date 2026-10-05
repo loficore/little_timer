@@ -92,6 +92,23 @@ func LLMSettingsUpdate(c *gin.Context) {
 		timeout = 30
 	}
 
+	// 先判定是否涉及秘钥字段(api_key / clear_key);锁定状态下整个请求
+	// 一并拒绝,避免非密字段已写入却报 423 造成部分写入的不一致体验。
+	hasAPIKey := false
+	bodyClearKey := false
+	if v, ok := body["api_key"].(string); ok && v != "" {
+		hasAPIKey = true
+	}
+	if clear, _ := body["clear_key"].(bool); clear {
+		bodyClearKey = true
+	}
+
+	secrets := a.Secrets()
+	if (hasAPIKey || bodyClearKey) && secrets.IsLocked() {
+		c.JSON(http.StatusLocked, gin.H{"success": false, "code": "auth.master_password_required", "error": "master password required"})
+		return
+	}
+
 	if _, err := a.SQLite.DB().Exec(
 		`UPDATE settings
 		 SET llm_provider=?, llm_base_url=?, llm_model=?, llm_max_tokens=?, llm_timeout_seconds=?
@@ -102,19 +119,17 @@ func LLMSettingsUpdate(c *gin.Context) {
 		return
 	}
 
-	secrets := a.Secrets()
-	if v, ok := body["api_key"].(string); ok && v != "" {
-		if secrets.IsLocked() {
-			c.JSON(http.StatusLocked, gin.H{"success": false, "code": "auth.master_password_required", "error": "master password required"})
-			return
-		}
-		if err := secrets.Store([]byte(llmAPIKeySecret), []byte(v)); err != nil {
+	if hasAPIKey {
+		if err := secrets.Store([]byte(llmAPIKeySecret), []byte(body["api_key"].(string))); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "store key failed"})
 			return
 		}
 	}
-	if clear, _ := body["clear_key"].(bool); clear {
-		_ = secrets.Delete([]byte(llmAPIKeySecret))
+	if bodyClearKey {
+		if err := secrets.Delete([]byte(llmAPIKeySecret)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "clear key failed"})
+			return
+		}
 	}
 
 	out, _ := readLLMSettings(a)

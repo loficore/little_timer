@@ -142,7 +142,7 @@ func (w *WorkerPool) loop(ctx context.Context) {
 func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 	task, _, err := w.aiTasks.GetTask(job.TaskID)
 	if err != nil || task == nil {
-		_ = w.aiTasks.MarkJobFailed(job.ID, "task not found")
+		_ = w.aiTasks.MarkJobFailed(job.ID, "task not found", "", 0, 0)
 		_ = w.aiTasks.SetAIStatus(job.TaskID, domain.AIStatusError, "task not found")
 		return
 	}
@@ -170,18 +170,32 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		Model:        cfg.Model,
 		MaxTokens:    cfg.MaxTokens,
 	}
-	res, err := ParseWithRetry(ctx, provider, req, 2)
+	outcome, err := ParseWithRetryDetailed(ctx, provider, req, 2)
 	if err != nil {
+		// 即便解析失败,也要把最后一次响应 + token 记到 ai_jobs,方便排查。
+		// Provider 错误时 outcome 为 nil(响应无意义),退化为空。
+		var raw string
+		var inTok, outTok int
+		if outcome != nil {
+			raw = outcome.RawText
+			inTok = outcome.InputTokens
+			outTok = outcome.OutputTokens
+		}
+		// 重要:不要先 MarkJobFailed 再 RequeueJob —— 终态写完后 RequeueJob
+		// 的 WHERE status='running' 失效,attempts 不递增,任务永远 processing。
 		if errors.Is(err, ErrRetryable) && job.Attempts < maxJobAttempts {
 			if rerr := w.aiTasks.RequeueJob(job.ID); rerr != nil {
 				log.Warn("worker.requeue failed", "job_id", job.ID, "error", rerr.Error())
 			}
 			_ = w.aiTasks.SetAIStatus(task.ID, domain.AIStatusPending, "")
+			// audit(响应 + token)随下一次 claim 时通过 MarkJobSuccess/Failed 写入终态。
 			return
 		}
+		_ = w.aiTasks.MarkJobFailed(job.ID, err.Error(), raw, inTok, outTok)
 		w.fail(job, task.ID, err.Error())
 		return
 	}
+	res := outcome.Result
 
 	// 成功:把解析结果写回 task + 子任务。逐项 best-effort;出错就 fail 整个 job。
 	status := domain.TaskStatusActive
@@ -214,13 +228,13 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 	if err := w.aiTasks.MarkParsedAt(task.ID); err != nil {
 		log.Warn("worker.mark parsed_at failed", "task_id", task.ID, "error", err.Error())
 	}
-	if err := w.aiTasks.MarkJobSuccess(job.ID, "", 0, 0); err != nil {
+	if err := w.aiTasks.MarkJobSuccess(job.ID, outcome.RawText, outcome.InputTokens, outcome.OutputTokens); err != nil {
 		log.Warn("worker.mark job success failed", "job_id", job.ID, "error", err.Error())
 	}
 }
 
 func (w *WorkerPool) fail(job domain.AIJobRow, taskID int64, msg string) {
-	if err := w.aiTasks.MarkJobFailed(job.ID, msg); err != nil {
+	if err := w.aiTasks.MarkJobFailed(job.ID, msg, "", 0, 0); err != nil {
 		log.Warn("worker.mark job failed", "job_id", job.ID, "error", err.Error())
 	}
 	if err := w.aiTasks.SetAIStatus(taskID, domain.AIStatusError, msg); err != nil {

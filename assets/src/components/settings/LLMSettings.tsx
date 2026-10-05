@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { useLLMSettings } from "../../hooks/useLLMSettings";
 import { t } from "../../utils/i18n";
 
@@ -19,14 +19,8 @@ export function LLMSettings() {
   const [clearKey, setClearKey] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  // 首次拉到 cfg 后填表
-  if (cfg && provider === "" && baseURL === "" && !cfg.provider === false) {
-    // 用 lazy 初始化只在首次触发
-  }
-  // 用 effect 模式替代:在 cfg 变化时同步到表单
-  const [lastCfg, setLastCfg] = useState<typeof cfg>(null);
-  if (cfg !== lastCfg) {
-    setLastCfg(cfg);
+  // cfg 加载完后填表单(一次性同步;之后用户编辑表单不覆盖 cfg)。
+  useEffect(() => {
     if (cfg) {
       setProvider(cfg.provider);
       setBaseURL(cfg.base_url);
@@ -34,7 +28,7 @@ export function LLMSettings() {
       setMaxTokens(cfg.max_tokens);
       setTimeout(cfg.timeout_seconds);
     }
-  }
+  }, [cfg]);
 
   const onSave = async () => {
     setFeedback(null);

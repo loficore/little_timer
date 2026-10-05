@@ -94,7 +94,16 @@ func TaskList(c *gin.Context) {
 		return
 	}
 	status := c.Query("status")
-	rows, err := a.SQLite.AITasks().ListTopLevel(status, limit, offset)
+	var parentID *int64
+	if pidStr := c.Query("parent_id"); pidStr != "" {
+		pid, perr := strconv.ParseInt(pidStr, 10, 64)
+		if perr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid parent_id"})
+			return
+		}
+		parentID = &pid
+	}
+	rows, err := a.SQLite.AITasks().ListTasks(status, parentID, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "list failed"})
 		return

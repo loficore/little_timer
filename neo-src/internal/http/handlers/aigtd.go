@@ -49,9 +49,11 @@ func AIGtdCapture(c *gin.Context) {
 		return
 	}
 
-	// 立即入队(worker 在后台处理)。
+	// 立即入队(worker 在后台处理)。失败时回滚 CreateTask,避免出现
+	// "卡片永远停在 Parsing 状态"的孤儿记录。
 	cfg := aiConfigFromApp(a)
 	if _, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, raw); err != nil {
+		_ = a.SQLite.AITasks().DeleteTask(taskID)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": "aigtd.enqueue_failed", "error": "enqueue failed"})
 		return
 	}

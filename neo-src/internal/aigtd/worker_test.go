@@ -249,15 +249,31 @@ func TestWorkerPool_ReparsePreservesUserEditedTitle(t *testing.T) {
 		`{"title":"REPARSE 改写的标题","is_complex":true,"estimated_minutes":45,"subtasks":[{"title":"b","estimated_minutes":20},{"title":"b2","estimated_minutes":20}]}`,
 		0,
 	)
-	if _, err := m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`); err != nil {
-		t.Fatal(err)
-	}
-	waitTaskStatus(t, m.AITasks(), taskID, domain.AIStatusDone, 5*time.Second)
-
-	after, _, err := m.AITasks().GetTask(taskID)
+	reparseJobID, err := m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// 等"第二条 job 本身"变 success —— 不能只等 task.ai_status==done,因为 reparse
+	// 前它已经是 done,waitTaskStatus 会立即返回导致断言失真(tautology)。
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		j, jerr := m.AITasks().LatestJobForTask(taskID)
+		if jerr == nil && j != nil && j.ID == reparseJobID && j.Status == domain.AIJobStatusSuccess {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	after, subs, err := m.AITasks().GetTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 先证明 reparse 确实跑了(子任务被替换成新一组)
+	if len(subs) != 2 || subs[0].Title != "b" || subs[1].Title != "b2" {
+		t.Fatalf("reparse 未生效,subtasks = %+v", subs)
+	}
+	// 再证明用户 title 未被覆盖
 	if after.Title != "用户改过的标题" {
 		t.Errorf("reparse 覆盖了用户 title: got %q, 期望 用户改过的标题", after.Title)
 	}

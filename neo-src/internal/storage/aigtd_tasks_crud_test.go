@@ -249,8 +249,8 @@ func TestReplaceSubtasks_AtomicSwap(t *testing.T) {
 		{Title: "新2", EstimatedMinutes: 40},
 		{Title: "新3", EstimatedMinutes: 50},
 	}
-	if err := c.ReplaceSubtasks(taskID, newSubs); err != nil {
-		t.Fatalf("ReplaceSubtasks: %v", err)
+	if err := c.ReplaceSubtasksStrict(taskID, newSubs); err != nil {
+		t.Fatalf("ReplaceSubtasksStrict: %v", err)
 	}
 
 	// 验证旧 subtasks 被清空、新 subtasks 到位
@@ -311,6 +311,112 @@ func TestHasInFlightJob(t *testing.T) {
 	if got {
 		t.Error("success job 不应再算 in-flight")
 	}
+}
+
+func TestAppendSubtasks_OnlyAddsNoDelete(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+	old1, _ := c.CreateSubtask(taskID, "旧1", 10, nil, 0)
+	old2, _ := c.CreateSubtask(taskID, "旧2", 20, nil, 1)
+	done := domain.SubtaskStatusDone
+	if err := c.UpdateSubtask(old1, SubtaskUpdateFields{Status: &done}); err != nil {
+		t.Fatal(err)
+	}
+
+	// append 纯追加,不做 title 去重(spec §3.3 / Q2):"旧2" 重名也插入
+	err := c.AppendSubtasks(taskID, []SubtaskInput{
+		{Title: "新增1", EstimatedMinutes: 30},
+		{Title: "旧2", EstimatedMinutes: 99},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, subs, err := c.GetTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var titles []string
+	for _, s := range subs {
+		titles = append(titles, s.Title)
+	}
+	if len(subs) != 4 {
+		t.Fatalf("append 后子任务数 = %d, want 4: %v", len(subs), titles)
+	}
+	// 旧1(带 done)仍在,状态未被改
+	for _, s := range subs {
+		if s.ID == old1 && s.Status != domain.SubtaskStatusDone {
+			t.Error("append 修改了已 done 子任务的状态")
+		}
+	}
+	_ = old2
+}
+
+func TestReplaceSubtasksKeepDone(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+	keep, _ := c.CreateSubtask(taskID, "已完成", 10, nil, 0)
+	drop, _ := c.CreateSubtask(taskID, "未完成", 20, nil, 1)
+	done := domain.SubtaskStatusDone
+	active := domain.SubtaskStatusActive
+	if err := c.UpdateSubtask(keep, SubtaskUpdateFields{Status: &done}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpdateSubtask(drop, SubtaskUpdateFields{Status: &active}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := c.ReplaceSubtasksKeepDone(taskID, []SubtaskInput{{Title: "新的", EstimatedMinutes: 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, subs, err := c.GetTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var titles []string
+	for _, s := range subs {
+		titles = append(titles, s.Title)
+	}
+	if !containsStr(titles, "已完成") {
+		t.Error("replace 删了 done 子任务")
+	}
+	if containsStr(titles, "未完成") {
+		t.Error("replace 未删除非 done 子任务")
+	}
+	if !containsStr(titles, "新的") {
+		t.Error("replace 未插入新子任务")
+	}
+}
+
+func containsStr(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }
 
 func stringPtr(s string) *string { return &s }

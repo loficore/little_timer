@@ -219,7 +219,7 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 			DueDate:          st.DueDate,
 		})
 	}
-	if err := w.aiTasks.ReplaceSubtasks(task.ID, subs); err != nil {
+	if err := w.aiTasks.ReplaceSubtasksStrict(task.ID, subs); err != nil {
 		w.fail(job, task.ID, "replace subtasks:"+err.Error())
 		return
 	}

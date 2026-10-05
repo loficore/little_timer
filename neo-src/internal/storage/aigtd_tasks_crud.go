@@ -354,9 +354,10 @@ func (c *AITasksCrud) HasInFlightJob(taskID int64) (bool, error) {
 	return n > 0, nil
 }
 
-// ReplaceSubtasks 在一个事务里清空 task 的旧 subtasks 并写入新子任务。
-// reparse 时 Worker 用它替换 LLM 解析出的新子任务集,避免重复累积。
-func (c *AITasksCrud) ReplaceSubtasks(taskID int64, subs []SubtaskInput) error {
+// ReplaceSubtasksStrict 在一个事务里清空 task 的旧 subtasks 并写入新子任务。
+// 已 done 的子任务也被删——本方法仅用于显式接受全量替换的路径(目前无调用方,
+// 保留以便以后扩展 use cases)。reparse 默认走 ReplaceSubtasksKeepDone。
+func (c *AITasksCrud) ReplaceSubtasksStrict(taskID int64, subs []SubtaskInput) error {
 	tx, err := c.db.Begin()
 	if err != nil {
 		return err
@@ -385,7 +386,84 @@ func (c *AITasksCrud) ReplaceSubtasks(taskID int64, subs []SubtaskInput) error {
 	return tx.Commit()
 }
 
-// SubtaskInput 是 ReplaceSubtasks 接受的子任务描述。
+// AppendSubtasks 仅向 task 追加新子任务,不删除/不修改任何已有行。
+// order_index 接在现有同 task 子任务最大值之后。不做 title 去重
+// (spec §3.3 / Q2:LLM 偶发重复由 UI 处理,worker 端不主动去重)。
+func (c *AITasksCrud) AppendSubtasks(taskID int64, subs []SubtaskInput) error {
+	if len(subs) == 0 {
+		return nil
+	}
+	tx, err := c.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var maxOrder int
+	if err := tx.QueryRow(
+		`SELECT COALESCE(MAX(order_index), -1) FROM tasks WHERE parent_id = ?;`, taskID,
+	).Scan(&maxOrder); err != nil {
+		return err
+	}
+
+	for i, s := range subs {
+		var due any
+		if s.DueDate != nil {
+			due = *s.DueDate
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO tasks (parent_id, title, estimated_minutes, due_date, order_index, source, status, ai_status)
+			 VALUES (?, ?, ?, ?, ?, 'ai', ?, 'done');`,
+			taskID, s.Title, s.EstimatedMinutes, due, maxOrder+1+i,
+			string(domain.SubtaskStatusActive),
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ReplaceSubtasksKeepDone 删除 task 下所有非 done 子任务,再插入新集合;
+// done 行原样保留。新条目 order_index 接在保留的 done 行之后。
+// reparse mode='replace' 时使用。
+func (c *AITasksCrud) ReplaceSubtasksKeepDone(taskID int64, subs []SubtaskInput) error {
+	tx, err := c.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(
+		`DELETE FROM tasks WHERE parent_id = ? AND status != 'done';`, taskID,
+	); err != nil {
+		return err
+	}
+
+	var maxOrder int
+	if err := tx.QueryRow(
+		`SELECT COALESCE(MAX(order_index), -1) FROM tasks WHERE parent_id = ?;`, taskID,
+	).Scan(&maxOrder); err != nil {
+		return err
+	}
+
+	for i, s := range subs {
+		var due any
+		if s.DueDate != nil {
+			due = *s.DueDate
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO tasks (parent_id, title, estimated_minutes, due_date, order_index, source, status, ai_status)
+			 VALUES (?, ?, ?, ?, ?, 'ai', ?, 'done');`,
+			taskID, s.Title, s.EstimatedMinutes, due, maxOrder+1+i,
+			string(domain.SubtaskStatusActive),
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// SubtaskInput 是 AppendSubtasks / ReplaceSubtasks* 接受的子任务描述。
 type SubtaskInput struct {
 	Title            string
 	EstimatedMinutes int

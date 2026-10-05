@@ -168,8 +168,66 @@ func TestMigrateV8ToV9_HabitsSetIdNullable(t *testing.T) {
 	}
 }
 
+// TestMigrateReconcileStuckInFlightJobs 验证 reviewer M2 修复:
+// 升级路径前 DB 中已有多个 queued/running ai_jobs 行(部分 UNIQUE 索引
+// idx_ai_jobs_in_flight 创建将因重复行失败) → Migrate 会先 reconcile 把
+// stuck 行标 failed,然后建索引成功。
+func TestMigrateReconcileStuckInFlightJobs(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	if _, err := m.DB().Exec(v8SchemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(v9TasksAiJobsSQL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(`INSERT INTO schema_version (version, description) VALUES (9,'v9');`); err != nil {
+		t.Fatal(err)
+	}
+	// Seed 同一 task 多个 in-flight 行(同 task 的 (queued/running) 行
+	// 重复,会触发 idx_ai_jobs_in_flight 部分 UNIQUE 失败)。
+	if _, err := m.DB().Exec(
+		`INSERT INTO tasks (id, title, source) VALUES (1,'t1','manual');`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(
+		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload) VALUES (1,'p','m','queued','{}');`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(
+		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload) VALUES (1,'p','m','running','{}');`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.Migrate(); err != nil {
+		t.Fatalf("Migrate 应 reconcile 后成功,实际: %v", err)
+	}
+
+	// stuck 行应已被 reconcile 标 failed
+	var queued, running int
+	row := m.DB().QueryRow(`SELECT COUNT(*) FROM ai_jobs WHERE status IN ('queued','running');`)
+	_ = row.Scan(&queued)
+	_ = queued
+	row2 := m.DB().QueryRow(`SELECT COUNT(*) FROM ai_jobs WHERE status = 'failed' AND error_message LIKE 'reconciled%';`)
+	if err := row2.Scan(&running); err != nil {
+		t.Fatal(err)
+	}
+	if running < 2 {
+		t.Errorf("reconcile 后应有 ≥2 行被标 failed, got %d", running)
+	}
+}
+
 // v9TasksAiJobsSQL 是 v9 版(不含 v10 新列)的 tasks / ai_jobs 建表语句。
-// 用于 TestMigrateV9ToV10_AddsColumns 模拟"已是 v9 但缺新列"的 DB。
+// 用于 TestMigrateV9ToV10_AddsColumns / TestMigrateReconcileStuckInFlightJobs
+// 模拟"已是 v9 但缺新列"的 DB。
 const v9TasksAiJobsSQL = `
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 )
 
 // CurrentSchemaVersion 是本构建目标针对的 schema 版本。
@@ -361,6 +362,27 @@ func (m *MigrationManager) setSchemaVersion(version int) error {
 	return err
 }
 
+// reconcileStuckInFlightJobs 在创建 idx_ai_jobs_in_flight 部分 UNIQUE 索引
+// 前调用:若 DB 中已存在多个 queued/running ai_jobs(跨 task 即可触发 UNIQUE
+// 失败),直接 UPDATE 为 failed + finished_at,避免 UNIQUE 索引创建失败被吞掉
+// (reviewer M2)。幂等;若没有 stuck 行,影响 0 行。
+func (m *MigrationManager) reconcileStuckInFlightJobs() error {
+	res, err := m.db.Exec(
+		`UPDATE ai_jobs
+		 SET status = 'failed',
+		     finished_at = CURRENT_TIMESTAMP,
+		     error_message = 'reconciled before idx_ai_jobs_in_flight: stale queued/running'
+		 WHERE status IN ('queued', 'running');`,
+	)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected > 0 {
+		slog.Info("migration.reconcile in-flight jobs", "affected", affected)
+	}
+	return nil
+}
+
 // createTables 执行 schema 中的每条 CREATE TABLE，然后是索引，
 // 最后播种默认 settings 行。
 //
@@ -386,16 +408,36 @@ func (m *MigrationManager) createTables() error {
 		}
 	}
 
-	// 索引 —— 这里失败不致命。
-	for _, idx := range indexes {
-		if _, err := m.db.Exec(idx.SQL); err != nil {
-			// 尽力而为：记日志但不让迁移失败。
-			_ = err
-		}
+	// 索引 —— idx_ai_jobs_in_flight 是 TOCTOU 兜底,失败必须传播(其余尽力而为)。
+	if err := m.createIndexes(); err != nil {
+		return err
 	}
 
 	if err := m.initializeDefaultSettings(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// createIndexes 创建 indexes 中的全部索引。idx_ai_jobs_in_flight(部分
+// UNIQUE)失败会先 reconcile 陈旧的 queued/running 行后重试,仍失败则传播
+// 错误(reviewer M2:这条索引是 TOCTOU 兜底,静默失败会让整个防御失效)。
+// 其余索引为尽力而为,失败不致命。
+func (m *MigrationManager) createIndexes() error {
+	for _, idx := range indexes {
+		if _, err := m.db.Exec(idx.SQL); err != nil {
+			if idx.Name == "idx_ai_jobs_in_flight" {
+				if rerr := m.reconcileStuckInFlightJobs(); rerr != nil {
+					return fmt.Errorf("%w: create %s: %w", ErrMigrationFailed, idx.Name, rerr)
+				}
+				if _, err2 := m.db.Exec(idx.SQL); err2 != nil {
+					return fmt.Errorf("%w: create %s after reconcile: %w", ErrMigrationFailed, idx.Name, err2)
+				}
+				continue
+			}
+			// 其余索引尽力而为,记日志但不让迁移失败。
+			slog.Warn("migration.index skipped", "index", idx.Name, "error", err.Error())
+		}
 	}
 	return nil
 }
@@ -506,11 +548,8 @@ func (m *MigrationManager) migrateV8ToV9() error {
 	}
 
 	// 3. 兜底建索引(新表可能由 verifyTablesExist 重建,索引不会跟着重建)。
-	for _, idx := range indexes {
-		if _, err := m.db.Exec(idx.SQL); err != nil {
-			// 尽力而为,索引失败不致命。
-			_ = err
-		}
+	if err := m.createIndexes(); err != nil {
+		return err
 	}
 
 	return nil

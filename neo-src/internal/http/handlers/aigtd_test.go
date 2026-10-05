@@ -119,6 +119,46 @@ func TestAIGtdReparse_SecondInFlight409(t *testing.T) {
 	}
 }
 
+func TestTaskUpdate_UserEditedTitleFlips(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "AI 起的标题"})
+	var task TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	if task.UserEditedTitle {
+		t.Fatal("新建 task 不应 user_edited_title=true")
+	}
+	path := "/api/tasks/" + strconv.FormatInt(task.ID, 10)
+
+	// PATCH title → 翻转 true
+	w = doJSON(t, r, http.MethodPatch, path, map[string]any{"title": "我改的"})
+	if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+		t.Fatalf("patch title: code=%d body=%s", w.Code, w.Body.String())
+	}
+	w = doJSON(t, r, http.MethodGet, path, nil)
+	var after TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &after)
+	if !after.UserEditedTitle {
+		t.Error("PATCH title 后 user_edited_title 应为 true")
+	}
+
+	// PATCH 其他字段不应翻转(新建另一个 task 测)
+	w = doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "另一个"})
+	var t2 TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &t2)
+	w = doJSON(t, r, http.MethodPatch, "/api/tasks/"+strconv.FormatInt(t2.ID, 10), map[string]any{"notes": "x"})
+	if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+		t.Fatalf("patch notes: code=%d", w.Code)
+	}
+	w = doJSON(t, r, http.MethodGet, "/api/tasks/"+strconv.FormatInt(t2.ID, 10), nil)
+	var a2 TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &a2)
+	if a2.UserEditedTitle {
+		t.Error("仅改 notes 不应翻转 user_edited_title")
+	}
+}
+
 func TestTaskCRUD(t *testing.T) {
 	a := newTestApp(t)
 	r := setupAIGtdRouter(t, a)

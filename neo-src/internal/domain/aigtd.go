@@ -61,6 +61,7 @@ type TaskRow struct {
 	Source           string     `json:"source"`
 	AIStatus         AIStatus   `json:"ai_status"`
 	AIError          string     `json:"ai_error,omitempty"`
+	UserEditedTitle  bool       `json:"user_edited_title"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 	ParsedAt         *time.Time `json:"parsed_at,omitempty"`
@@ -87,6 +88,16 @@ const (
 	AIJobStatusFailed  AIJobStatus = "failed"
 )
 
+// AIJobMode 是 ai_jobs 的处理模式。append=只增不改;replace=重建(保留 done);
+// review=后续 GTD 回顾(见 issue #7,本期不实现)。
+type AIJobMode string
+
+const (
+	AIJobModeAppend  AIJobMode = "append"
+	AIJobModeReplace AIJobMode = "replace"
+	AIJobModeReview  AIJobMode = "review"
+)
+
 // AIJobRow 是一行 `ai_jobs`。
 type AIJobRow struct {
 	ID              int64       `json:"id"`
@@ -100,6 +111,7 @@ type AIJobRow struct {
 	InputTokens     *int        `json:"input_tokens,omitempty"`
 	OutputTokens    *int        `json:"output_tokens,omitempty"`
 	Attempts        int         `json:"attempts"`
+	Mode            AIJobMode   `json:"mode"`
 	StartedAt       *time.Time  `json:"started_at,omitempty"`
 	FinishedAt      *time.Time  `json:"finished_at,omitempty"`
 	CreatedAt       time.Time   `json:"created_at"`

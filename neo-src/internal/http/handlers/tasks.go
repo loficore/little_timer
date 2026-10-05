@@ -32,6 +32,7 @@ type TaskDTO struct {
 	Source           string            `json:"source"`
 	AIStatus         string            `json:"ai_status"`
 	AIError          string            `json:"ai_error,omitempty"`
+	UserEditedTitle  bool              `json:"user_edited_title"`
 	Subtasks         []SubtaskDTO      `json:"subtasks,omitempty"`
 	CreatedAt        string            `json:"created_at"`
 	UpdatedAt        string            `json:"updated_at"`
@@ -65,6 +66,7 @@ func toTaskDTO(t *domain.TaskRow, subs []domain.SubtaskRow) TaskDTO {
 		Source:           t.Source,
 		AIStatus:         string(t.AIStatus),
 		AIError:          t.AIError,
+		UserEditedTitle:  t.UserEditedTitle,
 		CreatedAt:        t.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:        t.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -195,7 +197,13 @@ func TaskUpdate(c *gin.Context) {
 
 	fields := storage.TaskUpdateFields{}
 	if v, ok := body["title"].(string); ok {
-		fields.Title = &v
+		if strings.TrimSpace(v) != "" {
+			fields.Title = &v
+			// 用户显式改名 → 标记 user_edited_title,后续 reparse 不覆盖
+			// (worker 消费后重置为 false)。
+			edited := true
+			fields.UserEditedTitle = &edited
+		}
 	}
 	if v, ok := body["notes"].(string); ok {
 		fields.Notes = &v

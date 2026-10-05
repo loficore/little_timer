@@ -55,6 +55,7 @@ type TaskUpdateFields struct {
 	Pinned               *bool
 	OrderIndex           *int64
 	EstimatedMinutes     *int64
+	UserEditedTitle       *bool
 }
 
 // SubtaskUpdateFields 是子任务的更新字段集合。
@@ -235,6 +236,9 @@ func (c *AITasksCrud) UpdateTask(id int64, fields TaskUpdateFields) error {
 	}
 	if fields.EstimatedMinutes != nil {
 		add("estimated_minutes", *fields.EstimatedMinutes)
+	}
+	if fields.UserEditedTitle != nil {
+		add("user_edited_title", boolToInt(*fields.UserEditedTitle))
 	}
 	if len(sets) == 0 {
 		return nil
@@ -513,13 +517,13 @@ func (c *AITasksCrud) LatestJobForTask(taskID int64) (*domain.AIJobRow, error) {
 
 const taskCols = `id, parent_id, raw_text, title, notes, status, due_date,
 	scheduled_start, scheduled_end, pinned, estimated_minutes, order_index,
-	source, ai_status, ai_error, created_at, updated_at, parsed_at`
+	source, ai_status, ai_error, user_edited_title, created_at, updated_at, parsed_at`
 
 const subtaskCols = `id, parent_id, title, estimated_minutes, order_index, status, created_at`
 
 const aiJobCols = `id, task_id, provider, model, status, request_payload,
 	response_payload, error_message, input_tokens, output_tokens, attempts,
-	started_at, finished_at, created_at`
+	mode, started_at, finished_at, created_at`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -532,13 +536,13 @@ func scanTask(row rowScanner) (*domain.TaskRow, error) {
 	var status string
 	var dueDate sql.NullString
 	var schedStart, schedEnd sql.NullInt64
-	var pinned int
+	var pinned, userEditedTitle int
 	var aiStatus, aiError sql.NullString
 	var parsedAt sql.NullTime
 	err := row.Scan(
 		&t.ID, &parent, &rawText, &t.Title, &notes, &status, &dueDate,
 		&schedStart, &schedEnd, &pinned, &t.EstimatedMinutes, &t.OrderIndex,
-		&t.Source, &aiStatus, &aiError, &t.CreatedAt, &t.UpdatedAt, &parsedAt,
+		&t.Source, &aiStatus, &aiError, &userEditedTitle, &t.CreatedAt, &t.UpdatedAt, &parsedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
@@ -567,6 +571,7 @@ func scanTask(row rowScanner) (*domain.TaskRow, error) {
 		t.ScheduledEnd = &v
 	}
 	t.Pinned = pinned != 0
+	t.UserEditedTitle = userEditedTitle != 0
 	t.AIStatus = domain.AIStatus(aiStatus.String)
 	if aiError.Valid {
 		t.AIError = aiError.String
@@ -598,13 +603,14 @@ func scanSubtaskRow(rows rowScanner) (domain.SubtaskRow, error) {
 
 func scanAIJobRow(row rowScanner) (*domain.AIJobRow, error) {
 	var j domain.AIJobRow
-	var status string
+	var status, mode string
 	var resp, errMsg sql.NullString
 	var inTok, outTok sql.NullInt64
 	var started, finished sql.NullTime
 	if err := row.Scan(
 		&j.ID, &j.TaskID, &j.Provider, &j.Model, &status,
 		&j.RequestPayload, &resp, &errMsg, &inTok, &outTok, &j.Attempts,
+		&mode,
 		&started, &finished, &j.CreatedAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -613,6 +619,7 @@ func scanAIJobRow(row rowScanner) (*domain.AIJobRow, error) {
 		return nil, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
 	}
 	j.Status = domain.AIJobStatus(status)
+	j.Mode = domain.AIJobMode(mode)
 	if resp.Valid {
 		j.ResponsePayload = resp.String
 	}

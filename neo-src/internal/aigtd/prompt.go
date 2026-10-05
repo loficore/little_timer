@@ -21,6 +21,15 @@ const systemPromptTemplate = `你是 GTD 智能助理。输入是一段用户随
 5. estimated_minutes 从 {15, 25, 30, 45, 60, 90} 中选择最贴近的一个,范围 [5,180]。
 6. title 字段 ≤100 字符,subtasks 数组元素个数为 0 或 2-4。
 7. 若用户消息中给出了"已有子任务清单",你只能额外提出尚未覆盖的新增子任务,不得重复、修改或删除清单中已有的项。
+8. 你必须额外输出 4 个评分维度(放在顶层,或放在名为 "_scores" 的嵌套对象里):
+   - priority_score (1-5):任务重要性(数字越大越重要)。
+   - urgency_score (1-10):时间紧迫度(数字越大越紧迫)。
+   - energy_required (1-3):完成所需精力(1=低,2=中,3=高)。
+   - context_tag:从 {写作,编码,沟通,学习,杂事,general} 中选一个最贴近的任务情境。
+   评分依据:priority/urgency 对应 Eisenhower 矩阵的"重要 × 紧急"两轴;
+   energy_required 对应 Loehr/Schwartz 能量管理维度;context_tag 用于降低
+   context switching cost(CHIEA 2008:打断后平均需 23 分钟重建上下文)。
+   这 4 项是调度启发式输入,不是精确科学——给出你最好的判断即可。
 
 只返回 JSON,不要返回任何其他内容。`
 

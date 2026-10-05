@@ -51,3 +51,30 @@ func TestSystemPrompt_MentionsIncrementalRule(t *testing.T) {
 		t.Fatalf("system prompt 未提示增量语义: %s", sp)
 	}
 }
+
+// TestSystemPrompt_MentionsScoring 锁定 task 7 契约:
+// SystemPrompt 必须明确告知 LLM 输出 4 维评分字段及其范围 / 枚举(spec §5.3)。
+// 缺一个就 fail —— 防止 LLM 输出形态漂移。
+func TestSystemPrompt_MentionsScoring(t *testing.T) {
+	sp := SystemPrompt("2026-10-05")
+	for _, kw := range []string{
+		"priority_score",
+		"urgency_score",
+		"energy_required",
+		"context_tag",
+	} {
+		if !strings.Contains(sp, kw) {
+			t.Errorf("system prompt 缺评分字段 %q", kw)
+		}
+	}
+	// 同时应包含分值范围 + context_tag 枚举(spec §5.3)。
+	if !strings.Contains(sp, "1-5") {
+		t.Errorf("system prompt 应指明 priority_score 范围 1-5")
+	}
+	if !strings.Contains(sp, "1-10") {
+		t.Errorf("system prompt 应指明 urgency_score 范围 1-10")
+	}
+	if !strings.Contains(sp, "1-3") {
+		t.Errorf("system prompt 应指明 energy_required 范围 1-3")
+	}
+}

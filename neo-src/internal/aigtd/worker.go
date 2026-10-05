@@ -217,6 +217,12 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		DueDate:          res.DueDate,
 		EstimatedMinutes: &estMin,
 		Status:           &status,
+		// 4 维评分(spec §5.3 / task 7):直接透传 res —— ValidateDecomposition
+		// 已做缺省 / 越界回落,worker 端不再重复校验(Review Focus #3)。
+		PriorityScore:  &res.PriorityScore,
+		UrgencyScore:   &res.UrgencyScore,
+		EnergyRequired: &res.EnergyRequired,
+		ContextTag:     &res.ContextTag,
 	}
 	// title 软化:append 模式下,用户改过的 title(user_edited_title=true)不被
 	// 覆盖;replace 模式强制覆盖(replace 是用户显式选的全量重建)。

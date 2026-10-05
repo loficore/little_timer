@@ -162,7 +162,7 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 
 	req := CompletionRequest{
 		SystemPrompt: SystemPrompt(w.settings.CurrentDate()),
-		UserPrompt:   BuildUserPrompt(task.RawText),
+		UserPrompt:   BuildUserPrompt(task.RawText, nil),
 		Model:        cfg.Model,
 		MaxTokens:    cfg.MaxTokens,
 	}

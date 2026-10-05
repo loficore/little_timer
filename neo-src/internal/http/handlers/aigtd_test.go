@@ -57,6 +57,48 @@ func doJSON(t *testing.T, r *gin.Engine, method, path string, body any) *httptes
 	return w
 }
 
+func TestSubtaskUpdate_StatusValidation(t *testing.T) {
+	// B1 fix regression: handler 必须拒绝 status 不在 {active,done,archived} 的请求,
+	// 返回 400 而不是 500(SQLite CHECK constraint 拒绝 'pending'/'skipped')。
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "t"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("create task: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var task TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+
+	w = doJSON(t, r, http.MethodPost, "/api/tasks/"+strconv.FormatInt(task.ID, 10)+"/subtasks",
+		map[string]any{"title": "s"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("create subtask: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var sub SubtaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &sub)
+	subPath := "/api/tasks/" + strconv.FormatInt(task.ID, 10) + "/subtasks/" + strconv.FormatInt(sub.ID, 10)
+
+	// 合法值:全部 200(用 PATCH 子任务 status)
+	for _, status := range []string{"active", "done", "archived"} {
+		w = doJSON(t, r, http.MethodPatch, subPath, map[string]any{"status": status})
+		if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+			t.Errorf("status=%q: code=%d body=%s", status, w.Code, w.Body.String())
+		}
+	}
+
+	// 非法值:必须 400,且不返回 500(否则 SQLite CHECK 触发)
+	for _, bad := range []string{"pending", "skipped", "inbox", "rejected", "", "xyz"} {
+		w = doJSON(t, r, http.MethodPatch, subPath, map[string]any{"status": bad})
+		if w.Code == http.StatusInternalServerError {
+			t.Errorf("status=%q should not 500 (CHECK failure path): body=%s", bad, w.Body.String())
+		}
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status=%q: want 400, got %d", bad, w.Code)
+		}
+	}
+}
+
 func TestTaskCRUD(t *testing.T) {
 	a := newTestApp(t)
 	r := setupAIGtdRouter(t, a)

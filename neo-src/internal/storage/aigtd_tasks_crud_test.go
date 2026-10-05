@@ -199,6 +199,13 @@ func TestReclaimStuckRunningJobs(t *testing.T) {
 	if got == nil || got.ID != j.ID {
 		t.Errorf("expected to reclaim id=%d, got %v", j.ID, got)
 	}
+
+	// B4 fix regression: reclaim 必须累加 attempts(与 RequeueJob 共享上限),
+	// 否则 worker panic/OOM 后会无限 reclaim 绕开 maxJobAttempts。
+	// ai_jobs.attempts DEFAULT 1(详见 migration.go),reclaim 后 +1 = 2。
+	if got.Attempts != 2 {
+		t.Errorf("reclaim 后 attempts = %d, 期望 2", got.Attempts)
+	}
 }
 
 func stringPtr(s string) *string { return &s }

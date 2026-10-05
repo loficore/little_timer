@@ -284,6 +284,7 @@ func (m *MigrationManager) CheckAndMigrate() error {
 	case currentVersion < CurrentSchemaVersion:
 		// 发现较旧的 DB。不重放逐版本迁移；每个缺失的表都由下面的
 		// 校验环节重建，已处于已知 schema 的 DB 会原样通过校验。
+		// 升级完成后 bump schema_version(见下方 needsVersionBump)。
 
 	default:
 		// currentVersion > CurrentSchemaVersion。
@@ -296,7 +297,17 @@ func (m *MigrationManager) CheckAndMigrate() error {
 	}
 	// 幂等的 v8 → v9 升级:重建 habits(set_id 可空)、补 settings llm 列、
 	// 创建 tasks/ai_jobs 索引。对全新 DB 这些检查全部 no-op。
-	return m.migrateV8ToV9()
+	if err := m.migrateV8ToV9(); err != nil {
+		return err
+	}
+
+	// 旧 DB 升级后必须把 schema_version 推进到 CurrentSchemaVersion,
+	// 否则它永远停留在旧版本号,下次启动重复走升级分支(当前幂等所以安全,
+	// 但未来按版本分派的迁移会误分类)。fresh DB 已在上面写过,不重复写。
+	if currentVersion != 0 && currentVersion < CurrentSchemaVersion {
+		return m.setSchemaVersion(CurrentSchemaVersion)
+	}
+	return nil
 }
 
 // getSchemaVersion 读取 `SELECT MAX(version) FROM schema_version`。

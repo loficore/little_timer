@@ -375,11 +375,14 @@ func (c *AITasksCrud) MarkJobFailed(jobID int64, errMsg string) error {
 }
 
 // ReclaimStuckRunningJobs 把超过 thresholdSeconds 秒还卡在 running 的 job
-// 退回 queued,返回受影响行数。
+// 退回 queued,attempts 自增(started_at 也清空)。attempts 累加与 RequeueJob
+// 共用同一上限(maxJobAttempts,见 worker.go),防止 worker panic/OOM 后
+// 一直 reclaim 绕开重试上限。
 func (c *AITasksCrud) ReclaimStuckRunningJobs(thresholdSeconds int) (int, error) {
 	res, err := c.db.Exec(
 		fmt.Sprintf(
-			`UPDATE ai_jobs SET status='queued', started_at=NULL
+			`UPDATE ai_jobs
+			 SET status='queued', started_at=NULL, attempts=attempts+1
 			 WHERE status='running' AND started_at < datetime('now', '-%d seconds');`,
 			thresholdSeconds,
 		),

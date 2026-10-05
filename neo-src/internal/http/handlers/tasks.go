@@ -318,6 +318,12 @@ func SubtaskUpdate(c *gin.Context) {
 	}
 	if v, ok := body["status"].(string); ok {
 		s := domain.SubtaskStatus(v)
+		if !domain.IsValidSubtaskStatus(s) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false, "error": "invalid status (allowed: active|done|archived)",
+			})
+			return
+		}
 		fields.Status = &s
 	}
 	if v, ok := body["estimated_minutes"].(float64); ok {

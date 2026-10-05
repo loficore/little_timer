@@ -24,13 +24,25 @@ const (
 )
 
 // SubtaskStatus 是子任务执行状态。
+// 字面值与 tasks.status CHECK 约束对齐(同列复用),子任务仅用 active/done/archived 三态
+// —— 待办/完成/跳过。CHECK 约束见 internal/storage/migration.go。
 type SubtaskStatus string
 
 const (
-	SubtaskStatusPending SubtaskStatus = "pending"
-	SubtaskStatusDone    SubtaskStatus = "done"
-	SubtaskStatusSkipped SubtaskStatus = "skipped"
+	SubtaskStatusActive   SubtaskStatus = "active"
+	SubtaskStatusDone     SubtaskStatus = "done"
+	SubtaskStatusArchived SubtaskStatus = "archived"
 )
+
+// IsValidSubtaskStatus 检查 s 是否是 SubtaskStatus 合法值。CHECK 约束只接受
+// inbox/active/done/archived/rejected 五个值;子任务语义限定到 active/done/archived。
+func IsValidSubtaskStatus(s SubtaskStatus) bool {
+	switch s {
+	case SubtaskStatusActive, SubtaskStatusDone, SubtaskStatusArchived:
+		return true
+	}
+	return false
+}
 
 // TaskRow 是一行 `tasks`。自引用:parent_id 为 NULL 表示顶层任务。
 type TaskRow struct {

@@ -88,13 +88,13 @@ export function useAITasks(opts: UseAITasksOptions = {}) {
             : {
                 ...t,
                 subtasks: (t.subtasks ?? []).map((s) =>
-                  s.id === subId ? { ...s, status: done ? "done" : "pending" } : s,
+                  s.id === subId ? { ...s, status: done ? "done" : "active" } : s,
                 ),
               },
         ),
       );
       try {
-        await getAPIClient().toggleSubtask(taskId, subId, done ? "done" : "pending");
+        await getAPIClient().toggleSubtask(taskId, subId, done ? "done" : "active");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg);
@@ -107,7 +107,7 @@ export function useAITasks(opts: UseAITasksOptions = {}) {
               : {
                   ...t,
                   subtasks: (t.subtasks ?? []).map((s) =>
-                    s.id === subId ? { ...s, status: done ? "pending" : "done" } : s,
+                    s.id === subId ? { ...s, status: done ? "active" : "done" } : s,
                   ),
                 },
           ),

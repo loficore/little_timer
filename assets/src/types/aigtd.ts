@@ -6,7 +6,7 @@ export interface SubtaskDTO {
   id: number;
   task_id: number;
   title: string;
-  status: "pending" | "done" | "skipped";
+  status: "active" | "done" | "archived";
   estimated_minutes: number;
   order_index: number;
 }

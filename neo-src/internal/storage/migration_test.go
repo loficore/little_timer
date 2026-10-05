@@ -155,6 +155,17 @@ func TestMigrateV8ToV9_HabitsSetIdNullable(t *testing.T) {
 	if name != "冥想" {
 		t.Fatalf("habit 数据丢失: 期望 冥想, 实际 %q", name)
 	}
+
+	// 7. B3 fix regression: v8 → v9 升级后 schema_version 必须被推进到 9,
+	// 否则 getSchemaVersion() 永远返回 8,重复走此 case 分支(幂等但审计信息错误)。
+	var maxVersion int
+	if err := m.DB().QueryRow(
+		`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
+		t.Fatalf("读 schema_version 失败: %v", err)
+	}
+	if maxVersion != CurrentSchemaVersion {
+		t.Errorf("升级后 schema_version MAX = %d, 期望 %d", maxVersion, CurrentSchemaVersion)
+	}
 }
 
 // hasColumn 通过 PRAGMA table_info 检查列是否存在。

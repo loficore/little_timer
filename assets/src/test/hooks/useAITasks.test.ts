@@ -86,7 +86,7 @@ describe("useAITasks", () => {
         source: "manual",
         created_at: "2026-10-04T00:00:00Z",
         updated_at: "2026-10-04T00:00:00Z",
-        subtasks: [{ id: 1, task_id: 7, title: "a", status: "pending", estimated_minutes: 20, order_index: 0 }],
+        subtasks: [{ id: 1, task_id: 7, title: "a", status: "active", estimated_minutes: 20, order_index: 0 }],
       },
     ]);
     const { result } = renderHook(() => useAITasks({ pollIntervalMs: 60000 }));

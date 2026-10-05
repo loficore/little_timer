@@ -577,7 +577,7 @@ export class APIClient {
     }
 
     /** 切换子任务完成状态。 */
-    async toggleSubtask(taskId: number, subId: number, status: "pending" | "done"): Promise<void> {
+    async toggleSubtask(taskId: number, subId: number, status: "active" | "done"): Promise<void> {
         await this.fetchJson<void>(`${this.baseUrl}/api/tasks/${taskId}/subtasks/${subId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },

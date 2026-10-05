@@ -8,9 +8,13 @@
 // context_tag 兜底:非枚举值(写作 / 编码 / 沟通 / 学习 / 杂事 / general)
 // → 写入 "general" 并通过 X-LLM-Warning 响应头提示前端 / LLM 客户端。
 //
-// 乐观锁:由 middleware.GetVersion(c) 提供期望版本(若 body.version
-// 缺/为 0 优先 body,否则 fallback 到 header)。UpdateTask 不带版本
-// 命中 0 行 → storage.ErrVersionConflict → 409 Conflict。
+// 乐观锁:优先 middleware.GetVersion(c)(来自 `If-Match` header,或
+// ConflictGuard 从 body 解析的 version);仅当它为 0 时回退 body.version。
+// UpdateTask 带该期望版本命中 0 行 → storage.ErrVersionConflict → 409 Conflict。
+//
+// 范围校验(Review Focus #3):priority_score ∈ [1,5],urgency_score ∈ [1,10],
+// energy_required ∈ [1,3];越界不再落到 SQLite CHECK 变 500,而是 handler
+// 直接返 400 scores_out_of_range。
 package handlers
 
 import (
@@ -27,6 +31,39 @@ import (
 // LLM 自由发挥的字符串,落到 general 以保证后续规则引擎判定可预测。
 var validContextTags = map[string]bool{
 	"写作": true, "编码": true, "沟通": true, "学习": true, "杂事": true, "general": true,
+}
+
+// scoreRange 描述一个整数评分的合法闭区间 [min,max]。
+type scoreRange struct {
+	field string
+	min   int
+	max   int
+}
+
+// 与 tasks 表 CHECK 约束(migration v11)保持一致;handler 先校验,
+// 避免越界值触发 SQLite constraint → 500。
+var (
+	priorityScoreRange  = scoreRange{"priority_score", 1, 5}
+	urgencyScoreRange   = scoreRange{"urgency_score", 1, 10}
+	energyRequiredRange = scoreRange{"energy_required", 1, 3}
+)
+
+// checkScoreRange 校验非 nil 的指针值是否落在 [min,max];越界时返回
+// 可直接 JSON 的错误载荷(供 handler 返 400)。
+func checkScoreRange(r scoreRange, v *int) (payload gin.H, bad bool) {
+	if v == nil {
+		return nil, false
+	}
+	if *v < r.min || *v > r.max {
+		return gin.H{
+			"error": "score out of range",
+			"code":  "scores_out_of_range",
+			"field": r.field,
+			"value": *v,
+			"range": [2]int{r.min, r.max},
+		}, true
+	}
+	return nil, false
 }
 
 // TaskScoresUpdate PATCH /api/tasks/:id/scores —— 部分更新 5 维评分。
@@ -49,9 +86,26 @@ func TaskScoresUpdate(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	if body.Version <= 0 {
-		if v := middleware.GetVersion(c); v > 0 {
-			body.Version = v
+	// I4 fix:header 优先(ConflictGuard 已把它存进 ctx);只有 header 为 0
+	// 时才回退到 body.version。这与 TaskUpdate / ScheduleApply 的契约一致。
+	version := middleware.GetVersion(c)
+	if version == 0 {
+		version = body.Version
+	}
+	// I5 fix:范围校验,越界直接 400,不让 SQLite CHECK 把它转成 500。
+	for _, r := range []scoreRange{priorityScoreRange, urgencyScoreRange, energyRequiredRange} {
+		var p *int
+		switch r.field {
+		case "priority_score":
+			p = body.PriorityScore
+		case "urgency_score":
+			p = body.UrgencyScore
+		case "energy_required":
+			p = body.EnergyRequired
+		}
+		if payload, bad := checkScoreRange(r, p); bad {
+			c.JSON(400, payload)
+			return
 		}
 	}
 	fields := storage.TaskUpdateFields{
@@ -69,7 +123,7 @@ func TaskScoresUpdate(c *gin.Context) {
 			fields.ContextTag = body.ContextTag
 		}
 	}
-	if err := a.SQLite.AITasks().UpdateTask(id, fields, body.Version); err != nil {
+	if err := a.SQLite.AITasks().UpdateTask(id, fields, version); err != nil {
 		if errors.Is(err, storage.ErrVersionConflict) {
 			c.JSON(409, gin.H{"error": "version conflict", "code": "version_conflict"})
 			return

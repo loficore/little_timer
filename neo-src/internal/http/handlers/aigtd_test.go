@@ -625,4 +625,41 @@ func TestSubtaskUpdate_409OnVersionMismatch(t *testing.T) {
 // TestTaskCreate_SingleWrite 验证 I7:POST /api/tasks 用单次 UpdateTask
 // 写 title+notes+status,version 只 bump 一次(==1),且 notes/status/ai_status
 // 正确落库(不再吞 notes 写的错误)。
-// (随 commit 2 落地)
+func TestTaskCreate_SingleWrite(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks",
+		map[string]any{"title": "写报告", "notes": "周报备注"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("create: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var created TaskDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Title != "写报告" || created.Notes != "周报备注" {
+		t.Fatalf("title/notes = %q/%q", created.Title, created.Notes)
+	}
+	if created.Status != "active" {
+		t.Errorf("status = %q, want active", created.Status)
+	}
+	if created.AIStatus != "done" {
+		t.Errorf("ai_status = %q, want done", created.AIStatus)
+	}
+	// version 只 bump 一次(单次 UpdateTask),不是旧实现的 2 次。
+	if created.Version != 1 {
+		t.Errorf("version = %d, want 1(单次写);旧实现会写 2 次", created.Version)
+	}
+
+	// 空 notes 也应单次写成功(notes 列 DEFAULT '',语义等价)。
+	w = doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "无备注"})
+	var created2 TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &created2)
+	if created2.Version != 1 {
+		t.Errorf("空 notes version = %d, want 1", created2.Version)
+	}
+	if created2.Notes != "" {
+		t.Errorf("空 notes 应为空, got %q", created2.Notes)
+	}
+}

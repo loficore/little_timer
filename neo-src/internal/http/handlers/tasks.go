@@ -176,23 +176,27 @@ func TaskCreate(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "create failed"})
 		return
 	}
-	// 手动创建时,把入参 title 写到 title 列;notes 也直接写入。
-	// TaskCreate 走的是刚 CreateTask 的 task(version=0);两次顺序写,第二次
-	// 用第一次写入后的新 version(GetTaskVersion)。乐观锁 plumbing 已在
-	// middleware 层校验过 mutation version,这里只关心 task 行的实际版本。
+	// I7 fix:创建是刚 CreateTask 的 version=0 行,title / notes / status
+	// 在**单次** UpdateTask 里一并写入,替代原先的
+	// title→(可选)notes→SetTaskStatus 三次顺序写(其中 notes 写还吞了错误)。
+	// notes 为空时写空串(列 DEFAULT '' 语义等价);status 直接置 active
+	// (手动创建无需 AI 处理)。所有错误都不再吞,失败即 500。
 	title := req.Title
-	if err := a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &title}, 0); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "set title failed"})
+	notes := req.Notes
+	active := domain.TaskStatusActive
+	if err := a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{
+		Title:  &title,
+		Notes:  &notes,
+		Status: &active,
+	}, 0); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "initialize task failed"})
 		return
 	}
-	if req.Notes != "" {
-		notes := req.Notes
-		ver, _ := a.SQLite.AITasks().GetTaskVersion(taskID)
-		_ = a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Notes: &notes}, ver)
+	// ai_status 不在 TaskUpdateFields 里,单独写(错误同样不吞)。
+	if err := a.SQLite.AITasks().SetAIStatus(taskID, domain.AIStatusDone, ""); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "set ai_status failed"})
+		return
 	}
-	// 直接进入 active 状态(不需 AI 处理)。
-	_ = a.SQLite.AITasks().SetTaskStatus(taskID, domain.TaskStatusActive)
-	_ = a.SQLite.AITasks().SetAIStatus(taskID, domain.AIStatusDone, "")
 	task, subs, _ := a.SQLite.AITasks().GetTask(taskID)
 	c.JSON(http.StatusOK, toTaskDTO(task, subs))
 }

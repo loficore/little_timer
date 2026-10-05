@@ -31,8 +31,29 @@ func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	r.Use(middleware.CORS(corsOrigin))
 	r.Use(middleware.Auth(a))
 
-	// 子项目 2 起：所有 mutation 必须带 version。统一挂在 /api 路由组，
-	// 注册时把该组传给各 register 函数，避免重复 Group 调用。
+	// ConflictGuard 全局作用域(Review focus,Task 3 / Task 8 复用):
+	//
+	//  - 下面这一行 `api.Use(middleware.RequireVersionForMutation())` 是
+	//    **所有** `/api/*` 路径(包括嵌套 group: /api/tasks、/api/aigtd、
+	//    /api/schedule、/api/settings、...)共用的 mutation 闸门。任何
+	//    新增的 POST/PATCH/PUT/DELETE 端点都必须挂在 api 之下才能享受
+	//    该中间件;否则请求会绕过乐观锁校验。
+	//
+	//  - 前端契约:浏览器 mutation 必须带 `If-Match: "<version>"` header
+	//    (Node 端 fetch 兼容 CORS preflight 同样使用),或 body 内显式
+	//    `version` 字段(浏览器端 fetch 走这个,避免 CORS preflight 因
+	//    Access-Control-Allow-Headers 未列 if-match 而被拒)。两者缺失
+	//    即 400。
+	//
+	//  - 没有 version 语义的资源(创建新记录、scheduler run、LLM 设置
+	//    等)用 `"0"` 作为合法的存在性 token——语义是"随便一个非空版本号
+	//    通过闸门",真正的乐观锁语义(0 行 → 409)由 storage 层
+	//    updateWithVersion / 新引入的 DeleteTask(version) /
+	//    UpdateSubtask(version) 集中判定。
+	//
+	//  - 当前实现是 process-wide 单点风险:把所有 mutation 锁在一个闸门
+	//    后,version 解析失败全 400。后续如需豁免单端点,通过白名单显式
+	//    标记而非反注册中间件。
 	api := r.Group("/api")
 	api.Use(middleware.RequireVersionForMutation())
 

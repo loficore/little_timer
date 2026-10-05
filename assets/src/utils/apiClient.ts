@@ -21,7 +21,12 @@ import type {
     WallpaperListResult,
     WallpaperDeleteResult,
 } from "../types/api";
-import type { TaskDTO, LLMSettingsDTO } from "../types/aigtd";
+import type {
+    TaskDTO,
+    LLMSettingsDTO,
+    SchedulerPlan,
+    ScheduleApplyPlacement,
+} from "../types/aigtd";
 
 /**
  * API 客户端，用于与后端 API 进行交互
@@ -750,5 +755,66 @@ export class APIClient {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(patch),
         });
+    }
+
+    // ===== Scheduler (Task 9) =====
+
+    /**
+     * runSchedulePreview —— POST /api/schedule/run (mode=preview)。
+     *
+     * 返回后端 `scheduler.Plan` 的原样 JSON(PascalCase 键)。不落库。
+     * 走 fetchJson → 继承 ConflictGuard 的 If-Match 注入(Task 8 retrofit)。
+     */
+    async runSchedulePreview(date: string): Promise<SchedulerPlan> {
+        return this.fetchJson<SchedulerPlan>(`${this.baseUrl}/api/schedule/run`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ date, mode: "preview" }),
+        });
+    }
+
+    /**
+     * runScheduleApply —— POST /api/schedule/run (mode=apply)。
+     *
+     * 服务端在事务内乐观锁写入 preview 出来的 placements(任一冲突 → 409 全滚)。
+     * 走 fetchJson → 继承 If-Match 注入。
+     */
+    async runScheduleApply(date: string): Promise<SchedulerPlan> {
+        return this.fetchJson<SchedulerPlan>(`${this.baseUrl}/api/schedule/run`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ date, mode: "apply" }),
+        });
+    }
+
+    /**
+     * applySchedulePlacements —— POST /api/schedule/apply。
+     *
+     * 客户端显式提交要落库的 placements(带各自 version)。事务性:任一
+     * version 冲突 → 后端 409 全事务回滚,这里抛 VersionConflictError 供上层
+     * 展示冲突并刷新。
+     *
+     * 该端点需要识别 409 语义,而 `fetchJson` 只抛普通 Error(拿不到 status),
+     * 故与 `patchTaskScores` 一样用 raw fetch;raw 路径需手动补 ConflictGuard
+     * 要求的 `If-Match`(scheduler 无 per-resource 版本语义,送 `"0"`)。
+     */
+    async applySchedulePlacements(
+        placements: ScheduleApplyPlacement[],
+    ): Promise<{ applied: number }> {
+        const res = await fetch(`${this.baseUrl}/api/schedule/apply`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "If-Match": '"0"',
+            },
+            body: JSON.stringify({ placements }),
+        });
+        if (res.status === 409) {
+            throw new VersionConflictError();
+        }
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        }
+        return res.json() as Promise<{ applied: number }>;
     }
 }

@@ -65,6 +65,7 @@ vi.mock('../utils/icons', async () => {
     PhotoIconComponent: MockIcon,
     ForwardIconComponent: MockIcon,
     SparklesIconComponent: MockIcon,
+    CalendarIcon: MockIcon,
   };
 });
 

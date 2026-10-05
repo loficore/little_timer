@@ -67,3 +67,51 @@ export interface TestConnectionResult {
   model_echo?: string;
   error?: string;
 }
+
+// ===== Scheduler（Task 9）=====
+
+/**
+ * SchedulerPlacement —— `POST /api/schedule/run` 返回的单个 placement。
+ *
+ * ⚠️ 关键决策（PascalCase vs camelCase）：
+ * `scheduler.Placement`（Go）**没有 json tag**，`encoding/json` 会按导出字段名
+ * 原样输出，即 `TaskID` / `ScheduledStart` / `ScheduledEnd` / `Reason`。
+ * 因此前端类型直接采用 **PascalCase** 与后端保持一致，避免在 apiClient 层
+ * 维护一层易漏字段的适配器。显示层需要的 camelCase 在组件边界内自行转换。
+ */
+export interface SchedulerPlacement {
+  TaskID: number;
+  ScheduledStart: number; // unix 秒
+  ScheduledEnd: number; // unix 秒
+  Reason: string;
+}
+
+/**
+ * SchedulerPlan —— `POST /api/schedule/run` 的响应。
+ *
+ * 同为 Go 默认 JSON 键（PascalCase）：`Date` / `Placements` /
+ * `Unscheduled` / `Warnings`。
+ */
+export interface SchedulerPlan {
+  Date: string; // YYYY-MM-DD
+  Placements: SchedulerPlacement[];
+  Unscheduled: number[]; // 排不下的 task id
+  Warnings: string[];
+}
+
+/** 简名别名（对齐 Task 9 brief 的命名）。 */
+export type Plan = SchedulerPlan;
+export type Placement = SchedulerPlacement;
+
+/**
+ * ScheduleApplyPlacement —— `POST /api/schedule/apply` 的请求体单条。
+ *
+ * 注意：与响应不同，请求体由 handler 的 `schedulePlacement` 结构体显式声明了
+ * snake_case json tag，因此这里必须是 snake_case。
+ */
+export interface ScheduleApplyPlacement {
+  task_id: number;
+  scheduled_start: number;
+  scheduled_end: number;
+  version: number;
+}

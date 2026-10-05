@@ -21,6 +21,7 @@ import {
   PhotoIcon,
   ForwardIcon,
   SparklesIcon,
+  CalendarDaysIcon,
 } from "@heroicons/react/24/outline";
 
 export const PlayIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
@@ -108,4 +109,8 @@ export const ForwardIconComponent: FunctionalComponent<{ className?: string }> =
 );
 export const SparklesIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
   <SparklesIcon className={className} />
+);
+
+export const CalendarIcon: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
+  <CalendarDaysIcon className={className} />
 );

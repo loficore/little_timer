@@ -210,3 +210,55 @@ func TestWorkerPool_TestOverride_FailWithMarksError(t *testing.T) {
 	// fail_with=500 触发 ErrRetryable + 重试 3 次后失败
 	waitTaskStatus(t, m.AITasks(), taskID, domain.AIStatusError, 5*time.Second)
 }
+
+// TestWorkerPool_ReparsePreservesUserEditedTitle 验证 reparse 路径不覆盖
+// 用户已编辑过的 task.title —— 仅在首次解析(task.Title 为空)时写入 LLM
+// 出的 title。这样 reparse 替换子任务不会"偷偷"重置用户重命名。
+func TestWorkerPool_ReparsePreservesUserEditedTitle(t *testing.T) {
+	m := newTestDB(t)
+	aigtd.SetTestOverride(
+		`{"title":"LLM 给的标题","is_complex":true,"estimated_minutes":30,"subtasks":[{"title":"a","estimated_minutes":15},{"title":"a2","estimated_minutes":15}]}`,
+		0,
+	)
+	defer aigtd.ClearTestOverride()
+
+	taskID, _ := m.AITasks().CreateTask("原始随手记", "manual")
+	_, _ = m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`)
+
+	s := &fakeSettings{date: "2026-10-04", provider: "openai_compat", model: "m", apiKey: ""}
+	wp := aigtd.NewWorkerPool(m.AITasks(), s, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wp.Start(ctx)
+	defer func() { wp.Stop(); wp.Wait() }()
+
+	// 等首次解析完成
+	task := waitTaskStatus(t, m.AITasks(), taskID, domain.AIStatusDone, 5*time.Second)
+	if task.Title != "LLM 给的标题" {
+		t.Fatalf("首次解析应写入 LLM title, got %q", task.Title)
+	}
+
+	// 用户编辑 title
+	edited := "用户改过的标题"
+	if err := m.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited}); err != nil {
+		t.Fatal(err)
+	}
+
+	// reparse:再入队一个 job,worker 用不同 LLM 响应(模拟用户改了 raw_text 后再点重新解析)
+	aigtd.SetTestOverride(
+		`{"title":"REPARSE 改写的标题","is_complex":true,"estimated_minutes":45,"subtasks":[{"title":"b","estimated_minutes":20},{"title":"b2","estimated_minutes":20}]}`,
+		0,
+	)
+	if _, err := m.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`); err != nil {
+		t.Fatal(err)
+	}
+	waitTaskStatus(t, m.AITasks(), taskID, domain.AIStatusDone, 5*time.Second)
+
+	after, _, err := m.AITasks().GetTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Title != "用户改过的标题" {
+		t.Errorf("reparse 覆盖了用户 title: got %q, 期望 用户改过的标题", after.Title)
+	}
+}

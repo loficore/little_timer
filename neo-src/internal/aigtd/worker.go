@@ -18,10 +18,6 @@ var ErrProviderUnconfigured = errors.New("aigtd: provider API key not configured
 // handler 写入、worker 读取都必须用同一个常量。
 const APIKeySecretName = "llm_api_key"
 
-// ErrJobAlreadyRunning 标记任务已有 ai_status=processing 的活跃 job
-//(reparse 时 handler 检查这个避免重复入队)。
-var ErrJobAlreadyRunning = errors.New("aigtd: job already running")
-
 // LLMConfig 是一次 provider 构造所需的全部参数。
 type LLMConfig struct {
 	Provider       string // "openai_compat" | "anthropic"
@@ -200,13 +196,18 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 	// 成功:把解析结果写回 task + 子任务。逐项 best-effort;出错就 fail 整个 job。
 	status := domain.TaskStatusActive
 	estMin := int64(res.EstimatedMinutes)
-	if err := w.aiTasks.UpdateTask(task.ID, storage.TaskUpdateFields{
-		Title:            &res.Title,
+	updateFields := storage.TaskUpdateFields{
 		Notes:            &res.Notes,
 		DueDate:          res.DueDate,
 		EstimatedMinutes: &estMin,
 		Status:           &status,
-	}); err != nil {
+	}
+	// 软化 reparse 对 title 的覆盖:仅在 task 尚无 title(首次解析)时写入
+	// LLM 出的 title。用户已编辑过的 title 不被覆盖。
+	if task.Title == "" {
+		updateFields.Title = &res.Title
+	}
+	if err := w.aiTasks.UpdateTask(task.ID, updateFields); err != nil {
 		w.fail(job, task.ID, "update task:"+err.Error())
 		return
 	}

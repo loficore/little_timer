@@ -5,6 +5,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 
 	"little-timer/internal/aigtd"
 	"little-timer/internal/domain"
+	"little-timer/internal/storage"
 )
 
 const maxRawTextLen = 2000
@@ -114,6 +116,10 @@ func AIGtdReparse(c *gin.Context) {
 	cfg := aiConfigFromApp(a)
 	jobID, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, rawText)
 	if err != nil {
+		if errors.Is(err, storage.ErrJobInFlight) {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "code": "aigtd.processing", "error": "task is being processed"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "enqueue failed"})
 		return
 	}

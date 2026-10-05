@@ -204,6 +204,9 @@ var indexes = []struct {
 	{"idx_tasks_ai_status", "CREATE INDEX IF NOT EXISTS idx_tasks_ai_status ON tasks(ai_status, created_at);"},
 	{"idx_tasks_scheduled", "CREATE INDEX IF NOT EXISTS idx_tasks_scheduled ON tasks(scheduled_start);"},
 	{"idx_ai_jobs_task_id", "CREATE INDEX IF NOT EXISTS idx_ai_jobs_task_id ON ai_jobs(task_id, created_at);"},
+	// 部分 UNIQUE 索引:同一 task 至多一个 queued/running job,堵住
+	// reparse 的 TOCTOU 并发(handler 转 409)。
+	{"idx_ai_jobs_in_flight", "CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_jobs_in_flight ON ai_jobs(task_id) WHERE status IN ('queued','running');"},
 }
 
 // backupConfigTableSQL 是 v7 的 backup_config 表（带 v8 凭据列）。

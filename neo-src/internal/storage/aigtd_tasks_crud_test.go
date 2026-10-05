@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -131,10 +132,6 @@ func TestClaimNextQueuedJob_FIFO(t *testing.T) {
 
 	taskID, _ := c.CreateTask("t", "manual")
 	id1, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":1}`)
-	time.Sleep(1100 * time.Millisecond) // 跨 1 秒,确保 created_at 不同
-	id2, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":2}`)
-	id3, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":3}`)
-
 	got1, err := c.ClaimNextQueuedJob()
 	if err != nil {
 		t.Fatal(err)
@@ -149,10 +146,26 @@ func TestClaimNextQueuedJob_FIFO(t *testing.T) {
 	if got1.Status != domain.AIJobStatusRunning {
 		t.Errorf("after claim status = %q, want running", got1.Status)
 	}
-
+	// 部分 UNIQUE 索引(同 task 至多一个 in-flight):先 MarkJobSuccess 释放约束
+	// 才能继续入队 id2/id3。
+	if err := c.MarkJobSuccess(id1, "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond) // 跨 1 秒,确保 created_at 不同
+	id2, err := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":2}`)
+	if err != nil {
+		t.Fatalf("enqueue id2: %v", err)
+	}
 	got2, _ := c.ClaimNextQueuedJob()
 	if got2 == nil || got2.ID != id2 {
-		t.Errorf("second claim should be id2(%d), got %v", id1, got2)
+		t.Errorf("second claim should be id2(%d), got %v", id2, got2)
+	}
+	if err := c.MarkJobSuccess(id2, "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	id3, err := c.EnqueueJob(taskID, "openai_compat", "m", `{"v":3}`)
+	if err != nil {
+		t.Fatalf("enqueue id3: %v", err)
 	}
 	got3, _ := c.ClaimNextQueuedJob()
 	if got3 == nil || got3.ID != id3 {
@@ -302,3 +315,35 @@ func TestHasInFlightJob(t *testing.T) {
 
 func stringPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool       { return &b }
+
+func TestEnqueueJob_RejectsSecondInFlightJob(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("t", "manual")
+	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`); err != nil {
+		t.Fatalf("first enqueue: %v", err)
+	}
+	// 第二条同 task 的 queued → 被部分 UNIQUE 索引拒
+	_, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	if !errors.Is(err, ErrJobInFlight) {
+		t.Fatalf("second enqueue err = %v, want ErrJobInFlight", err)
+	}
+
+	// 第一条变 success 后,同 task 又可以入队
+	job, _ := c.ClaimNextQueuedJob()
+	if err := c.MarkJobSuccess(job.ID, "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`); err != nil {
+		t.Fatalf("enqueue after terminal: %v", err)
+	}
+}

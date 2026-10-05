@@ -11,7 +11,9 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 
 	"little-timer/internal/domain"
 )
@@ -24,6 +26,10 @@ const (
 	ErrAITaskUpdateFailed AITaskError = "ai task update failed"
 	ErrAITaskQueryFailed  AITaskError = "ai task query failed"
 	ErrAITaskDeleteFailed AITaskError = "ai task delete failed"
+
+	// ErrJobInFlight 表示该 task 已有 queued/running 的 ai_job,新入队被
+	// ai_jobs 的部分 UNIQUE 索引拒绝(handler 转为 409 Conflict)。
+	ErrJobInFlight AITaskError = "ai job in flight"
 
 	// Error 让 AITaskError 实现 error 接口(与其他 sentinel 类型一致)。
 	// (HabitError 用的是同构写法,详见 habit.go。)
@@ -390,9 +396,27 @@ func (c *AITasksCrud) EnqueueJob(taskID int64, provider, model, reqPayload strin
 		taskID, provider, model, reqPayload,
 	)
 	if err != nil {
-		return 0, err
+		if isUniqueViolation(err) {
+			return 0, ErrJobInFlight
+		}
+		return 0, fmt.Errorf("%w: %v", ErrAITaskInsertFailed, err)
 	}
 	return res.LastInsertId()
+}
+
+// isUniqueViolation 判定 error 是否来自 SQLite UNIQUE 约束。
+// 部分 UNIQUE 索引(idx_ai_jobs_in_flight)冲突时,INSERT 会报
+// "UNIQUE constraint failed";不同驱动暴露的码不同,故做双重判定。
+func isUniqueViolation(err error) bool {
+	var coder interface{ Code() int }
+	if errors.As(err, &coder) {
+		code := coder.Code()
+		// 19 = SQLITE_CONSTRAINT;2067 = SQLITE_CONSTRAINT_UNIQUE(扩展码)
+		if code == 19 || code == 2067 || code&0xff == 19 {
+			return true
+		}
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 // ClaimNextQueuedJob 原子地取出最早一个 queued 任务,标记为 running。

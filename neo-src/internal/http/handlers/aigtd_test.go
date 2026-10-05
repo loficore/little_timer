@@ -99,6 +99,26 @@ func TestSubtaskUpdate_StatusValidation(t *testing.T) {
 	}
 }
 
+func TestAIGtdReparse_SecondInFlight409(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "t", "raw_text": "r"})
+	var task TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	path := "/api/aigtd/reparse/" + strconv.FormatInt(task.ID, 10)
+
+	w = doJSON(t, r, http.MethodPost, path, map[string]any{})
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("first reparse: code=%d body=%s", w.Code, w.Body.String())
+	}
+	// 第二个:HasInFlightJob 或部分 UNIQUE 索引 → 409
+	w = doJSON(t, r, http.MethodPost, path, map[string]any{})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("second reparse: code=%d body=%s, want 409", w.Code, w.Body.String())
+	}
+}
+
 func TestTaskCRUD(t *testing.T) {
 	a := newTestApp(t)
 	r := setupAIGtdRouter(t, a)

@@ -3,9 +3,10 @@
  *
  * - capture(text):提交一条随手记,返回 task_id(任务以 pending 占位卡 prepend)
  * - refresh:重拉顶层任务列表
- * - archive(id):删除任务
+ * - archive(id):删除任务(乐观移除 + 409 回滚)
  * - toggleSubtask(taskId, subId, done):乐观更新子任务完成状态
  * - reparse(id):触发 AI 重新解析
+ * - patchScores(taskId, fields, version):乐观锁重试写 5 维评分(409 拉新版本重发 1 次)
  *
  * 轮询:每 pollIntervalMs 检查所有 ai_status ∈ {pending, processing} 的任务,
  * 拉详情后合并进列表。
@@ -13,8 +14,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { getAPIClient } from "../utils/apiClientSingleton";
+import { VersionConflictError } from "../utils/apiClient";
 import { logError } from "../utils/logger";
 import type { TaskDTO } from "../types/aigtd";
+
+/** patchScores 的可选字段集合(版本号由第三个参数单独传)。 */
+export interface TaskScoreFields {
+  priority_score?: number;
+  urgency_score?: number;
+  energy_required?: number;
+  context_tag?: string;
+}
 
 export interface UseAITasksOptions {
   pollIntervalMs?: number;
@@ -58,6 +68,11 @@ export function useAITasks(opts: UseAITasksOptions = {}) {
       estimated_minutes: 0,
       order_index: 0,
       source: "manual",
+      version: 0,
+      priority_score: 3,
+      urgency_score: 5,
+      energy_required: 2,
+      context_tag: "general",
       subtasks: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -68,9 +83,14 @@ export function useAITasks(opts: UseAITasksOptions = {}) {
 
   const archive = useCallback(async (id: number) => {
     const prev = tasksRef.current;
+    const target = prev.find((t) => t.id === id);
+    if (!target || typeof target.version !== "number") {
+      // 没找到任务或无版本号,直接抛错而非静默发请求(避免中间件 400)
+      throw new Error(`archive: task ${id} missing or has no version`);
+    }
     setTasks((cur) => cur.filter((t) => t.id !== id));
     try {
-      await getAPIClient().deleteTask(id);
+      await getAPIClient().deleteTask(id, target.version);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -81,6 +101,10 @@ export function useAITasks(opts: UseAITasksOptions = {}) {
 
   const toggleSubtask = useCallback(
     async (taskId: number, subId: number, done: boolean) => {
+      const target = tasksRef.current.find((t) => t.id === taskId);
+      if (!target || typeof target.version !== "number") {
+        throw new Error(`toggleSubtask: task ${taskId} missing or has no version`);
+      }
       setTasks((cur) =>
         cur.map((t) =>
           t.id !== taskId
@@ -94,7 +118,7 @@ export function useAITasks(opts: UseAITasksOptions = {}) {
         ),
       );
       try {
-        await getAPIClient().toggleSubtask(taskId, subId, done ? "done" : "active");
+        await getAPIClient().toggleSubtask(taskId, subId, done ? "done" : "active", target.version);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg);
@@ -118,17 +142,62 @@ export function useAITasks(opts: UseAITasksOptions = {}) {
   );
 
   const reparse = useCallback(async (id: number) => {
+    const target = tasksRef.current.find((t) => t.id === id);
+    if (!target || typeof target.version !== "number") {
+      throw new Error(`reparse: task ${id} missing or has no version`);
+    }
     setTasks((cur) =>
       cur.map((t) => (t.id === id ? { ...t, ai_status: "pending", ai_error: undefined } : t)),
     );
     try {
-      await getAPIClient().reparseAIGtd(id);
+      await getAPIClient().reparseAIGtd(id, target.version);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       logError("useAITasks.reparse failed", new Error(msg));
     }
   }, []);
+
+  /**
+   * patchScores —— 5 维评分局部更新,带 409 有界重试。
+   *
+   * 流程:
+   *  1) 以入参 version 调 patchTaskScores;
+   *  2) 若返回 VersionConflictError: getTask(id) 拉最新版本,再调一次;
+   *  3) 第二次仍 409(或其它错误)→ 抛出,不无限循环。
+   * 成功时把 updated 合并进 tasks 列表。
+   */
+  const patchScores = useCallback(
+    async (
+      taskId: number,
+      fields: TaskScoreFields,
+      version: number,
+    ): Promise<TaskDTO> => {
+      const api = getAPIClient();
+      let currentVersion = version;
+      let updated: TaskDTO | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          updated = await api.patchTaskScores(taskId, { version: currentVersion, ...fields });
+          break;
+        } catch (err) {
+          if (err instanceof VersionConflictError && attempt === 0) {
+            const fresh = await api.getTask(taskId);
+            currentVersion = fresh.version;
+            continue;
+          }
+          throw err;
+        }
+      }
+      if (!updated) {
+        throw new Error("patchScores: no result after retry");
+      }
+      const next = updated as TaskDTO;
+      setTasks((cur) => cur.map((t) => (t.id === taskId ? next : t)));
+      return next;
+    },
+    [],
+  );
 
   // 首次加载
   useEffect(() => {
@@ -175,5 +244,5 @@ export function useAITasks(opts: UseAITasksOptions = {}) {
     return () => clearInterval(h);
   }, [pollIntervalMs]);
 
-  return { tasks, topLevel: tasks, loading, error, refresh, capture, archive, toggleSubtask, reparse };
+  return { tasks, topLevel: tasks, loading, error, refresh, capture, archive, toggleSubtask, reparse, patchScores };
 }

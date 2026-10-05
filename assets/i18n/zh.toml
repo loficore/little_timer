@@ -406,3 +406,13 @@ test_ok = "连接成功 ({latency}ms)"
 test_fail = "连接失败:{error}"
 not_unlocked = "请先在备份设置解锁主密码"
 saved = "已保存"
+
+[score]
+priority = "优先级"
+urgency = "紧急度"
+energy = "精力"
+context = "情境"
+save = "保存"
+save_success = "评分已保存"
+save_fail = "保存失败"
+conflict = "版本冲突，已刷新最新数据，请重新编辑后保存"

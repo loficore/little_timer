@@ -26,6 +26,38 @@ import type { TaskDTO, LLMSettingsDTO } from "../types/aigtd";
 /**
  * API 客户端，用于与后端 API 进行交互
  */
+
+/**
+ * VersionConflictError —— PATCH/PUT/DELETE 返回 409 时抛出的 sentinel。
+ *
+ * 后端 ConflictGuard 在 storage 层 updateWithVersion 影响 0 行时统一返回
+ * HTTP 409 + code=version_conflict,前端在拿到这个错误时应:
+ *   1) 用 getTask(id) 拉最新版本与字段;
+ *   2) 重新提交(有界重试 1 次),或把决策交回用户(展示冲突横幅)。
+ *
+ * 不复用普通 Error(仅 message 含 "409"),保证 instanceof 判定稳。
+ */
+export class VersionConflictError extends Error {
+    constructor(message: string = "version conflict") {
+        super(message);
+        this.name = "VersionConflictError";
+    }
+}
+
+/**
+ * TaskScoresPatch —— PATCH /api/tasks/:id/scores 的请求体形状。
+ *
+ * 指针语义:除 version 外所有字段可选;后端 omitempty,缺 = "不动"。
+ * version 必须带,后端 ConflictGuard 缺则 400。
+ */
+export interface TaskScoresPatch {
+    version: number;
+    priority_score?: number;
+    urgency_score?: number;
+    energy_required?: number;
+    context_tag?: string;
+}
+
 export class APIClient {
     public baseUrl: string;
     private authToken: string | null = null;
@@ -513,21 +545,38 @@ export class APIClient {
 
     // ===== AI GTD =====
 
-    /** 提交一条随手记 → 异步拆解。返回 task_id。 */
+    /** 提交一条随手记 → 异步拆解。返回 task_id。
+     *
+     *  v11:ConflictGuard 要求所有 mutation 带 version。capture 是创建场景,
+     *  任务尚未存在,带 `If-Match: "0"` + body version=0 满足中间件即可。
+     */
     async captureAIGtd(rawText: string, source?: string): Promise<{ task_id: number }> {
         return this.fetchJson<{ task_id: number }>(`${this.baseUrl}/api/aigtd/capture`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ raw_text: rawText, source: source ?? "manual" }),
+            headers: {
+                "Content-Type": "application/json",
+                "If-Match": '"0"',
+            },
+            body: JSON.stringify({ version: 0, raw_text: rawText, source: source ?? "manual" }),
         });
     }
 
-    /** 重新解析一个 task(可选覆盖原文)。 */
-    async reparseAIGtd(taskId: number, newRawText?: string): Promise<{ job_id: number }> {
+    /** 重新解析一个 task(可选覆盖原文)。
+     *
+     *  v11:ConflictGuard 要求 version;reparse 若带 newRawText 走 storage.UpdateTask
+     *  乐观锁校验,不带则 handler 忽略 version,但中间件仍要求。统一 required。
+     */
+    async reparseAIGtd(taskId: number, version: number, newRawText?: string): Promise<{ job_id: number }> {
         return this.fetchJson<{ job_id: number }>(`${this.baseUrl}/api/aigtd/reparse/${taskId}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(newRawText ? { raw_text: newRawText } : {}),
+            headers: {
+                "Content-Type": "application/json",
+                "If-Match": `"${version}"`,
+            },
+            body: JSON.stringify({
+                version,
+                ...(newRawText ? { raw_text: newRawText } : {}),
+            }),
         });
     }
 
@@ -553,36 +602,99 @@ export class APIClient {
         return this.fetchJson<TaskDTO>(`${this.baseUrl}/api/tasks/${id}`);
     }
 
-    /** 直接创建任务(不经过 AI)。 */
+    /** 直接创建任务(不经过 AI)。
+     *
+     *  v11:ConflictGuard 要求 mutation 带 version。create 任务尚未存在,
+     *  带 `If-Match: "0"` + body version=0 满足中间件。
+     */
     async createTask(title: string, notes?: string): Promise<TaskDTO> {
         return this.fetchJson<TaskDTO>(`${this.baseUrl}/api/tasks`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, notes }),
+            headers: {
+                "Content-Type": "application/json",
+                "If-Match": '"0"',
+            },
+            body: JSON.stringify({ version: 0, title, notes }),
         });
     }
 
-    /** 局部更新任务(指针语义)。 */
+    /** 局部更新任务(指针语义)。
+     *
+     *  v11:patch 必须包含 version(从 task.version 读取),既走 If-Match header
+     *  也回填到 body,handler 通过 middleware.GetVersion(c) 取值做乐观锁。
+     */
     async updateTask(id: number, patch: Partial<TaskDTO>): Promise<TaskDTO> {
+        const { version, ...rest } = patch;
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (typeof version === "number") {
+            headers["If-Match"] = `"${version}"`;
+        }
         return this.fetchJson<TaskDTO>(`${this.baseUrl}/api/tasks/${id}`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify(patch),
         });
     }
 
-    /** 删除任务。 */
-    async deleteTask(id: number): Promise<void> {
-        await this.fetchJson<void>(`${this.baseUrl}/api/tasks/${id}`, { method: "DELETE" });
+    /** 删除任务。
+     *
+     *  v11:ConflictGuard 要求 mutation 带 version;handler TaskDelete 当前未
+     *  使用 version 做业务校验,但中间件强制 0/缺版本 400。
+     */
+    async deleteTask(id: number, version: number): Promise<void> {
+        await this.fetchJson<void>(`${this.baseUrl}/api/tasks/${id}`, {
+            method: "DELETE",
+            headers: { "If-Match": `"${version}"` },
+        });
     }
 
-    /** 切换子任务完成状态。 */
-    async toggleSubtask(taskId: number, subId: number, status: "active" | "done"): Promise<void> {
+    /** 切换子任务完成状态。
+     *
+     *  v11:ConflictGuard 要求 mutation 带 version;handler SubtaskUpdate 当前
+     *  未使用 version 做业务校验,统一带上以满足中间件。
+     */
+    async toggleSubtask(
+        taskId: number,
+        subId: number,
+        status: "active" | "done",
+        version: number,
+    ): Promise<void> {
         await this.fetchJson<void>(`${this.baseUrl}/api/tasks/${taskId}/subtasks/${subId}`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status }),
+            headers: {
+                "Content-Type": "application/json",
+                "If-Match": `"${version}"`,
+            },
+            body: JSON.stringify({ version, status }),
         });
+    }
+
+    /** 局部更新 5 维评分(pointer 语义)。
+     *
+     *  v11:走 PATCH /api/tasks/:id/scores,ConflictGuard 强制 version。
+     *  优先 If-Match header(ETag 风格,handler 优先级 > body)。
+     *  body 仍然带 version,作为 fallback 满足中间件的 body-peek 探测。
+     *  409 由后端返回 `{"code":"version_conflict"}`,此处统一抛 VersionConflictError
+     *  供上层 (useAITasks.patchScores / ScoreEditPanel) 做有界重试或冲突横幅。
+     */
+    async patchTaskScores(id: number, body: TaskScoresPatch): Promise<TaskDTO> {
+        const { version, ...fields } = body;
+        const payload = { version, ...fields };
+        const res = await fetch(`${this.baseUrl}/api/tasks/${id}/scores`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                "If-Match": `"${version}"`,
+            },
+            body: JSON.stringify(payload),
+        });
+        if (res.status === 409) {
+            throw new VersionConflictError();
+        }
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        }
+        return res.json() as Promise<TaskDTO>;
     }
 
     /** 读 LLM 设置。 */

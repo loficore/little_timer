@@ -58,6 +58,11 @@ describe("useAITasks", () => {
         estimated_minutes: 0,
         order_index: 0,
         source: "manual",
+        version: 0,
+        priority_score: 3,
+        urgency_score: 5,
+        energy_required: 2,
+        context_tag: "general",
         created_at: "2026-10-04T00:00:00Z",
         updated_at: "2026-10-04T00:00:00Z",
         subtasks: [],
@@ -69,7 +74,7 @@ describe("useAITasks", () => {
     await act(async () => {
       await result.current.archive(7);
     });
-    expect(deleteTask).toHaveBeenCalledWith(7);
+    expect(deleteTask).toHaveBeenCalledWith(7, 0);
     expect(result.current.tasks.length).toBe(0);
   });
 
@@ -84,6 +89,11 @@ describe("useAITasks", () => {
         estimated_minutes: 0,
         order_index: 0,
         source: "manual",
+        version: 0,
+        priority_score: 3,
+        urgency_score: 5,
+        energy_required: 2,
+        context_tag: "general",
         created_at: "2026-10-04T00:00:00Z",
         updated_at: "2026-10-04T00:00:00Z",
         subtasks: [{ id: 1, task_id: 7, title: "a", status: "active", estimated_minutes: 20, order_index: 0 }],
@@ -95,7 +105,7 @@ describe("useAITasks", () => {
     await act(async () => {
       await result.current.toggleSubtask(7, 1, true);
     });
-    expect(toggleSubtask).toHaveBeenCalledWith(7, 1, "done");
+    expect(toggleSubtask).toHaveBeenCalledWith(7, 1, "done", 0);
     expect(result.current.tasks[0].subtasks?.[0].status).toBe("done");
   });
 });

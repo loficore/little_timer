@@ -127,10 +127,14 @@ export class TimerPage extends BasePage {
   /** 以秒为单位设置倒计时时长，便于旅程用例用短时长跑完整流程。 */
   async setCountdownSeconds(seconds: number) {
     const ok = await this.page.evaluate(async (secs) => {
+      // ConflictGuard (Task 3): timer/config 无 per-row version 语义,在 body 送 version=0。
+      // 不加 If-Match header 是为了避免跨源 fetch 触发 CORS 预检
+      // (Access-Control-Allow-Headers 不含 If-Match)。
       const r = await fetch("http://127.0.0.1:8080/api/timer/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          version: 0,
           countdown: { duration_seconds: secs, loop: false, loop_count: 0, loop_interval_seconds: 0 },
         }),
       });

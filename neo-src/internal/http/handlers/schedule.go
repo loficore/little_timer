@@ -86,6 +86,20 @@ func ScheduleRun(c *gin.Context) {
 	habits := loadHabitSlotsForDate(a, body.Date)
 	plan := scheduler.Schedule(tasks, habits, body.Date, scheduler.Options{})
 
+	// Wire-contract 归一化:scheduler 内部以 nil 表达「无元素」,encoding/json
+	// 会序列化成 `null`,前端 `plan.Warnings.length` 等访问会抛
+	// "Cannot read properties of null"(Task 10 e2e 暴露)。在 handler 出口把
+	// nil 替换为空切片,不动 scheduler 单元测试的内部约定。
+	if plan.Placements == nil {
+		plan.Placements = []scheduler.Placement{}
+	}
+	if plan.Unscheduled == nil {
+		plan.Unscheduled = []int64{}
+	}
+	if plan.Warnings == nil {
+		plan.Warnings = []string{}
+	}
+
 	if body.Mode == "apply" {
 		if err := applyPlanInTx(a, plan); err != nil {
 			if errors.Is(err, storage.ErrVersionConflict) {

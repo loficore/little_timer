@@ -11,7 +11,14 @@ export class TestUtils {
 
   async resetTimerState() {
     await this.page.evaluate(async () => {
-      const response = await fetch("http://127.0.0.1:8080/api/reset", { method: "POST" });
+      // ConflictGuard (Task 3): reset 无 per-row version 语义,通过 body 送 version=0。
+      // 注意:必须走 body 而不是 If-Match header,因为跨源 fetch 加自定义 header
+      // 会触发 CORS 预检,而后端 Access-Control-Allow-Headers 不含 If-Match。
+      const response = await fetch("http://127.0.0.1:8080/api/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: 0 }),
+      });
       return response.ok;
     });
     await this.page.waitForTimeout(300);

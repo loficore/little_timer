@@ -27,6 +27,13 @@ Little Timer 是一个基于 Go、Gin、SQLite 和 WebView 开发的跨平台定
 
 API Key 通过主密码加密落本地 SQLite，**不上传、不入日志**。LLM 配置与数据全部本地化。
 
+## Scheduler + 智能调度
+
+- 设置 → LLM 填 API Key 后，`/aigtd` 随手记的任务会自动获得 5 维评分（重要性 / 紧迫度 / 精力 / 语境 / 依赖）
+- `/schedule` 页面跑 Scheduler：规则引擎 + LLM 评分确定性摆位
+- 所有修改带 version 乐观锁，跨端编辑冲突 → 严格 409 + 提示重拉
+- 评分依据：David Allen GTD、Eisenhower 矩阵、Loehr/Schwartz 能量管理、context switching cost 研究
+
 ## 开源协议
 
 本项目采用 [Apache License 2.0](./LICENSE) 协议，请遵照协议使用。

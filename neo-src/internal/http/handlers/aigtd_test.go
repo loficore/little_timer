@@ -12,7 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/storage"
 )
 
 // setupAIGtdRouter 注册 Task 7 的全部新路由。
@@ -117,6 +119,44 @@ func TestAIGtdReparse_SecondInFlight409(t *testing.T) {
 	w = doJSON(t, r, http.MethodPost, path, map[string]any{})
 	if w.Code != http.StatusConflict {
 		t.Fatalf("second reparse: code=%d body=%s, want 409", w.Code, w.Body.String())
+	}
+}
+
+// TestAIGtdReparse_DBUniqueFallback409 确定性测 reviewer M4 修复路径:
+// 绕过 precheck(HasInFlightJob + AIStatus==processing 都注入返回 false),
+// 直接在 DB 种一个 queued job(同 task)→ 调 reparse → EnqueueJob 必被
+// idx_ai_jobs_in_flight 部分 UNIQUE 索引拒 → handler 必须把 ErrJobInFlight
+// 映射为 409(而非 500)。这条分支是 race 兜底,正常路径被 precheck 抢先时
+// 不会被命中,需要靠注入绕过才能可靠测试。
+func TestAIGtdReparse_DBUniqueFallback409(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "t", "raw_text": "r"})
+	var task TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	taskID := task.ID
+
+	// 注入:跳过 precheck,让 handler 走到 EnqueueJob
+	origInFlight, origProcessing := hasInFlightJobFn, taskIsProcessingFn
+	hasInFlightJobFn = func(c *storage.AITasksCrud, id int64) (bool, error) { return false, nil }
+	taskIsProcessingFn = func(t *domain.TaskRow) bool { return false }
+	t.Cleanup(func() {
+		hasInFlightJobFn = origInFlight
+		taskIsProcessingFn = origProcessing
+	})
+
+	// DB 中预先种一个 queued job(同 task_id),使 idx_ai_jobs_in_flight
+	// 在第二次 EnqueueJob 时必触发拒绝。
+	_, err := a.SQLite.AITasks().EnqueueJob(taskID, "openai_compat", "m", `pre-existing`, domain.AIJobModeAppend)
+	if err != nil {
+		t.Fatalf("seed queued job: %v", err)
+	}
+
+	// 现在调 reparse → precheck 已被注入返 false → 走到 EnqueueJob → UNIQUE 拒绝 → 409
+	w = doJSON(t, r, http.MethodPost, "/api/aigtd/reparse/"+strconv.FormatInt(taskID, 10), map[string]any{})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("DB UNIQUE 冲突应转 409, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 

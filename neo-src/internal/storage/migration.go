@@ -363,9 +363,10 @@ func (m *MigrationManager) setSchemaVersion(version int) error {
 }
 
 // reconcileStuckInFlightJobs 在创建 idx_ai_jobs_in_flight 部分 UNIQUE 索引
-// 前调用:若 DB 中已存在多个 queued/running ai_jobs(跨 task 即可触发 UNIQUE
-// 失败),直接 UPDATE 为 failed + finished_at,避免 UNIQUE 索引创建失败被吞掉
-// (reviewer M2)。幂等;若没有 stuck 行,影响 0 行。
+// 前调用:若同一 task 已存在多个 queued/running ai_jobs(索引是
+// UNIQUE(task_id) WHERE status IN ('queued','running'),故仅同 task 多行会
+// 触发冲突),直接 UPDATE 为 failed + finished_at,避免 UNIQUE 索引创建失败
+// 被吞掉(reviewer M2)。幂等;若没有 stuck 行,影响 0 行。
 func (m *MigrationManager) reconcileStuckInFlightJobs() error {
 	res, err := m.db.Exec(
 		`UPDATE ai_jobs
@@ -420,8 +421,9 @@ func (m *MigrationManager) createTables() error {
 }
 
 // createIndexes 创建 indexes 中的全部索引。idx_ai_jobs_in_flight(部分
-// UNIQUE)失败会先 reconcile 陈旧的 queued/running 行后重试,仍失败则传播
-// 错误(reviewer M2:这条索引是 TOCTOU 兜底,静默失败会让整个防御失效)。
+// UNIQUE:UNIQUE(task_id) WHERE status IN ('queued','running'))失败会先
+// reconcile 同一 task 的陈旧 queued/running 行后重试,仍失败则传播错误
+// (reviewer M2:这条索引是 TOCTOU 兜底,静默失败会让整个防御失效)。
 // 其余索引为尽力而为,失败不致命。
 func (m *MigrationManager) createIndexes() error {
 	for _, idx := range indexes {

@@ -48,7 +48,7 @@ func BuildUserPrompt(rawText string, existing []SubtaskHint, mode domain.AIJobMo
 严格按照系统约束的 JSON Schema 输出,不要附加任何解释。`
 	if len(existing) == 0 || mode == domain.AIJobModeReplace {
 		if mode == domain.AIJobModeReplace {
-			base += "\n\n这是一个完整重新分解(replace)请求:请根据随手记从头输出整个子任务集;系统会保留 status='done' 的子任务,其余将被替换。务必给出完整的 2-4 个子任务。"
+			base += "\n\n这是一个完整重新分解(replace)请求:请根据随手记从头输出整个子任务集;系统会保留 status='done' 的子任务,其余将被替换。若该任务确实是复杂任务,请给出完整的 2-4 个子任务;若可一次完成则按系统规则返回 is_complex=false。"
 		}
 		return base
 	}

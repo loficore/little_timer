@@ -18,6 +18,14 @@ import (
 
 const maxRawTextLen = 2000
 
+// hasInFlightJobFn / taskIsProcessingFn 是 reparse precheck 的可注入点。
+// 生产默认实现直连 storage;测试替换后可绕过 precheck,确定性触达 DB 层
+// 部分 UNIQUE 索引的 ErrJobInFlight→409 分支(reviewer M4)。
+var (
+	hasInFlightJobFn   = func(c *storage.AITasksCrud, taskID int64) (bool, error) { return c.HasInFlightJob(taskID) }
+	taskIsProcessingFn = func(t *domain.TaskRow) bool { return t.AIStatus == domain.AIStatusProcessing }
+)
+
 // AIGtdCapture POST /api/aigtd/capture
 //
 // body { raw_text, source? } → 202 { task_id }
@@ -80,12 +88,14 @@ func AIGtdReparse(c *gin.Context) {
 		return
 	}
 	// 已有 queued/running job 时拒绝重复入队(可能来自快速双击或重试风暴)。
-	inFlight, err := a.SQLite.AITasks().HasInFlightJob(taskID)
+	// 走可注入的 precheckFn:生产等价于直接调 storage;测试可绕过以确定性地
+	// 触达 DB 层 idx_ai_jobs_in_flight 的 ErrJobInFlight→409 分支(reviewer M4)。
+	inFlight, err := hasInFlightJobFn(a.SQLite.AITasks(), taskID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "job lookup failed"})
 		return
 	}
-	if inFlight || task.AIStatus == domain.AIStatusProcessing {
+	if inFlight || taskIsProcessingFn(task) {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "code": "aigtd.processing", "error": "task is being processed"})
 		return
 	}

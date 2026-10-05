@@ -160,9 +160,16 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		}
 	}
 
+		// 取已有子任务作为 prompt 上下文(append 模式下让 LLM 知道已有内容)。
+	_, existingSubs, _ := w.aiTasks.GetTask(task.ID)
+	hints := make([]SubtaskHint, 0, len(existingSubs))
+	for _, x := range existingSubs {
+		hints = append(hints, SubtaskHint{Title: x.Title, Status: string(x.Status)})
+	}
+
 	req := CompletionRequest{
 		SystemPrompt: SystemPrompt(w.settings.CurrentDate()),
-		UserPrompt:   BuildUserPrompt(task.RawText, nil),
+		UserPrompt:   BuildUserPrompt(task.RawText, hints),
 		Model:        cfg.Model,
 		MaxTokens:    cfg.MaxTokens,
 	}
@@ -193,6 +200,12 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 	}
 	res := outcome.Result
 
+	// 决定合并模式:append(默认,只追加)/ replace(显式,重建非 done)。
+	mode := job.Mode
+	if mode == "" {
+		mode = domain.AIJobModeAppend
+	}
+
 	// 成功:把解析结果写回 task + 子任务。逐项 best-effort;出错就 fail 整个 job。
 	status := domain.TaskStatusActive
 	estMin := int64(res.EstimatedMinutes)
@@ -202,11 +215,14 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		EstimatedMinutes: &estMin,
 		Status:           &status,
 	}
-	// 软化 reparse 对 title 的覆盖:仅在 task 尚无 title(首次解析)时写入
-	// LLM 出的 title。用户已编辑过的 title 不被覆盖。
-	if task.Title == "" {
+	// title 软化:append 模式下,用户改过的 title(user_edited_title=true)不被
+	// 覆盖;replace 模式强制覆盖(replace 是用户显式选的全量重建)。
+	// reparse 完成后 UserEditedTitle 一律 reset=false,用户需再次编辑才会重保护。
+	clearFlag := false
+	if mode == domain.AIJobModeReplace || !task.UserEditedTitle {
 		updateFields.Title = &res.Title
 	}
+	updateFields.UserEditedTitle = &clearFlag
 	if err := w.aiTasks.UpdateTask(task.ID, updateFields); err != nil {
 		w.fail(job, task.ID, "update task:"+err.Error())
 		return
@@ -219,9 +235,16 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 			DueDate:          st.DueDate,
 		})
 	}
-	if err := w.aiTasks.ReplaceSubtasksStrict(task.ID, subs); err != nil {
-		w.fail(job, task.ID, "replace subtasks:"+err.Error())
-		return
+	if mode == domain.AIJobModeReplace {
+		if err := w.aiTasks.ReplaceSubtasksKeepDone(task.ID, subs); err != nil {
+			w.fail(job, task.ID, "replace subtasks:"+err.Error())
+			return
+		}
+	} else {
+		if err := w.aiTasks.AppendSubtasks(task.ID, subs); err != nil {
+			w.fail(job, task.ID, "append subtasks:"+err.Error())
+			return
+		}
 	}
 	if err := w.aiTasks.SetAIStatus(task.ID, domain.AIStatusDone, ""); err != nil {
 		log.Warn("worker.mark done failed", "task_id", task.ID, "error", err.Error())

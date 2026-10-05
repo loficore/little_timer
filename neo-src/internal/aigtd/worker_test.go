@@ -65,6 +65,137 @@ func waitTaskStatus(t *testing.T, c *storage.AITasksCrud, id int64, want domain.
 	return nil
 }
 
+func waitJobSuccess(t *testing.T, c *storage.AITasksCrud, taskID, jobID int64, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		j, err := c.LatestJobForTask(taskID)
+		if err == nil && j != nil && j.ID == jobID && j.Status == domain.AIJobStatusSuccess {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for job %d success", jobID)
+}
+
+func TestWorkerPool_AppendKeepsDoneAndUserTitle(t *testing.T) {
+	m := newTestDB(t)
+	c := m.AITasks()
+	taskID, _ := c.CreateTask("原始", "manual")
+	keep, _ := c.CreateSubtask(taskID, "已完成A", 10, nil, 0)
+	done := domain.SubtaskStatusDone
+	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}); err != nil {
+		t.Fatal(err)
+	}
+	// 用户改标题
+	edited := "用户标题"
+	editedFlag := true
+	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &editedFlag}); err != nil {
+		t.Fatal(err)
+	}
+
+	aigtd.SetTestOverride(`{"title":"LLM新标题","is_complex":true,"estimated_minutes":30,"subtasks":[{"title":"新1","estimated_minutes":15},{"title":"新2","estimated_minutes":15}]}`, 0)
+	defer aigtd.ClearTestOverride()
+
+	jobID, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &fakeSettings{date: "2026-10-05", provider: "openai_compat", model: "m"}
+	wp := aigtd.NewWorkerPool(c, s, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wp.Start(ctx)
+	defer func() { wp.Stop(); wp.Wait() }()
+
+	waitJobSuccess(t, c, taskID, jobID, 5*time.Second)
+
+	task, subs, err := c.GetTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Title != "用户标题" {
+		t.Errorf("append 覆盖了用户 title: got %q", task.Title)
+	}
+	var titles []string
+	for _, x := range subs {
+		titles = append(titles, x.Title)
+	}
+	if !containsStr(titles, "已完成A") {
+		t.Errorf("append 删了 done 子任务: %v", titles)
+	}
+	if !containsStr(titles, "新1") || !containsStr(titles, "新2") {
+		t.Errorf("未追加新子任务: %v", titles)
+	}
+}
+
+func TestWorkerPool_ReplaceKeepsDoneAndOverwritesTitle(t *testing.T) {
+	m := newTestDB(t)
+	c := m.AITasks()
+	taskID, _ := c.CreateTask("原始", "manual")
+	keep, _ := c.CreateSubtask(taskID, "已完成A", 10, nil, 0)
+	drop, _ := c.CreateSubtask(taskID, "未完成B", 20, nil, 1)
+	done := domain.SubtaskStatusDone
+	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}); err != nil {
+		t.Fatal(err)
+	}
+	edited := "用户标题"
+	flag := true
+	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}); err != nil {
+		t.Fatal(err)
+	}
+	_ = drop
+
+	aigtd.SetTestOverride(`{"title":"LLM新标题","is_complex":true,"estimated_minutes":30,"subtasks":[{"title":"新1","estimated_minutes":15},{"title":"新2","estimated_minutes":15}]}`, 0)
+	defer aigtd.ClearTestOverride()
+
+	jobID, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(`UPDATE ai_jobs SET mode='replace' WHERE id=?`, jobID); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &fakeSettings{date: "2026-10-05", provider: "openai_compat", model: "m"}
+	wp := aigtd.NewWorkerPool(c, s, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wp.Start(ctx)
+	defer func() { wp.Stop(); wp.Wait() }()
+	waitJobSuccess(t, c, taskID, jobID, 5*time.Second)
+
+	task, subs, err := c.GetTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Title != "LLM新标题" {
+		t.Errorf("replace 应覆盖 title: got %q", task.Title)
+	}
+	var titles []string
+	for _, x := range subs {
+		titles = append(titles, x.Title)
+	}
+	if !containsStr(titles, "已完成A") {
+		t.Errorf("replace 删了 done 子任务: %v", titles)
+	}
+	if containsStr(titles, "未完成B") {
+		t.Errorf("replace 未删除非 done 子任务: %v", titles)
+	}
+	if !containsStr(titles, "新1") {
+		t.Errorf("replace 未插入新子任务: %v", titles)
+	}
+}
+
+func containsStr(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestWorkerPool_ProcessesQueuedJob(t *testing.T) {
 	m := newTestDB(t)
 	taskID, _ := m.AITasks().CreateTask("准备下周汇报 PPT", "manual")
@@ -238,9 +369,10 @@ func TestWorkerPool_ReparsePreservesUserEditedTitle(t *testing.T) {
 		t.Fatalf("首次解析应写入 LLM title, got %q", task.Title)
 	}
 
-	// 用户编辑 title
+	// 用户编辑 title(handler 实际行为:同时翻 user_edited_title=true)
 	edited := "用户改过的标题"
-	if err := m.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited}); err != nil {
+	flag := true
+	if err := m.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,12 +401,32 @@ func TestWorkerPool_ReparsePreservesUserEditedTitle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 先证明 reparse 确实跑了(子任务被替换成新一组)
-	if len(subs) != 2 || subs[0].Title != "b" || subs[1].Title != "b2" {
-		t.Fatalf("reparse 未生效,subtasks = %+v", subs)
+	// append 模式:旧子任务 a/a2 应保留 + 新 b/b2 追加(共 4 条)
+	var titles []string
+	for _, s := range subs {
+		titles = append(titles, s.Title)
 	}
-	// 再证明用户 title 未被覆盖
+	want := []string{"a", "a2", "b", "b2"}
+	if !equalTitles(titles, want) {
+		t.Fatalf("append 应追加新子任务,实际 subtasks = %v, want %v", titles, want)
+	}
+	// 验证用户 title 未被覆盖 + user_edited_title 已重置
 	if after.Title != "用户改过的标题" {
 		t.Errorf("reparse 覆盖了用户 title: got %q, 期望 用户改过的标题", after.Title)
 	}
+	if after.UserEditedTitle {
+		t.Error("reparse 后 user_edited_title 应被重置为 false")
+	}
+}
+
+func equalTitles(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

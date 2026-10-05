@@ -146,9 +146,12 @@ const logToBackend = (category: LogCategory, message: string, level: 'info' | 'e
   const runtime = getFrontendRuntime();
 
   // 优先使用 HTTP 日志接口，便于统一落盘。
+  // `/api/log` 挂在 `api` 路由组上，受 `RequireVersionForMutation()` 保护，
+  // 任何 mutation 必须带 `If-Match: "<version>"`。日志条目本身没有
+  // 版本语义，固定送 `"0"` 即可通过 400 防呆。
   fetch('/api/log', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'If-Match': '"0"' },
     body: JSON.stringify({ category, level, message, runtime }),
   }).catch((error) => {
     void error;

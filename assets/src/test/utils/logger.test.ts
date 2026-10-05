@@ -39,7 +39,7 @@ describe("logger utils", () => {
 
       expect(mockFetch).toHaveBeenCalledWith("/api/log", expect.objectContaining({
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "If-Match": '"0"' },
         body: expect.stringContaining("test message"),
       }));
     });
@@ -81,10 +81,22 @@ describe("logger utils", () => {
         "/api/log",
         expect.objectContaining({
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "If-Match": '"0"' },
           body: expect.stringContaining("desktop test message"),
         })
       );
+    });
+
+    // Regression /api/log 挂在 api 路由组,RequireVersionForMutation
+    // 中间件强制 POST 带 `If-Match: "<version>"`。日志条目本身无版本
+    // 语义,固定 `"0"`。缺 header 会被 ConflictGuard 400 拒收。
+    it("POST /api/log 必须携带 If-Match: '\"0\"' 否则被 ConflictGuard 400", () => {
+      logError("regression: header 必须带 If-Match");
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(init.method).toBe("POST");
+      expect((init.headers as Record<string, string>)["If-Match"]).toBe('"0"');
     });
   });
 

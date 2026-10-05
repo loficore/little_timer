@@ -525,7 +525,7 @@ var v9SettingsColumns = []struct {
 }
 
 // migrateV8ToV9 把 v8 数据库带到 v9 状态。所有操作都是幂等的，fresh DB
-//(已经按 v9 schema 建表) 上调用也是 no-op。
+// (已经按 v9 schema 建表) 上调用也是 no-op。
 func (m *MigrationManager) migrateV8ToV9() error {
 	// 1. habits.set_id 由 NOT NULL 变为可空。SQLite 无法 ALTER COLUMN，
 	//    唯一办法是建新表 → 拷数据 → 改名。先检查是否需要。

@@ -418,4 +418,3 @@ func TestLLMSettings_RejectsBadProvider(t *testing.T) {
 		t.Fatalf("bad provider: code=%d, want 400", w.Code)
 	}
 }
-

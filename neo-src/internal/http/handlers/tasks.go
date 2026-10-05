@@ -17,26 +17,26 @@ import (
 
 // TaskDTO 是出参形状,与前端 bindings 对齐。
 type TaskDTO struct {
-	ID               int64             `json:"id"`
-	ParentID         *int64            `json:"parent_id,omitempty"`
-	RawText          string            `json:"raw_text,omitempty"`
-	Title            string            `json:"title"`
-	Notes            string            `json:"notes,omitempty"`
-	Status           string            `json:"status"`
-	DueDate          *string           `json:"due_date,omitempty"`
-	ScheduledStart   *int64            `json:"scheduled_start,omitempty"`
-	ScheduledEnd     *int64            `json:"scheduled_end,omitempty"`
-	Pinned           bool              `json:"pinned"`
-	EstimatedMinutes int64             `json:"estimated_minutes"`
-	OrderIndex       int64             `json:"order_index"`
-	Source           string            `json:"source"`
-	AIStatus         string            `json:"ai_status"`
-	AIError          string            `json:"ai_error,omitempty"`
-	UserEditedTitle  bool              `json:"user_edited_title"`
-	Subtasks         []SubtaskDTO      `json:"subtasks,omitempty"`
-	CreatedAt        string            `json:"created_at"`
-	UpdatedAt        string            `json:"updated_at"`
-	ParsedAt         *string           `json:"parsed_at,omitempty"`
+	ID               int64        `json:"id"`
+	ParentID         *int64       `json:"parent_id,omitempty"`
+	RawText          string       `json:"raw_text,omitempty"`
+	Title            string       `json:"title"`
+	Notes            string       `json:"notes,omitempty"`
+	Status           string       `json:"status"`
+	DueDate          *string      `json:"due_date,omitempty"`
+	ScheduledStart   *int64       `json:"scheduled_start,omitempty"`
+	ScheduledEnd     *int64       `json:"scheduled_end,omitempty"`
+	Pinned           bool         `json:"pinned"`
+	EstimatedMinutes int64        `json:"estimated_minutes"`
+	OrderIndex       int64        `json:"order_index"`
+	Source           string       `json:"source"`
+	AIStatus         string       `json:"ai_status"`
+	AIError          string       `json:"ai_error,omitempty"`
+	UserEditedTitle  bool         `json:"user_edited_title"`
+	Subtasks         []SubtaskDTO `json:"subtasks,omitempty"`
+	CreatedAt        string       `json:"created_at"`
+	UpdatedAt        string       `json:"updated_at"`
+	ParsedAt         *string      `json:"parsed_at,omitempty"`
 }
 
 // SubtaskDTO 是子任务的出参形状。
@@ -174,7 +174,7 @@ func TaskCreate(c *gin.Context) {
 // TaskUpdate PATCH /api/tasks/:id —— 指针语义更新
 //
 // 用 json.RawMessage 探测键是否存在以及值是否为 JSON null,以明确区分
-//"缺字段(不动) / 显式 null(置 NULL) / 有值(更新)" 三种语义。
+// "缺字段(不动) / 显式 null(置 NULL) / 有值(更新)" 三种语义。
 func TaskUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	id, err := parseInt64Param(c, "id")

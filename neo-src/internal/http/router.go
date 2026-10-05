@@ -2,9 +2,12 @@
 //
 // 所有 endpoint 统一挂在 `/api/<area>` 下。
 //
-// 中间件顺序: CORS（最外层）→ recovery（Gin 默认）→ auth。
+// 中间件顺序: CORS（最外层）→ recovery（Gin 默认）→ auth → ConflictGuard。
 // auth 中间件设置每请求 "app" 键，
 // 处理器可通过 `c.MustGet("app")` 获取 App 束。
+// ConflictGuard 强制所有 mutation 请求携带 `If-Match` header 或 body
+// `version` 字段；读请求（GET/HEAD/OPTIONS）放行。具体乐观锁校验在
+// storage 层 `updateWithVersion`（Task 4）。
 package http
 
 import (
@@ -28,16 +31,21 @@ func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	r.Use(middleware.CORS(corsOrigin))
 	r.Use(middleware.Auth(a))
 
+	// 子项目 2 起：所有 mutation 必须带 version。统一挂在 /api 路由组，
+	// 注册时把该组传给各 register 函数，避免重复 Group 调用。
+	api := r.Group("/api")
+	api.Use(middleware.RequireVersionForMutation())
+
 	registerRoot(r)
-	registerTimer(r)
-	registerHabits(r)
-	registerSettings(r)
-	registerLLMSettings(r)
-	registerTasks(r)
-	registerAIGtd(r)
-	registerBackup(r)
-	registerWallpapers(r)
-	registerEvents(r)
+	registerTimer(api)
+	registerHabits(api)
+	registerSettings(api)
+	registerLLMSettings(api)
+	registerTasks(api)
+	registerAIGtd(api)
+	registerBackup(api)
+	registerWallpapers(api)
+	registerEvents(api)
 
 	return r
 }
@@ -53,8 +61,7 @@ func registerRoot(r *gin.Engine) {
 
 // 计时器路由。
 
-func registerTimer(r *gin.Engine) {
-	g := r.Group("/api")
+func registerTimer(g *gin.RouterGroup) {
 	g.GET("/state", handlers.TimerState)
 	g.GET("/timer/state", handlers.TimerState)
 	g.GET("/timer/progress", handlers.TimerProgress)
@@ -71,8 +78,7 @@ func registerTimer(r *gin.Engine) {
 
 // 习惯路由。
 
-func registerHabits(r *gin.Engine) {
-	g := r.Group("/api")
+func registerHabits(g *gin.RouterGroup) {
 	g.GET("/habit-sets", handlers.HabitSetList)
 	g.POST("/habit-sets", handlers.HabitSetCreate)
 	g.PUT("/habit-sets/:id", handlers.HabitSetUpdate)
@@ -97,52 +103,50 @@ func registerHabits(r *gin.Engine) {
 
 // 设置路由。
 
-func registerSettings(r *gin.Engine) {
-	g := r.Group("/api")
+func registerSettings(g *gin.RouterGroup) {
 	g.GET("/settings", handlers.SettingsGet)
 	g.POST("/settings", handlers.SettingsUpdate)
 }
 
 // LLM 设置路由。
 
-func registerLLMSettings(r *gin.Engine) {
-	g := r.Group("/api/settings/llm")
-	g.GET("", handlers.LLMSettingsGet)
-	g.PUT("", handlers.LLMSettingsUpdate)
+func registerLLMSettings(g *gin.RouterGroup) {
+	sg := g.Group("/settings/llm")
+	sg.GET("", handlers.LLMSettingsGet)
+	sg.PUT("", handlers.LLMSettingsUpdate)
 }
 
 // 任务路由。
 
-func registerTasks(r *gin.Engine) {
-	g := r.Group("/api/tasks")
-	g.GET("", handlers.TaskList)
-	g.POST("", handlers.TaskCreate)
-	g.GET("/:id", handlers.TaskGet)
-	g.PATCH("/:id", handlers.TaskUpdate)
-	g.DELETE("/:id", handlers.TaskDelete)
-	g.POST("/:id/subtasks", handlers.SubtaskCreate)
-	g.PATCH("/:id/subtasks/:sub_id", handlers.SubtaskUpdate)
-	g.DELETE("/:id/subtasks/:sub_id", handlers.SubtaskDelete)
+func registerTasks(g *gin.RouterGroup) {
+	tg := g.Group("/tasks")
+	tg.GET("", handlers.TaskList)
+	tg.POST("", handlers.TaskCreate)
+	tg.GET("/:id", handlers.TaskGet)
+	tg.PATCH("/:id", handlers.TaskUpdate)
+	tg.DELETE("/:id", handlers.TaskDelete)
+	tg.POST("/:id/subtasks", handlers.SubtaskCreate)
+	tg.PATCH("/:id/subtasks/:sub_id", handlers.SubtaskUpdate)
+	tg.DELETE("/:id/subtasks/:sub_id", handlers.SubtaskDelete)
 }
 
 // AI GTD 路由。
 
-func registerAIGtd(r *gin.Engine) {
-	g := r.Group("/api/aigtd")
-	g.POST("/capture", handlers.AIGtdCapture)
-	g.POST("/reparse/:task_id", handlers.AIGtdReparse)
-	g.GET("/jobs", handlers.AIGtdJobs)
+func registerAIGtd(g *gin.RouterGroup) {
+	ag := g.Group("/aigtd")
+	ag.POST("/capture", handlers.AIGtdCapture)
+	ag.POST("/reparse/:task_id", handlers.AIGtdReparse)
+	ag.GET("/jobs", handlers.AIGtdJobs)
 	// 测试端点（注入固定 LLM 响应/模拟 5xx）只在显式开启时注册。
 	// e2e:Playwright webServer 启动时设置 LITTLE_TIMER_TEST_ENDPOINTS=1。
 	if os.Getenv("LITTLE_TIMER_TEST_ENDPOINTS") == "1" {
-		g.POST("/_test/prompt", handlers.AIGtdTestPrompt)
+		ag.POST("/_test/prompt", handlers.AIGtdTestPrompt)
 	}
 }
 
 // 备份路由。
 
-func registerBackup(r *gin.Engine) {
-	g := r.Group("/api")
+func registerBackup(g *gin.RouterGroup) {
 	g.GET("/backup/config", handlers.BackupConfigGet)
 	g.POST("/backup/config", handlers.BackupConfigUpdate)
 	g.POST("/backup/create", handlers.BackupCreate)
@@ -165,18 +169,18 @@ func registerBackup(r *gin.Engine) {
 
 // 壁纸路由。
 
-func registerWallpapers(r *gin.Engine) {
-	g := r.Group("/api/wallpapers")
-	g.POST("/from-url", handlers.WallpaperFromURL)
-	g.POST("", handlers.WallpaperUpload)
-	g.GET("", handlers.WallpaperList)
-	g.GET("/:id", handlers.WallpaperServe)
-	g.DELETE("/:id", handlers.WallpaperDelete)
+func registerWallpapers(g *gin.RouterGroup) {
+	wg := g.Group("/wallpapers")
+	wg.POST("/from-url", handlers.WallpaperFromURL)
+	wg.POST("", handlers.WallpaperUpload)
+	wg.GET("", handlers.WallpaperList)
+	wg.GET("/:id", handlers.WallpaperServe)
+	wg.DELETE("/:id", handlers.WallpaperDelete)
 }
 
 // SSE + 前端日志路由。
 
-func registerEvents(r *gin.Engine) {
-	r.GET("/api/events", handlers.Events)
-	r.POST("/api/log", handlers.FrontendLog)
+func registerEvents(g *gin.RouterGroup) {
+	g.GET("/events", handlers.Events)
+	g.POST("/log", handlers.FrontendLog)
 }

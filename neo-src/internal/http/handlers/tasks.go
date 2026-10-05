@@ -199,10 +199,15 @@ func TaskUpdate(c *gin.Context) {
 	if v, ok := body["title"].(string); ok {
 		if strings.TrimSpace(v) != "" {
 			fields.Title = &v
-			// 用户显式改名 → 标记 user_edited_title,后续 reparse 不覆盖
-			// (worker 消费后重置为 false)。
-			edited := true
-			fields.UserEditedTitle = &edited
+			// 仅当新值与旧值不同时才标记 user_edited_title(避免客户端
+			// round-trip / autosave 同值 PATCH 粘死 flag)。读旧值失败时保守
+			// 不翻(下次真正改名的 PATCH 仍会翻)。
+			if cur, _, gerr := a.SQLite.AITasks().GetTask(id); gerr == nil && cur != nil {
+				if strings.TrimSpace(v) != strings.TrimSpace(cur.Title) {
+					edited := true
+					fields.UserEditedTitle = &edited
+				}
+			}
 		}
 	}
 	if v, ok := body["notes"].(string); ok {

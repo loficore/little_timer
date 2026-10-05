@@ -119,6 +119,29 @@ func TestAIGtdReparse_SecondInFlight409(t *testing.T) {
 	}
 }
 
+func TestTaskUpdate_SameTitleDoesNotFlipFlag(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "原值"})
+	var task TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	if task.UserEditedTitle {
+		t.Fatal("新建 task 不应 user_edited_title=true")
+	}
+	path := "/api/tasks/" + strconv.FormatInt(task.ID, 10)
+	// 同值 PATCH → flag 不应翻
+	w = doJSON(t, r, http.MethodPatch, path, map[string]any{"title": "原值"})
+	if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+		t.Fatalf("patch: code=%d", w.Code)
+	}
+	w = doJSON(t, r, http.MethodGet, path, nil)
+	var after TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &after)
+	if after.UserEditedTitle {
+		t.Error("同值 PATCH title 不应翻 user_edited_title")
+	}
+}
+
 func TestAIGtdReparse_ModeValidation(t *testing.T) {
 	a := newTestApp(t)
 	r := setupAIGtdRouter(t, a)

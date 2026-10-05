@@ -67,7 +67,10 @@ describe("APIClient", () => {
         "http://localhost:8080/api/start",
         expect.objectContaining({
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: expect.objectContaining({
+            "Content-Type": "application/json",
+            "If-Match": '"0"',
+          }),
           body: JSON.stringify({ habit_id: 1 }),
         })
       );
@@ -182,7 +185,10 @@ describe("APIClient", () => {
         "http://localhost:8080/api/settings",
         expect.objectContaining({
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: expect.objectContaining({
+            "Content-Type": "application/json",
+            "If-Match": '"0"',
+          }),
           body: JSON.stringify(newSettings),
         })
       );
@@ -393,6 +399,84 @@ describe("APIClient", () => {
 
         await expect(client.startTimer()).rejects.toThrow();
       });
+    });
+  });
+
+  describe("mutation 乐观锁 header (ConflictGuard)", () => {
+    it("patchTaskScores 应发送 If-Match 真实版本号与正确的 body", async () => {
+      const updated = { id: 7, version: 4, priority_score: 5 };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => updated,
+      });
+
+      const result = await client.patchTaskScores(7, {
+        version: 3,
+        priority_score: 5,
+        context_tag: "编码",
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:8080/api/tasks/7/scores",
+        expect.objectContaining({
+          method: "PATCH",
+          headers: expect.objectContaining({
+            "Content-Type": "application/json",
+            "If-Match": '"3"',
+          }),
+          body: JSON.stringify({ version: 3, priority_score: 5, context_tag: "编码" }),
+        })
+      );
+      expect(result).toEqual(updated);
+    });
+
+    it("无版本语义的 mutation 缺省发送 If-Match: \"0\"", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      });
+
+      await client.createBackup();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:8080/api/backup/create",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({ "If-Match": '"0"' }),
+        })
+      );
+    });
+
+    it("DELETE mutation 也应带 If-Match", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      });
+
+      await client.deleteHabit(1);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:8080/api/habits/1",
+        expect.objectContaining({
+          method: "DELETE",
+          headers: expect.objectContaining({ "If-Match": '"0"' }),
+        })
+      );
+    });
+
+    it("GET 不应带 If-Match", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      });
+
+      await client.getState();
+
+      expect(mockFetch).toHaveBeenCalledWith("http://localhost:8080/api/state", undefined);
     });
   });
 });

@@ -63,13 +63,42 @@ export class APIClient {
     private authToken: string | null = null;
 
     /**
+     * ensureMutationVersion —— 给 POST/PATCH/PUT/DELETE 注入 ConflictGuard
+     * 要求的 `If-Match: "<version>"` header。
+     *
+     * 设计:
+     *  - GET/HEAD/OPTIONS 原样返回(读不需要乐观锁)。
+     *  - 已显式设置 If-Match(如 task 真实 version / capture 的 "0")不覆盖。
+     *  - 其余资源(backup/settings/timer/wallpaper/habit/...)缺省 `"0"`。
+     *    中间件 Task 3 仅做存在性校验,正确性校验仅 tasks 行(Task 4),
+     *    所以对无版本语义的资源送 "0" 即可满足 400 防呆。
+     *
+     * 集中放在 fetchJson 是为了**不漏** —— Critical finding 指出手动
+     * 加头的方法在 review 时漏了 ~20 个,这里用唯一出口一次性覆盖。
+     */
+    private ensureMutationVersion(init?: RequestInit): RequestInit | undefined {
+        if (!init) return init;
+        const method = (init.method ?? "GET").toUpperCase();
+        if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+            return init;
+        }
+        const headers: Record<string, string> = {
+            ...((init.headers ?? {}) as Record<string, string>),
+        };
+        if (!headers["If-Match"]) {
+            headers["If-Match"] = '"0"';
+        }
+        return { ...init, headers };
+    }
+
+    /**
      * 内部辅助函数：统一处理 fetch 响应和 JSON 解析
      * @param url 请求 URL
      * @param options RequestInit 选项
      * @returns Promise<T> 解析后的 JSON 数据
      */
     private async fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-        const res = await fetch(url, options);
+        const res = await fetch(url, this.ensureMutationVersion(options));
         if (!res.ok) {
             throw new Error(`HTTP ${res.status}: ${await res.text()}`);
         }
@@ -502,8 +531,12 @@ export class APIClient {
         const formData = new FormData();
         formData.append("file", file);
 
+        // v11:ConflictGuard 要求 mutation 带 If-Match。uploadWallpaper 用 raw
+        // fetch(FormData 不能走 fetchJson 那条 Content-Type 自动注入路径),
+        // 这里手动补 header。wallpaper 无版本语义,送 "0"。
         const response = await fetch(`${this.baseUrl}/api/wallpapers`, {
             method: "POST",
+            headers: { "If-Match": '"0"' },
             body: formData,
         });
         if (!response.ok) {

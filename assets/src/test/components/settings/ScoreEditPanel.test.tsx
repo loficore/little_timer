@@ -19,7 +19,7 @@ vi.mock("../../../components/common/Toast", () => ({
 }));
 
 vi.mock("../../../utils/i18n", () => ({
-  t: (key: string) => {
+  t: (key: string, params?: Record<string, string | number>) => {
     const translations: Record<string, string> = {
       "score.priority": "优先级",
       "score.urgency": "紧急度",
@@ -29,9 +29,14 @@ vi.mock("../../../utils/i18n", () => ({
       "score.save_success": "评分已保存",
       "score.save_fail": "保存失败",
       "score.conflict": "版本冲突，已刷新最新数据，请重试",
+      "score.conflict_refresh_failed": "版本冲突，且刷新最新数据失败：{error}",
       "button.saving": "保存中...",
     };
-    return translations[key] ?? key;
+    let out = translations[key] ?? key;
+    if (params) {
+      for (const [k, v] of Object.entries(params)) out = out.replace(`{${k}}`, String(v));
+    }
+    return out;
   },
 }));
 
@@ -148,5 +153,38 @@ describe("ScoreEditPanel", () => {
     await waitFor(() => {
       expect(onUpdated).toHaveBeenCalledWith(fresh);
     });
+  });
+
+  it("409 后 getTask 也失败时, 显示带原因的冲突提示且保留用户编辑", async () => {
+    mocks.patchTaskScores.mockRejectedValue(new VersionConflictError());
+    mocks.getTask.mockRejectedValue(new Error("network down"));
+    const onUpdated = vi.fn();
+
+    render(
+      <ScoreEditPanel
+        taskId={7}
+        current={{
+          priority_score: 3,
+          urgency_score: 5,
+          energy_required: 2,
+          context_tag: "general",
+        }}
+        version={3}
+        onUpdated={onUpdated}
+      />,
+    );
+
+    // 用户先调高 priority,模拟"未保存的编辑"
+    const slider = screen.getByTestId("priority-input") as HTMLInputElement;
+    fireEvent.input(slider, { target: { value: "5" } });
+    fireEvent.click(screen.getByTestId("save-scores"));
+
+    const banner = await screen.findByTestId("conflict-banner");
+    expect(banner.textContent).toContain("network down");
+
+    // 用户编辑必须保留(不能被覆盖成旧值)
+    expect(screen.getByTestId("priority-value").textContent).toBe("5");
+    // getTask 失败不应触发 onUpdated(没有可信的 fresh 数据)
+    expect(onUpdated).not.toHaveBeenCalled();
   });
 });

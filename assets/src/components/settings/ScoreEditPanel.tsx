@@ -58,7 +58,9 @@ export function ScoreEditPanel(props: ScoreEditPanelProps) {
       showToast(t("score.save_success"), "success");
     } catch (err) {
       if (err instanceof VersionConflictError) {
-        // 409:服务端版本已变,拉取最新任务并展示冲突,让用户重新编辑后保存
+        // 409:服务端版本已变,拉取最新任务并展示冲突,让用户重新编辑后保存。
+        // 若拉取也失败(refresh failed),表单保持用户原编辑(避免覆盖未保存
+        // 输入),只展示带原因的冲突提示让用户决定下一步。
         try {
           const fresh = await getAPIClient().getTask(props.taskId);
           setVersion(fresh.version);
@@ -68,8 +70,9 @@ export function ScoreEditPanel(props: ScoreEditPanelProps) {
           setContext(fresh.context_tag);
           setConflict(t("score.conflict"));
           props.onUpdated(fresh);
-        } catch {
-          setConflict(t("score.conflict"));
+        } catch (refreshErr) {
+          const reason = refreshErr instanceof Error ? refreshErr.message : String(refreshErr);
+          setConflict(t("score.conflict_refresh_failed", { error: reason }));
         }
       } else {
         const msg = err instanceof Error ? err.message : String(err);

@@ -31,9 +31,27 @@ jobs:
         with:
           version: latest
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: neo-src/go.sum
+
       - name: Install frontend deps
         working-directory: assets
         run: pnpm install
+
+      - name: Install GTK4 and WebKitGTK dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            pkg-config \
+            libgirepository1.0-dev
+
+      - name: Generate Wails bindings
+        run: bash scripts/generate-bindings.sh
 
       - name: Install Playwright browser
         working-directory: assets

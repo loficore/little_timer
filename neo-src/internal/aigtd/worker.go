@@ -136,7 +136,10 @@ func (w *WorkerPool) loop(ctx context.Context) {
 }
 
 func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
-	task, _, err := w.aiTasks.GetTask(job.TaskID)
+	// issue #11:起手一次性取 task + 子任务,append 模式直接复用这里的
+	// existingSubs 作为 hints,不再在下面第二次 GetTask(省一次 DB
+	// round-trip,且两次调用间无并发编辑窗口)。
+	task, existingSubs, err := w.aiTasks.GetTask(job.TaskID)
 	if err != nil || task == nil {
 		_ = w.aiTasks.MarkJobFailed(job.ID, "task not found", "", 0, 0)
 		_ = w.aiTasks.SetAIStatus(job.TaskID, domain.AIStatusError, "task not found")
@@ -169,7 +172,7 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 	}
 	var hints []SubtaskHint
 	if mode != domain.AIJobModeReplace {
-		_, existingSubs, _ := w.aiTasks.GetTask(task.ID)
+		// 复用 process() 起手 GetTask 拿到的 existingSubs(issue #11)。
 		hints = make([]SubtaskHint, 0, len(existingSubs))
 		for _, x := range existingSubs {
 			hints = append(hints, SubtaskHint{Title: x.Title, Status: string(x.Status)})

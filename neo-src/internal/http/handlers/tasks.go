@@ -184,10 +184,15 @@ func TaskCreate(c *gin.Context) {
 	title := req.Title
 	notes := req.Notes
 	active := domain.TaskStatusActive
+	// issue #10:手动创建时用户自带 title,视为"用户编辑过" → 翻
+	// user_edited_title=true,后续 append reparse 不覆盖用户起的标题
+	// (与 PATCH title 路径 spec §3.5 的保护语义一致)。
+	userEdited := true
 	if err := a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{
-		Title:  &title,
-		Notes:  &notes,
-		Status: &active,
+		Title:           &title,
+		Notes:           &notes,
+		Status:          &active,
+		UserEditedTitle: &userEdited,
 	}, 0); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "initialize task failed"})
 		return

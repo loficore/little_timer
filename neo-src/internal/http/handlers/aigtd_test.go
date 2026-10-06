@@ -270,11 +270,13 @@ func TestTaskUpdate_SameTitleDoesNotFlipFlag(t *testing.T) {
 	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "原值"})
 	var task TaskDTO
 	_ = json.Unmarshal(w.Body.Bytes(), &task)
-	if task.UserEditedTitle {
-		t.Fatal("新建 task 不应 user_edited_title=true")
+	// 手动创建带 title → user_edited_title 应为 true(用户起的标题应受
+	// reparse 保护,见 issue #10 / spec §3.5 延伸)。
+	if !task.UserEditedTitle {
+		t.Fatal("新建 task 应 user_edited_title=true(用户自带 title 受保护)")
 	}
 	path := "/api/tasks/" + strconv.FormatInt(task.ID, 10)
-	// 同值 PATCH → flag 不应翻
+	// 同值 PATCH → flag 不应翻(保持 true)
 	w = doJSON(t, r, http.MethodPatch, path, map[string]any{"title": "原值"})
 	if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
 		t.Fatalf("patch: code=%d", w.Code)
@@ -282,8 +284,8 @@ func TestTaskUpdate_SameTitleDoesNotFlipFlag(t *testing.T) {
 	w = doJSON(t, r, http.MethodGet, path, nil)
 	var after TaskDTO
 	_ = json.Unmarshal(w.Body.Bytes(), &after)
-	if after.UserEditedTitle {
-		t.Error("同值 PATCH title 不应翻 user_edited_title")
+	if !after.UserEditedTitle {
+		t.Error("同值 PATCH title 不应翻回 user_edited_title=false")
 	}
 }
 
@@ -325,12 +327,13 @@ func TestTaskUpdate_UserEditedTitleFlips(t *testing.T) {
 	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "AI 起的标题"})
 	var task TaskDTO
 	_ = json.Unmarshal(w.Body.Bytes(), &task)
-	if task.UserEditedTitle {
-		t.Fatal("新建 task 不应 user_edited_title=true")
+	// 手动创建带 title → user_edited_title 应为 true(issue #10)。
+	if !task.UserEditedTitle {
+		t.Fatal("新建 task 应 user_edited_title=true(用户自带 title 受保护)")
 	}
 	path := "/api/tasks/" + strconv.FormatInt(task.ID, 10)
 
-	// PATCH title → 翻转 true
+	// PATCH title → 保持 true
 	w = doJSON(t, r, http.MethodPatch, path, map[string]any{"title": "我改的"})
 	if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
 		t.Fatalf("patch title: code=%d body=%s", w.Code, w.Body.String())
@@ -353,8 +356,8 @@ func TestTaskUpdate_UserEditedTitleFlips(t *testing.T) {
 	w = doJSON(t, r, http.MethodGet, "/api/tasks/"+strconv.FormatInt(t2.ID, 10), nil)
 	var a2 TaskDTO
 	_ = json.Unmarshal(w.Body.Bytes(), &a2)
-	if a2.UserEditedTitle {
-		t.Error("仅改 notes 不应翻转 user_edited_title")
+	if !a2.UserEditedTitle {
+		t.Error("仅改 notes 不应把 user_edited_title 翻回 false")
 	}
 }
 

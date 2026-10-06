@@ -97,4 +97,4 @@ docs/superpowers/
 
 .tool-versions
 
-scripts/private/*
+scripts/private/*.worktrees/

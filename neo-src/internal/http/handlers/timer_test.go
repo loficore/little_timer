@@ -66,6 +66,7 @@ func setupTestRouter(t *testing.T, a *app.App) *gin.Engine {
 	r.POST("/api/pause", TimerPause)
 	r.POST("/api/reset", TimerReset)
 	r.POST("/api/finish", TimerFinish)
+	r.POST("/api/timer/finish", TimerFinish)
 	r.POST("/api/mode", TimerMode)
 	r.POST("/api/timer/rest", TimerStartRest)
 	r.GET("/api/timer/config", TimerConfig)

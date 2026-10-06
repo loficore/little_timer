@@ -135,25 +135,14 @@ func TimerStart(c *gin.Context) {
 	a.Lock()
 	defer a.Unlock()
 
-	// 已在运行的分支——保留同一会话并上报当前 habit id。
+	// 已有 session 时:仅保留「用户主动暂停后恢复」的语义(spec §6 H1);
+	// 其余情况(含运行中残留、已 finished 但未 reset、行取不到等)一律收敛,
+	// 由下方 CreateTimerSession 创建全新 session,而不是复用旧 id。
 	if a.CurrentTimerSessionID != nil {
 		// 查询实时数据行。
 		row, err := a.SQLite.Timers().GetTimerSessionByID(*a.CurrentTimerSessionID)
 		if err == nil {
-			if row.IsRunning && !row.IsFinished && !row.IsPaused {
-				a.CurrentHabitID = req.HabitID
-				if a.CurrentHabitID == nil && row.HabitID != nil {
-					h := *row.HabitID
-					a.CurrentHabitID = &h
-				}
-				c.JSON(http.StatusOK, gin.H{
-					"status":     "already_running",
-					"habit_id":   a.CurrentHabitID,
-					"session_id": *a.CurrentTimerSessionID,
-				})
-				return
-			}
-			// 暂停分支——恢复。
+			// 暂停分支——恢复。保留此分支,让「先 pause 再 start」语义不变。
 			state := a.Clock.Update()
 			if state.IsPaused() && (!state.IsFinished() || row.IsPaused) {
 				pausedTotal := row.PausedTotalSeconds
@@ -181,8 +170,10 @@ func TimerStart(c *gin.Context) {
 				return
 			}
 		}
-		// 过期会话——清理。
-		a.ResetTimerSession()
+		// 运行中残留 / 过期会话 / 行取不到:收敛旧 session,落到 CreateTimerSession
+		// 创建新 session。CreateTimerSession 内部还会再调一次
+		// ConvergeStaleSessionIfAny 作防御层。
+		a.ConvergeStaleSessionIfAny()
 	}
 
 	sessionID, err := a.CreateTimerSession(req.HabitID, mode, work, rest, loop)

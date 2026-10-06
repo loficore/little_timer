@@ -89,6 +89,11 @@ export class TimerPage extends BasePage {
    * 计时器是后端进程级全局状态，用例之间会互相残留。
    * 清理运行中/暂停中的过期计时器，回到「已停止」。
    * 不重新导航，避免与 beforeEach 的加载竞争。
+   *
+   * 后端层面:Playwright 跨项目共享同一 Go 进程，仅靠 UI 清理不够；
+   * 即使 UI 显示 startButton,后端 App.CurrentTimerSessionID 仍可能残留
+   * (spec §6 H1)。所以在 UI 清理后必须强制打后端 finish + reset,
+   * 并 GET /api/timer/progress 断言干净态(spec §7 层 2)。
    */
   async resetStaleTimer() {
     if (await this.isVisible(this.pauseButton)) {
@@ -96,11 +101,64 @@ export class TimerPage extends BasePage {
     } else if (await this.isVisible(this.resumeButton)) {
       // 已处于暂停态，直接 reset
     } else if (await this.isVisible(this.startButton)) {
-      return; // 已是停止态
+      // 已是停止态——继续走下方 forceClearBackendTimer 收敛后端残留。
     }
     if (await this.isVisible(this.resetButton)) {
       await this.clickReset();
       await this.page.waitForTimeout(300);
+    }
+    // 显式后端清理:见 forceClearBackendTimer 的契约注释。
+    await this.forceClearBackendTimer();
+  }
+
+  /**
+   * 显式调用后端 finish + reset 把 App.CurrentTimerSessionID 清掉,
+   * 然后 GET /api/timer/progress 断言 session_id 为 null(spec §6 H1 +
+   * spec §7 层 2)。
+   *
+   * 用 page.evaluate + fetch 直接打 API,与现有 setCountdownSeconds 同模式:
+   * 不设 If-Match header(避免 CORS 预检),body 送 version: 0 绕过
+   * ConflictGuard 闸门。请求失败或后端未回到干净态时,throw 让用例显式失败。
+   */
+  async forceClearBackendTimer() {
+    const ok = await this.page.evaluate(async () => {
+      const baseHeaders = { "Content-Type": "application/json" };
+
+      const finRes = await fetch("http://127.0.0.1:8080/api/timer/finish", {
+        method: "POST",
+        headers: baseHeaders,
+        body: JSON.stringify({ version: 0 }),
+      });
+      if (!finRes.ok) {
+        throw new Error(`POST /api/timer/finish failed: ${finRes.status}`);
+      }
+
+      const resetRes = await fetch("http://127.0.0.1:8080/api/reset", {
+        method: "POST",
+        headers: baseHeaders,
+        body: JSON.stringify({ version: 0 }),
+      });
+      if (!resetRes.ok) {
+        throw new Error(`POST /api/reset failed: ${resetRes.status}`);
+      }
+
+      const stateRes = await fetch("http://127.0.0.1:8080/api/timer/progress", {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (!stateRes.ok) {
+        throw new Error(`GET /api/timer/progress failed: ${stateRes.status}`);
+      }
+      const state = await stateRes.json();
+      if (state.session_id !== null && state.session_id !== undefined) {
+        throw new Error(
+          `backend still has active session_id=${state.session_id} after forceClear`,
+        );
+      }
+      return true;
+    });
+    if (!ok) {
+      throw new Error("forceClearBackendTimer: page.evaluate returned falsy");
     }
   }
 

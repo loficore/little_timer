@@ -182,6 +182,15 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
 
     useEffect(() => {
         if (timerConfig.mode === "stopwatch" && habitDetail && elapsedSeconds > 0 && !autoRecordTriggeredRef.current) {
+            // 若目标在本 session 启动前已达成(habitDetail.today_seconds >=
+            // goal_seconds),本 session 不自动触发 finish+recordSession。
+            // 避免把跨测试/跨项目的 today_seconds 残留立刻误触发现 session 的
+            // 自动完成 —— e2e 共享后端进程时这是 mobile-412 stopwatch 测试
+            // 稳定超时的真正原因(spec §7 layer 3 修复)。
+            if (habitDetail.today_seconds >= habitDetail.goal_seconds) {
+                autoRecordTriggeredRef.current = true;
+                return;
+            }
             const totalTodaySeconds = habitDetail.today_seconds + elapsedSeconds;
             if (totalTodaySeconds >= habitDetail.goal_seconds) {
                 autoRecordTriggeredRef.current = true;

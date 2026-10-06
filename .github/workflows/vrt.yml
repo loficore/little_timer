@@ -53,6 +53,13 @@ jobs:
       - name: Generate Wails bindings
         run: bash scripts/generate-bindings.sh
 
+      - name: Build Go backend
+        working-directory: neo-src
+        run: go build -o bin/server ./cmd/server
+
+      - name: Ensure test_tmp exists for backend db path
+        run: mkdir -p assets/test_tmp
+
       - name: Install Playwright browser
         working-directory: assets
         run: pnpm exec playwright install --with-deps chromium

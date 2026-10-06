@@ -152,7 +152,14 @@ func defaultBackupDir(dbPath string) string {
 // 内存指针和数据库，绝不触碰锁本身，也不重新加锁。
 
 // CreateTimerSession 插入一条 timer_sessions 行并更新内存中的当前会话指针。调用方必须持有 a.mu 写锁。
+//
+// 创建前先幂等收敛既有残留会话(ConvergeStaleSessionIfAny),行为契约 =
+// 「调用后 CurrentTimerSessionID 指向且仅指向新 session」。这挡住跨项目
+// 共享后端进程时 App 内存态泄漏导致新 start 复用/误收敛旧 session
+// (spec §6 H1)。
 func (a *App) CreateTimerSession(habitID *int64, mode string, work, rest, loop int64) (int64, error) {
+	a.ConvergeStaleSessionIfAny()
+
 	id, err := a.SQLite.Timers().CreateTimerSession(habitID, mode, work, rest, loop)
 	if err != nil {
 		log.Error("timer.session.create failed", "habit_id", habitID, "mode", mode, "error", err.Error())
@@ -162,6 +169,50 @@ func (a *App) CreateTimerSession(habitID *int64, mode string, work, rest, loop i
 	a.CurrentHabitID = habitID
 	log.Info("timer.session.create", "session_id", id, "habit_id", habitID, "mode", mode)
 	return id, nil
+}
+
+// ConvergeStaleSessionIfAny 收敛内存中残留的 timer_session(spec §6 H1
+// 跨项目泄漏)。语义:
+//   - 无残留指针时无操作。
+//   - 有残留时先取回行读取 elapsed,再把它标记为已结束
+//     (SQLite.Timers().FinishTimerSession);若 elapsed==0(该 session 从未
+//     被真正使用)则直接 DeleteTimerSession 删除,避免以「已完成」形态
+//     残留在 timer_sessions。
+//   - 收敛只清 timer_sessions 状态,**绝不写入 sessions(今日统计)表** ——
+//     残留会话不是用户主动完成,不应计入统计。
+//   - 最后清空 CurrentTimerSessionID / CurrentHabitID。
+//
+// 调用方必须持有 a.mu 写锁。
+func (a *App) ConvergeStaleSessionIfAny() {
+	sessionID := a.CurrentTimerSessionID
+	if sessionID == nil {
+		a.CurrentHabitID = nil
+		return
+	}
+
+	row, err := a.SQLite.Timers().GetTimerSessionByID(*sessionID)
+	if err != nil {
+		// 行取不到(可能已被删除):仅清指针,无需 DB 操作。
+		a.CurrentTimerSessionID = nil
+		a.CurrentHabitID = nil
+		log.Info("timer.session.converge", "session_id", *sessionID, "result", "missing_row")
+		return
+	}
+
+	elapsed := row.ElapsedSeconds
+	if err := a.SQLite.Timers().FinishTimerSession(*sessionID); err != nil {
+		// 不返回:仍需清指针,避免继续复用残留 session。
+		log.Error("timer.session.converge finish failed", "session_id", *sessionID, "error", err.Error())
+	}
+	if elapsed == 0 {
+		if err := a.SQLite.Timers().DeleteTimerSession(*sessionID); err != nil {
+			log.Error("timer.session.converge delete failed", "session_id", *sessionID, "error", err.Error())
+		}
+	}
+
+	a.CurrentTimerSessionID = nil
+	a.CurrentHabitID = nil
+	log.Info("timer.session.converge", "session_id", *sessionID, "elapsed", elapsed)
 }
 
 // FinishTimerSession 将当前 timer_session 标记为结束并返回已用秒数。调用方必须持有 a.mu 写锁。

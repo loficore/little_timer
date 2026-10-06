@@ -1,0 +1,111 @@
+name: Update VRT Snapshots
+
+# 手动触发:在 CI 环境重生成 VRT 截图基线。
+#
+# 为什么必须在 CI 跑:
+#   Playwright 的 toHaveScreenshot() 基线是像素级比对(maxDiffPixels=100)。
+#   截图渲染受字体栅格化影响 —— CI 是 ubuntu-latest + fonts-noto-cjk +
+#   headless chromium,本地机器(AlmaLinux / macOS / Windows)的字体栈
+#   不同,本机 `pnpm run test:vrt:update` 出来的基线在 CI 上会对不上,
+#   下次 vrt.yml 反而会红。
+#
+# 标准流程(与 PR #15 一致):
+#   1. 在本 workflow 里填 ref(默认 develop)手动触发;
+#   2. 跑完从 run 页面下载 `vrt-snapshots-updated` artifact;
+#   3. 本地解压覆盖 assets/src/test/visual/specs/timer.spec.ts-snapshots/*.png;
+#   4. 把重生成的 png commit 到你的分支;
+#   5. 正常 vrt.yml 会在 PR 上校验新基线是否匹配。
+#
+# 不要用本机 --update-snapshots 的产物直接 commit,除非你的机器与 CI
+# 的字体/渲染环境完全一致。
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "生成快照的分支 / tag / commit SHA"
+        required: true
+        default: develop
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update-vrt-snapshots:
+    name: Update VRT snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: neo-src/go.sum
+
+      - name: Install frontend deps
+        working-directory: assets
+        run: pnpm install
+
+      - name: Install GTK4 and WebKitGTK dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            pkg-config \
+            libgirepository1.0-dev
+
+      - name: Generate Wails bindings
+        run: bash scripts/generate-bindings.sh
+
+      - name: Build Go backend
+        working-directory: neo-src
+        run: go build -o bin/server ./cmd/server
+
+      - name: Ensure test_tmp exists for backend db path
+        run: mkdir -p assets/test_tmp
+
+      - name: Install Playwright browser
+        working-directory: assets
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Install Chinese fonts for VRT
+        run: sudo apt-get install -y fonts-noto-cjk
+
+      - name: Run visual regression tests (update snapshots)
+        working-directory: assets
+        run: pnpm run test:vrt:update
+
+      - name: Upload updated snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vrt-snapshots-updated
+          path: assets/src/test/visual/specs/timer.spec.ts-snapshots/*.png
+          if-no-files-found: warn
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: assets/playwright-report
+          if-no-files-found: ignore

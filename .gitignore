@@ -4,6 +4,7 @@
 /zig-out/
 /test-tmp/
 /test_tmp/
+/assets/test_tmp/
 /temp.txt
 
 # === Go ===

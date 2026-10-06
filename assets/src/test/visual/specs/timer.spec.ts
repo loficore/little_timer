@@ -9,7 +9,7 @@ async function setTimeDisplayStyle(page: Page, style: "classic" | "seven_segment
   }, style);
 }
 
-async function closeHabitSelector(page: Page) {
+async function closeAnyHabitSelector(page: Page) {
   await page.waitForTimeout(300);
 
   const closeBtn = page.locator('.my-overlay-backdrop button.btn-circle').first();

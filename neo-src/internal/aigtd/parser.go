@@ -46,6 +46,10 @@ func ParseWithRetry(ctx context.Context, p Provider, req CompletionRequest, maxA
 // ParseWithRetryDetailed 与 ParseWithRetry 逻辑相同,但额外返回最后一次
 // Provider 响应的原始文本与 token 计数(即使解析失败也保留最后一次响应文本,
 // 便于 ai_jobs.response_payload 留痕)。
+//
+// 评分警告(spec §5.3 / task 7):以 "[scores] " 前缀标记的 errs 条目不触发
+// 重试 —— ValidateDecomposition 已就地回退默认并把合法值放进 res,继续
+// 重试只会浪费 token;真 schema 错误仍按原逻辑重试并把错误反馈进 prompt。
 func ParseWithRetryDetailed(ctx context.Context, p Provider, req CompletionRequest, maxAttempts int) (*ParseOutcome, error) {
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -68,7 +72,7 @@ func ParseWithRetryDetailed(ctx context.Context, p Provider, req CompletionReque
 		out.OutputTokens = resp.OutputTokens
 
 		res, errs, perr := ValidateDecomposition(resp.Text)
-		if perr == nil && len(errs) == 0 {
+		if perr == nil && len(realParseErrs(errs)) == 0 {
 			out.Result = res
 			return out, nil
 		}
@@ -88,4 +92,18 @@ func ParseWithRetryDetailed(ctx context.Context, p Provider, req CompletionReque
 		lastErr = ErrParseFailed
 	}
 	return out, fmt.Errorf("%w: %v", ErrParseFailed, lastErr)
+}
+
+// realParseErrs 过滤掉评分警告(spec §5.3 / task 7),只保留真正的 schema 错误。
+// 评分警告以 "[scores] " 前缀标记 —— ValidateDecomposition 已就地回退默认值,
+// 不应再触发解析重试。
+func realParseErrs(errs []string) []string {
+	out := errs[:0:0]
+	for _, e := range errs {
+		if strings.HasPrefix(e, scoreWarnPrefix) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }

@@ -10,6 +10,14 @@ Little Timer is a cross-platform timer application built with Go, Gin, SQLite, a
 - 🎨 **Modern UI**: Responsive interface based on Preact + Tailwind CSS
 - 🔄 **Modular Architecture**: Clear separation between frontend and backend
 - 📱 **Mobile First**: Touch-friendly with mobile device optimization
+- 🤖 **AI GTD (experimental)**: capture → LLM decomposes into actionable subtasks; task tree, habits, and focus timer share the same local SQLite
+
+## Scheduler + Smart Scheduling
+
+- After setting an LLM API key under Settings, tasks captured in `/aigtd` automatically receive 5-dimensional scores (importance / urgency / energy / context / dependency)
+- The `/schedule` page runs the Scheduler: deterministic placement driven by a rule engine plus LLM scores
+- Every mutation carries a `version` optimistic lock; cross-device edit conflicts return a strict 409 and prompt a refetch
+- Scoring is grounded in David Allen's GTD, the Eisenhower matrix, Loehr & Schwartz's energy management, and context-switching-cost research
 
 ## License
 

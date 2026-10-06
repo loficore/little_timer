@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,31 +13,40 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"little-timer/internal/domain"
+	"little-timer/internal/http/middleware"
 	"little-timer/internal/storage"
 )
 
 // TaskDTO 是出参形状,与前端 bindings 对齐。
 type TaskDTO struct {
-	ID               int64        `json:"id"`
-	ParentID         *int64       `json:"parent_id,omitempty"`
-	RawText          string       `json:"raw_text,omitempty"`
-	Title            string       `json:"title"`
-	Notes            string       `json:"notes,omitempty"`
-	Status           string       `json:"status"`
-	DueDate          *string      `json:"due_date,omitempty"`
-	ScheduledStart   *int64       `json:"scheduled_start,omitempty"`
-	ScheduledEnd     *int64       `json:"scheduled_end,omitempty"`
-	Pinned           bool         `json:"pinned"`
-	EstimatedMinutes int64        `json:"estimated_minutes"`
-	OrderIndex       int64        `json:"order_index"`
-	Source           string       `json:"source"`
-	AIStatus         string       `json:"ai_status"`
-	AIError          string       `json:"ai_error,omitempty"`
-	UserEditedTitle  bool         `json:"user_edited_title"`
-	Subtasks         []SubtaskDTO `json:"subtasks,omitempty"`
-	CreatedAt        string       `json:"created_at"`
-	UpdatedAt        string       `json:"updated_at"`
-	ParsedAt         *string      `json:"parsed_at,omitempty"`
+	ID               int64   `json:"id"`
+	ParentID         *int64  `json:"parent_id,omitempty"`
+	RawText          string  `json:"raw_text,omitempty"`
+	Title            string  `json:"title"`
+	Notes            string  `json:"notes,omitempty"`
+	Status           string  `json:"status"`
+	DueDate          *string `json:"due_date,omitempty"`
+	ScheduledStart   *int64  `json:"scheduled_start,omitempty"`
+	ScheduledEnd     *int64  `json:"scheduled_end,omitempty"`
+	Pinned           bool    `json:"pinned"`
+	EstimatedMinutes int64   `json:"estimated_minutes"`
+	OrderIndex       int64   `json:"order_index"`
+	Source           string  `json:"source"`
+	AIStatus         string  `json:"ai_status"`
+	AIError          string  `json:"ai_error,omitempty"`
+	UserEditedTitle  bool    `json:"user_edited_title"`
+	// v11:5 维调度评分 + 乐观锁版本号(见 scheduler 设计 §3.1)。BlockedBy
+	// 为空切片时 omitempty 不出现在 JSON 里,与 domain.TaskRow 对齐。
+	Version        int64        `json:"version"`
+	PriorityScore  int          `json:"priority_score"`
+	UrgencyScore   int          `json:"urgency_score"`
+	EnergyRequired int          `json:"energy_required"`
+	ContextTag     string       `json:"context_tag"`
+	BlockedBy      []int64      `json:"blocked_by,omitempty"`
+	Subtasks       []SubtaskDTO `json:"subtasks,omitempty"`
+	CreatedAt      string       `json:"created_at"`
+	UpdatedAt      string       `json:"updated_at"`
+	ParsedAt       *string      `json:"parsed_at,omitempty"`
 }
 
 // SubtaskDTO 是子任务的出参形状。
@@ -67,6 +77,12 @@ func toTaskDTO(t *domain.TaskRow, subs []domain.SubtaskRow) TaskDTO {
 		AIStatus:         string(t.AIStatus),
 		AIError:          t.AIError,
 		UserEditedTitle:  t.UserEditedTitle,
+		Version:          t.Version,
+		PriorityScore:    t.PriorityScore,
+		UrgencyScore:     t.UrgencyScore,
+		EnergyRequired:   t.EnergyRequired,
+		ContextTag:       t.ContextTag,
+		BlockedBy:        t.BlockedBy,
 		CreatedAt:        t.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:        t.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -85,6 +101,12 @@ func toTaskDTO(t *domain.TaskRow, subs []domain.SubtaskRow) TaskDTO {
 		})
 	}
 	return dto
+}
+
+// taskDTOFromRow 把单行 task 转成 DTO(不带子任务)。供 /scores 等只需要
+// task 本身的分支复用,避免每次都拉取子任务。
+func taskDTOFromRow(t *domain.TaskRow) TaskDTO {
+	return toTaskDTO(t, nil)
 }
 
 // TaskList GET /api/tasks?status=&parent_id=
@@ -154,19 +176,27 @@ func TaskCreate(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "create failed"})
 		return
 	}
-	// 手动创建时,把入参 title 写到 title 列;notes 也直接写入。
+	// I7 fix:创建是刚 CreateTask 的 version=0 行,title / notes / status
+	// 在**单次** UpdateTask 里一并写入,替代原先的
+	// title→(可选)notes→SetTaskStatus 三次顺序写(其中 notes 写还吞了错误)。
+	// notes 为空时写空串(列 DEFAULT '' 语义等价);status 直接置 active
+	// (手动创建无需 AI 处理)。所有错误都不再吞,失败即 500。
 	title := req.Title
-	if err := a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &title}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "set title failed"})
+	notes := req.Notes
+	active := domain.TaskStatusActive
+	if err := a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{
+		Title:  &title,
+		Notes:  &notes,
+		Status: &active,
+	}, 0); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "initialize task failed"})
 		return
 	}
-	if req.Notes != "" {
-		notes := req.Notes
-		_ = a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Notes: &notes})
+	// ai_status 不在 TaskUpdateFields 里,单独写(错误同样不吞)。
+	if err := a.SQLite.AITasks().SetAIStatus(taskID, domain.AIStatusDone, ""); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "set ai_status failed"})
+		return
 	}
-	// 直接进入 active 状态(不需 AI 处理)。
-	_ = a.SQLite.AITasks().SetTaskStatus(taskID, domain.TaskStatusActive)
-	_ = a.SQLite.AITasks().SetAIStatus(taskID, domain.AIStatusDone, "")
 	task, subs, _ := a.SQLite.AITasks().GetTask(taskID)
 	c.JSON(http.StatusOK, toTaskDTO(task, subs))
 }
@@ -261,7 +291,16 @@ func TaskUpdate(c *gin.Context) {
 		fields.EstimatedMinutes = &e
 	}
 
-	if err := a.SQLite.AITasks().UpdateTask(id, fields); err != nil {
+	if err := a.SQLite.AITasks().UpdateTask(id, fields, middleware.GetVersion(c)); err != nil {
+		// C3 fix:乐观锁冲突 → 409(与 TaskScoresUpdate / ScheduleApply 一致),
+		// 其它错误才是 500。
+		if errors.Is(err, storage.ErrVersionConflict) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "version conflict",
+				"code":  "version_conflict",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
 		return
 	}
@@ -277,7 +316,16 @@ func TaskDelete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid id"})
 		return
 	}
-	if err := a.SQLite.AITasks().DeleteTask(id); err != nil {
+	// C1 fix:删除也走乐观锁 —— 用 ConflictGuard 解析出的期望版本,
+	// 0 行受影响(版本不符/task 不存在)→ 409。
+	if err := a.SQLite.AITasks().DeleteTask(id, middleware.GetVersion(c)); err != nil {
+		if errors.Is(err, storage.ErrVersionConflict) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "version conflict",
+				"code":  "version_conflict",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "delete failed"})
 		return
 	}
@@ -356,7 +404,16 @@ func SubtaskUpdate(c *gin.Context) {
 		o := int64(v)
 		fields.OrderIndex = &o
 	}
-	if err := a.SQLite.AITasks().UpdateSubtask(subID, fields); err != nil {
+	// C2 fix:子任务也走乐观锁。子任务本身是 tasks 行(带 parent_id 与
+	// version),与 UpdateTask 同源同语义。
+	if err := a.SQLite.AITasks().UpdateSubtask(subID, fields, middleware.GetVersion(c)); err != nil {
+		if errors.Is(err, storage.ErrVersionConflict) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "version conflict",
+				"code":  "version_conflict",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
 		return
 	}

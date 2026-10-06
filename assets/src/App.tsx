@@ -5,15 +5,16 @@ import { HabitsPage } from "./HabitsPage";
 import { SettingsPage } from "./Settings.tsx";
 import { StatsPage } from "./Stats.tsx";
 import { AIGtdPage } from "./AIGtdPage";
+import { SchedulePage } from "./SchedulePage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastContainer, showToast } from "./components/common/Toast";
 import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, logLifecycle, logPerf } from "./utils/logger";
 import { useAppSettings, logWallpaperDebug } from "./hooks/useAppSettings";
 import { resolveWallpaperUrl, WALLPAPER_FALLBACK_GRADIENT } from "./utils/constants";
 import { t } from "./utils/i18n";
-import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, SparklesIconComponent } from "./utils/icons";
+import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, SparklesIconComponent, CalendarIcon } from "./utils/icons";
 
-type Page = "timer" | "habits" | "aigtd" | "stats" | "settings";
+type Page = "timer" | "habits" | "aigtd" | "schedule" | "stats" | "settings";
 
 const formatUnknownError = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -224,6 +225,7 @@ export const App = () => {
               <StatsPage onBackClick={() => navigateTo("timer")} />
             )}
             {page === "aigtd" && <AIGtdPage />}
+            {page === "schedule" && <SchedulePage />}
             {page === "settings" && (
               <SettingsPage
                 onBackClick={() => navigateTo("timer")}
@@ -268,6 +270,15 @@ export const App = () => {
         >
           <SparklesIconComponent className="h-5 w-5" />
           <span className="btm-nav-label">{t("aigtd.nav_label_short")}</span>
+        </button>
+        <button
+          type="button"
+          data-testid="nav-schedule"
+          className={`my-bottom-nav-item ${page === "schedule" ? "active" : ""}`}
+          onClick={() => navigateTo("schedule")}
+        >
+          <CalendarIcon className="h-5 w-5" />
+          <span className="btm-nav-label">{t("schedule.nav_label_short")}</span>
         </button>
         <button
           type="button"

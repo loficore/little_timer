@@ -86,13 +86,14 @@ func TestWorkerPool_AppendKeepsDoneAndUserTitle(t *testing.T) {
 	// 加一个未完成的子任务:append 必须保留它(与 replace 区分的关键)。
 	_, _ = c.CreateSubtask(taskID, "未完成B", 15, nil, 1)
 	done := domain.SubtaskStatusDone
-	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}); err != nil {
+	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}, 0); err != nil {
 		t.Fatal(err)
 	}
 	// 用户改标题
 	edited := "用户标题"
 	editedFlag := true
-	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &editedFlag}); err != nil {
+	ver, _ := c.GetTaskVersion(taskID)
+	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &editedFlag}, ver); err != nil {
 		t.Fatal(err)
 	}
 
@@ -137,12 +138,13 @@ func TestWorkerPool_ReplaceKeepsDoneAndOverwritesTitle(t *testing.T) {
 	keep, _ := c.CreateSubtask(taskID, "已完成A", 10, nil, 0)
 	drop, _ := c.CreateSubtask(taskID, "未完成B", 20, nil, 1)
 	done := domain.SubtaskStatusDone
-	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}); err != nil {
+	if err := c.UpdateSubtask(keep, storage.SubtaskUpdateFields{Status: &done}, 0); err != nil {
 		t.Fatal(err)
 	}
 	edited := "用户标题"
 	flag := true
-	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}); err != nil {
+	ver, _ := c.GetTaskVersion(taskID)
+	if err := c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}, ver); err != nil {
 		t.Fatal(err)
 	}
 	_ = drop
@@ -373,7 +375,8 @@ func TestWorkerPool_ReparsePreservesUserEditedTitle(t *testing.T) {
 	// 用户编辑 title(handler 实际行为:同时翻 user_edited_title=true)
 	edited := "用户改过的标题"
 	flag := true
-	if err := m.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}); err != nil {
+	ver, _ := m.AITasks().GetTaskVersion(taskID)
+	if err := m.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{Title: &edited, UserEditedTitle: &flag}, ver); err != nil {
 		t.Fatal(err)
 	}
 
@@ -430,4 +433,96 @@ func equalTitles(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// TestWorkerPool_PersistsScores 锁定 task 7 契约:worker 必须把 LLM 给的
+// 4 维评分(spec §5.3)落到 tasks.priority_score/urgency_score/energy_required/
+// context_tag 4 列;并对 LLM 越界值走 ValidateDecomposition 的默认 + 警告
+// 语义(Review Focus #3/#5:永不 panic,落默认 + 提示)。
+//
+//   - 用合法 nested _scores → DB 读到合法值;
+//   - 顶层越界值 → DB 读到默认值。
+func TestWorkerPool_PersistsScores(t *testing.T) {
+	m := newTestDB(t)
+	c := m.AITasks()
+
+	t.Run("nested _scores 合法值原样落库", func(t *testing.T) {
+		taskID, _ := c.CreateTask("原始", "manual")
+		aigtd.SetTestOverride(
+			`{"title":"ok","is_complex":false,"estimated_minutes":30,"subtasks":[],
+			  "_scores":{"priority_score":5,"urgency_score":9,"energy_required":3,"context_tag":"编码"}}`,
+			0,
+		)
+		defer aigtd.ClearTestOverride()
+
+		jobID, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &fakeSettings{date: "2026-10-05", provider: "openai_compat", model: "m"}
+		wp := aigtd.NewWorkerPool(c, s, 1)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		wp.Start(ctx)
+		defer func() { wp.Stop(); wp.Wait() }()
+		waitJobSuccess(t, c, taskID, jobID, 5*time.Second)
+
+		after, _, err := c.GetTask(taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if after.PriorityScore != 5 {
+			t.Errorf("priority_score = %d, want 5", after.PriorityScore)
+		}
+		if after.UrgencyScore != 9 {
+			t.Errorf("urgency_score = %d, want 9", after.UrgencyScore)
+		}
+		if after.EnergyRequired != 3 {
+			t.Errorf("energy_required = %d, want 3", after.EnergyRequired)
+		}
+		if after.ContextTag != "编码" {
+			t.Errorf("context_tag = %q, want 编码", after.ContextTag)
+		}
+	})
+
+	t.Run("顶层越界 → 落默认值,任务整体成功", func(t *testing.T) {
+		taskID, _ := c.CreateTask("原始", "manual")
+		// priority_score=99 越界;其余合法。
+		aigtd.SetTestOverride(
+			`{"title":"ok","is_complex":false,"estimated_minutes":30,"subtasks":[],
+			  "priority_score":99,"urgency_score":5,"energy_required":2,"context_tag":"general"}`,
+			0,
+		)
+		defer aigtd.ClearTestOverride()
+
+		jobID, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeAppend)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &fakeSettings{date: "2026-10-05", provider: "openai_compat", model: "m"}
+		wp := aigtd.NewWorkerPool(c, s, 1)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		wp.Start(ctx)
+		defer func() { wp.Stop(); wp.Wait() }()
+		waitJobSuccess(t, c, taskID, jobID, 5*time.Second)
+
+		after, _, err := c.GetTask(taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// priority 越界 → 默认 3;其余合法原样写入。
+		if after.PriorityScore != 3 {
+			t.Errorf("priority_score = %d, want 默认 3", after.PriorityScore)
+		}
+		if after.UrgencyScore != 5 {
+			t.Errorf("urgency_score = %d, want 5", after.UrgencyScore)
+		}
+		if after.EnergyRequired != 2 {
+			t.Errorf("energy_required = %d, want 2", after.EnergyRequired)
+		}
+		if after.ContextTag != "general" {
+			t.Errorf("context_tag = %q, want general", after.ContextTag)
+		}
+	})
 }

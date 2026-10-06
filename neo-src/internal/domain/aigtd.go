@@ -62,9 +62,18 @@ type TaskRow struct {
 	AIStatus         AIStatus   `json:"ai_status"`
 	AIError          string     `json:"ai_error,omitempty"`
 	UserEditedTitle  bool       `json:"user_edited_title"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
-	ParsedAt         *time.Time `json:"parsed_at,omitempty"`
+	// v11:乐观锁版本号,server 在每次 UpdateTask 时 ++;int64 与 DB INTEGER 对齐。
+	Version int64 `json:"version"`
+	// v11:5 维调度评分(见 scheduler 设计 §3.1)。blocked_by 由用户显式标,
+	// 不经 LLM;其它 4 维 LLM 预填 + 用户可改。omitempty 让空切片不出现在 JSON 里。
+	PriorityScore  int        `json:"priority_score"`
+	UrgencyScore   int        `json:"urgency_score"`
+	EnergyRequired int        `json:"energy_required"`
+	ContextTag     string     `json:"context_tag"`
+	BlockedBy      []int64    `json:"blocked_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	ParsedAt       *time.Time `json:"parsed_at,omitempty"`
 }
 
 // SubtaskRow 是一行 `task_subtasks` 语义的 tasks 子任务(通过 parent_id 关联)。
@@ -118,6 +127,10 @@ type AIJobRow struct {
 }
 
 // AIDecompositionResult 是 AI 解析随手记后返回的结构化结果。
+//
+// v11(capture/reparse 扩展):额外携带 4 维调度评分(spec §5.3)。LLM 输出
+// 形态为嵌套 `_scores` 对象,validator 也兼容旧的顶层键。缺省 / 越界时由
+// ValidateDecomposition 回填默认值 3/5/2/general。blocked_by 不经 LLM。
 type AIDecompositionResult struct {
 	Title            string         `json:"title"`
 	Notes            string         `json:"notes,omitempty"`
@@ -125,6 +138,12 @@ type AIDecompositionResult struct {
 	DueDate          *string        `json:"due_date,omitempty"`
 	EstimatedMinutes int            `json:"estimated_minutes"`
 	Subtasks         []SubtaskDraft `json:"subtasks"`
+	// 4 维评分。JSON tag 同时用于顶层兼容形态;spec §5.3 的嵌套 `_scores`
+	// 由 schema.go 显式解析(不会随本结构体直接反序列化)。
+	PriorityScore  int    `json:"priority_score"`
+	UrgencyScore   int    `json:"urgency_score"`
+	EnergyRequired int    `json:"energy_required"`
+	ContextTag     string `json:"context_tag"`
 }
 
 // SubtaskDraft 是 AI 拆解结果中的一个子任务草案。

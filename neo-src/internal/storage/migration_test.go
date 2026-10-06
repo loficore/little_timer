@@ -272,6 +272,57 @@ CREATE TABLE IF NOT EXISTS ai_jobs (
 );
 `
 
+// v10TasksAiJobsSQL 是 v10 版(含 tasks.user_edited_title 与
+// ai_jobs.mode,但不含 v11 的 6 列)的 tasks / ai_jobs 建表语句。用于
+// TestMigrateV10ToV11_AddsAllColumns 模拟"已是 v10 但缺 v11 列"的 DB,
+// 强制 migrateV10ToV11 真实执行 ALTER TABLE ... ADD COLUMN ... CHECK(...),
+// 而不是走 fresh-create 路径。
+const v10TasksAiJobsSQL = `
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER,
+    raw_text TEXT DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    notes TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'inbox'
+        CHECK(status IN ('inbox','active','done','archived','rejected')),
+    due_date TEXT,
+    scheduled_start INTEGER,
+    scheduled_end INTEGER,
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),
+    estimated_minutes INTEGER NOT NULL DEFAULT 0,
+    order_index INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    ai_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(ai_status IN ('pending','processing','done','error')),
+    ai_error TEXT,
+    user_edited_title INTEGER NOT NULL DEFAULT 0 CHECK(user_edited_title IN (0,1)),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    parsed_at TIMESTAMP,
+    FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS ai_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    status TEXT NOT NULL
+        CHECK(status IN ('queued','running','success','failed')),
+    request_payload TEXT NOT NULL,
+    response_payload TEXT,
+    error_message TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 1,
+    mode TEXT NOT NULL DEFAULT 'append' CHECK(mode IN ('append','replace','review')),
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+`
+
 func TestMigrateV9ToV10_AddsColumns(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "lt.db")
 	m := NewSqliteManager().Init(dbPath)
@@ -311,6 +362,85 @@ func TestMigrateV9ToV10_AddsColumns(t *testing.T) {
 	}
 	if maxVersion != CurrentSchemaVersion {
 		t.Errorf("schema_version = %d, want %d", maxVersion, CurrentSchemaVersion)
+	}
+}
+
+// TestMigrateV10ToV11_AddsAllColumns 验证 v10 → v11 真正升级:
+//   - tasks 表新增 6 列(version / priority_score / urgency_score /
+//     energy_required / context_tag / blocked_by),且 CHECK 约束生效;
+//   - schema_version 被推进到 11(CurrentSchemaVersion)。
+//
+// 引导方式:用手工 v10 建表 SQL 钉一个"有 tasks/ai_jobs 但缺 v11 列"的 DB,
+// 写 schema_version=10,再跑 Migrate()。此时 currentVersion=10 < 11,会进入
+// 升级分支;tasks 表已存在且缺 6 列,addColumnIfMissing 会真实执行
+// ALTER TABLE ... ADD COLUMN ... CHECK(...)(而不是 fresh-create 的 no-op)。
+// 注意不能像旧版那样"先 Migrate() 再 INSERT OR REPLACE version=10"——
+// version=10 与既有 version=11 行无 PK 冲突,INSERT OR REPLACE 只会新增兄弟行,
+// MAX(version) 仍是 11,升级分支永远不会进入。
+func TestMigrateV10ToV11_AddsAllColumns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	// 1. 引导到"已是 v10 但缺 v11 列"的状态。
+	if _, err := m.DB().Exec(schemaVersionTableSQL); err != nil {
+		t.Fatalf("seed schema_version: %v", err)
+	}
+	if _, err := m.DB().Exec(v10TasksAiJobsSQL); err != nil {
+		t.Fatalf("seed v10 tasks/ai_jobs: %v", err)
+	}
+	if _, err := m.DB().Exec(
+		`INSERT INTO schema_version (version, description) VALUES (10, 'v10');`,
+	); err != nil {
+		t.Fatalf("seed version=10: %v", err)
+	}
+	// 前置断言:v10 tasks 必不含 v11 列,否则升级分支被 addColumnIfMissing
+	// 直接跳过,测试就测不到 ALTER TABLE ... CHECK(...) 路径。
+	v11Cols := []string{
+		"version", "priority_score", "urgency_score",
+		"energy_required", "context_tag", "blocked_by",
+	}
+	for _, col := range v11Cols {
+		if hasColumn(m.DB(), "tasks", col) {
+			t.Fatalf("前置: v10 tasks 不应含 %s 列", col)
+		}
+	}
+
+	// 2. 跑 Migrate():currentVersion=10 < 11 → 走升级分支。
+	if err := m.Migrate(); err != nil {
+		t.Fatalf("Migrate v10→v11: %v", err)
+	}
+
+	// 3. 6 列必须都在 tasks 表上。
+	for _, col := range v11Cols {
+		if !hasColumn(m.DB(), "tasks", col) {
+			t.Errorf("tasks.%s 缺失", col)
+		}
+	}
+
+	// 4. ADD COLUMN ... CHECK(...) 路径真实生效:违规值应被拒。
+	if _, err := m.DB().Exec(
+		`INSERT INTO tasks (title, priority_score) VALUES ('bad', 99);`,
+	); err == nil {
+		t.Error("CHECK(priority_score BETWEEN 1 AND 5) 未生效: priority_score=99 应被拒")
+	}
+	if _, err := m.DB().Exec(
+		`INSERT INTO tasks (title, blocked_by) VALUES ('bad', 'not-json');`,
+	); err == nil {
+		t.Error("CHECK(json_valid(blocked_by)) 未生效: blocked_by='not-json' 应被拒")
+	}
+
+	// 5. schema_version 已被推进到 11。
+	var v int
+	if err := m.DB().QueryRow(
+		`SELECT MAX(version) FROM schema_version`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != 11 {
+		t.Errorf("schema_version.max = %d, want 11", v)
 	}
 }
 

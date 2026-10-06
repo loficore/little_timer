@@ -217,6 +217,12 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		DueDate:          res.DueDate,
 		EstimatedMinutes: &estMin,
 		Status:           &status,
+		// 4 维评分(spec §5.3 / task 7):直接透传 res —— ValidateDecomposition
+		// 已做缺省 / 越界回落,worker 端不再重复校验(Review Focus #3)。
+		PriorityScore:  &res.PriorityScore,
+		UrgencyScore:   &res.UrgencyScore,
+		EnergyRequired: &res.EnergyRequired,
+		ContextTag:     &res.ContextTag,
 	}
 	// title 软化:append 模式下,用户改过的 title(user_edited_title=true)不被
 	// 覆盖;replace 模式强制覆盖(replace 是用户显式选的全量重建)。
@@ -226,7 +232,15 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		updateFields.Title = &res.Title
 	}
 	updateFields.UserEditedTitle = &clearFlag
-	if err := w.aiTasks.UpdateTask(task.ID, updateFields); err != nil {
+	// 乐观锁:取当前 server 端 version。TaskRow.Version 当前未被 scanTask
+	// 填入(taskCols 不含 version),所以显式取一次。冲突(版本已被别处
+	// 修改)在 work 上下文里少见,但语义上仍要正确传递。
+	ver, verr := w.aiTasks.GetTaskVersion(task.ID)
+	if verr != nil {
+		w.fail(job, task.ID, "read version:"+verr.Error())
+		return
+	}
+	if err := w.aiTasks.UpdateTask(task.ID, updateFields, ver); err != nil {
 		w.fail(job, task.ID, "update task:"+err.Error())
 		return
 	}

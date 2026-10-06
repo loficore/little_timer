@@ -10,24 +10,26 @@ test.describe("StatsPage - 图表显示测试", () => {
     const created = await page.evaluate(async () => {
       const today = new Date().toISOString().split("T")[0];
 
+      // ConflictGuard (Task 3): 新建资源无 version 语义,在 body 送 version=0。
+      // 走 body 而不是 If-Match header,避免跨源 fetch 触发 CORS 预检。
       const setRes = await fetch("http://127.0.0.1:8080/api/habit-sets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "测试集", description: "test", color: "#6366f1" }),
+        body: JSON.stringify({ version: 0, name: "测试集", description: "test", color: "#6366f1" }),
       });
       const set = await setRes.json();
 
       const habitRes = await fetch("http://127.0.0.1:8080/api/habits", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ set_id: set.id, name: "测试习惯", goal_seconds: 1500, color: "#6366f1" }),
+        body: JSON.stringify({ version: 0, set_id: set.id, name: "测试习惯", goal_seconds: 1500, color: "#6366f1" }),
       });
       const habit = await habitRes.json();
 
       const sessionRes = await fetch("http://127.0.0.1:8080/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ habit_id: habit.id, duration_seconds: 1500, count: 1, date: today }),
+        body: JSON.stringify({ version: 0, habit_id: habit.id, duration_seconds: 1500, count: 1, date: today }),
       });
       const session = await sessionRes.json();
 

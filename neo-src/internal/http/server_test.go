@@ -317,7 +317,9 @@ func TestTimerProgressHandler(t *testing.T) {
 func TestTimerModeSwitchEmpty(t *testing.T) {
 	r, _ := newRealTestRouter(t)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/mode", strings.NewReader("")))
+	req := httptest.NewRequest(http.MethodPost, "/api/mode", strings.NewReader(""))
+	req.Header.Set("If-Match", `"0"`)
+	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST /api/mode (empty): code = %d, body = %s", w.Code, w.Body.String())
 	}
@@ -332,7 +334,9 @@ func TestTimerModeSwitchCountdown(t *testing.T) {
 	r, _ := newRealTestRouter(t)
 	w := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"mode":"countdown"}`)
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/mode", body))
+	req := httptest.NewRequest(http.MethodPost, "/api/mode", body)
+	req.Header.Set("If-Match", `"0"`)
+	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST /api/mode countdown: code = %d, body = %s", w.Code, w.Body.String())
 	}
@@ -353,7 +357,9 @@ func TestTimerModeSwitchCountdown(t *testing.T) {
 func TestFrontendLogEmptyBody(t *testing.T) {
 	r, _ := newRealTestRouter(t)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/log", strings.NewReader("")))
+	req := httptest.NewRequest(http.MethodPost, "/api/log", strings.NewReader(""))
+	req.Header.Set("If-Match", `"0"`)
+	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST /api/log empty: code = %d", w.Code)
 	}

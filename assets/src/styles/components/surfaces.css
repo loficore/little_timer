@@ -90,4 +90,31 @@
     backdrop-filter: blur(12px) saturate(116%);
     -webkit-backdrop-filter: blur(12px) saturate(116%);
   }
+
+  /* ===== Schedule Timeline (Task 9) ===== */
+
+  /* context_tag 底色族:左侧 3px inset 色条区分 6 类情境。 */
+  .timeline-task-block.context-writing {
+    box-shadow: inset 3px 0 0 #a855f7;
+  }
+  .timeline-task-block.context-coding {
+    box-shadow: inset 3px 0 0 #0ea5e9;
+  }
+  .timeline-task-block.context-communication {
+    box-shadow: inset 3px 0 0 #22c55e;
+  }
+  .timeline-task-block.context-study {
+    box-shadow: inset 3px 0 0 #eab308;
+  }
+  .timeline-task-block.context-chores {
+    box-shadow: inset 3px 0 0 #f97316;
+  }
+  .timeline-task-block.context-general,
+  .timeline-task-block.context-default {
+    box-shadow: inset 3px 0 0 color-mix(in oklab, var(--my-outline) 60%, transparent);
+  }
+
+  .timeline-track {
+    min-height: 4rem;
+  }
 }

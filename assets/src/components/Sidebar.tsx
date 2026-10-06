@@ -5,10 +5,10 @@
 
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
-import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon } from "../utils/icons";
+import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, CalendarIcon } from "../utils/icons";
 import { SparklesIconComponent } from "../utils/icons";
 
-type Page = "timer" | "habits" | "aigtd" | "stats" | "settings";
+type Page = "timer" | "habits" | "aigtd" | "schedule" | "stats" | "settings";
 
 interface SidebarProps {
     /** 当前所在页面 */
@@ -37,6 +37,13 @@ const navItems = [
         labelKey: "aigtd.nav_label",
         icon: (
             <SparklesIconComponent className="h-5 w-5" />
+        ),
+    },
+    {
+        id: "schedule" as const,
+        labelKey: "schedule.nav_label",
+        icon: (
+            <CalendarIcon className="h-5 w-5" />
         ),
     },
     {

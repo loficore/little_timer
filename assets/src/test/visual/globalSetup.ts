@@ -32,6 +32,8 @@ async function setThemeSettings(): Promise<void> {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          // ConflictGuard (Task 3): settings 资源无 per-row version 语义,送 "0"。
+          "If-Match": '"0"',
           "Content-Length": Buffer.byteLength(settingsPayload),
         },
       },
@@ -137,6 +139,8 @@ async function createTestHabitSet(): Promise<void> {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          // ConflictGuard: habit-set 新建无 version 语义,送 "0" 满足中间件。
+          "If-Match": '"0"',
           "Content-Length": Buffer.byteLength(habitSetPayload),
         },
       },
@@ -182,6 +186,8 @@ async function createTestHabit(): Promise<void> {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          // ConflictGuard: habit 新建无 version 语义,送 "0" 满足中间件。
+          "If-Match": '"0"',
           "Content-Length": Buffer.byteLength(habitPayload),
         },
       },

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/http/middleware"
 	"little-timer/internal/storage"
 )
 
@@ -26,6 +28,8 @@ func setupAIGtdRouter(t *testing.T, a *app.App) *gin.Engine {
 		c.Set("app", a)
 		c.Next()
 	})
+	// 与生产 router 对齐:所有 mutation 路由强制带 version(乐观锁 plumbing)。
+	r.Use(middleware.RequireVersionForMutation())
 
 	r.GET("/api/tasks", TaskList)
 	r.POST("/api/tasks", TaskCreate)
@@ -42,9 +46,21 @@ func setupAIGtdRouter(t *testing.T, a *app.App) *gin.Engine {
 
 	r.GET("/api/settings/llm", LLMSettingsGet)
 	r.PUT("/api/settings/llm", LLMSettingsUpdate)
+	testRouterApp = a
+	t.Cleanup(func() { testRouterApp = nil })
 	return r
 }
 
+// testRouterApp 由 setupAIGtdRouter 记录,供 doJSON 根据路径查 task 当前
+// version 用。测试串行执行,单包内不并发访问这个变量即可。
+var testRouterApp *app.App
+
+// doJSON 发请求并返回 recorder。
+//
+// 与生产对齐:所有 mutation 必带 version(ConflictGuard)。乐观锁 plumbing
+// (Task 4) 让 handler 用 middleware.GetVersion(c);为避免每条用例手动跟踪
+// 每次 mutation 后的 version,这里从 /api/tasks/{id}* 路径解析 task ID,
+// 查 DB 拿当前 server 端 version 作为 If-Match;其余路径回退 "0"。
 func doJSON(t *testing.T, r *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer
@@ -55,9 +71,53 @@ func doJSON(t *testing.T, r *gin.Engine, method, path string, body any) *httptes
 	}
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", currentVersionForPath(method, path))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w
+}
+
+// currentVersionForPath 读 path 中 task ID 对应的当前 DB version。
+// 读方法(GET/HEAD/OPTIONS)中间件放行,不需要版本,返 "0"。
+//
+// 子任务路径 `/api/tasks/:id/subtasks/:sub_id` 的乐观锁 version 是
+// **子任务**自身的 version(子任务也是 tasks 行,与顶层 task 同源)。
+// 顶层 task 的 version 不动 → 不能用它作 If-Match,否则第一次 PATCH 后
+// 后续 PATCH 永远 409(GetTaskVersion(taskID) 一直=0)。
+func currentVersionForPath(method, path string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return "0"
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) >= 3 && parts[0] == "api" && parts[1] == "tasks" {
+		if testRouterApp == nil || testRouterApp.SQLite == nil {
+			return "0"
+		}
+		// 子任务路径:/api/tasks/{task_id}/subtasks/{sub_id}
+		if len(parts) >= 5 && parts[3] == "subtasks" {
+			subID, err := strconv.ParseInt(parts[4], 10, 64)
+			if err != nil {
+				return "0"
+			}
+			v, err := testRouterApp.SQLite.AITasks().GetTaskVersion(subID)
+			if err != nil {
+				return "0"
+			}
+			return strconv.FormatInt(v, 10)
+		}
+		// 顶层 task 路径:/api/tasks/{id}[/scores]
+		id, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			return "0"
+		}
+		v, err := testRouterApp.SQLite.AITasks().GetTaskVersion(id)
+		if err != nil {
+			return "0"
+		}
+		return strconv.FormatInt(v, 10)
+	}
+	return "0"
 }
 
 func TestSubtaskUpdate_StatusValidation(t *testing.T) {
@@ -456,5 +516,150 @@ func TestLLMSettings_RejectsBadProvider(t *testing.T) {
 	w := doJSON(t, r, http.MethodPut, "/api/settings/llm", map[string]any{"provider": "bogus"})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("bad provider: code=%d, want 400", w.Code)
+	}
+}
+
+// TestTaskUpdate_409OnVersionMismatch 验证 C3:TaskUpdate 的乐观锁冲突
+// 必须映射为 409(带标准 {error,code} body),而不是 500。
+func TestTaskUpdate_409OnVersionMismatch(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+	taskID := createTask(t, r, "t")
+	path := "/api/tasks/" + strconv.FormatInt(taskID, 10)
+
+	// 第一次更新:doJSON 自动带 If-Match = 当前版本(0)→ 成功,version→1。
+	w := doJSON(t, r, http.MethodPatch, path, map[string]any{"title": "新标题"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("first update: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 第二次用旧 version=0(不走 doJSON,避免注入最新 If-Match)→ 409。
+	w = doJSONNoIfMatch(t, r, http.MethodPatch, path, map[string]any{
+		"version": 0,
+		"title":   "冲突标题",
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("want 409, got code=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Code != "version_conflict" {
+		t.Errorf("code=%q, want version_conflict", resp.Code)
+	}
+	// 冲突不应落库。
+	row, _, _ := a.SQLite.AITasks().GetTask(taskID)
+	if row.Title != "新标题" {
+		t.Errorf("冲突更新不应落库, title=%q", row.Title)
+	}
+}
+
+// TestTaskDelete_409OnVersionMismatch 验证 C1:DeleteTask 也强制乐观锁,
+// 旧版本删除 → 409 且行仍在;正确版本删除 → 204。
+func TestTaskDelete_409OnVersionMismatch(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+	taskID := createTask(t, r, "t")
+	path := "/api/tasks/" + strconv.FormatInt(taskID, 10)
+
+	// 先 bump 到 version=1。
+	w := doJSON(t, r, http.MethodPatch, path, map[string]any{"title": "新标题"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("bump: code=%d body=%s", w.Code, w.Body.String())
+	}
+	// 旧 version=0 删除 → 409。
+	w = doJSONNoIfMatch(t, r, http.MethodDelete, path, map[string]any{"version": 0})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("stale delete want 409, got code=%d body=%s", w.Code, w.Body.String())
+	}
+	if _, _, err := a.SQLite.AITasks().GetTask(taskID); err != nil {
+		t.Fatalf("冲突删除后 task 应仍在: %v", err)
+	}
+	// 正确版本(doJSON 注入当前 If-Match=1)→ 204。
+	w = doJSON(t, r, http.MethodDelete, path, nil)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("correct delete want 204, got code=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestSubtaskUpdate_409OnVersionMismatch 验证 C2:子任务更新强制乐观锁,
+// 旧版本 → 409;正确版本 → 成功。
+func TestSubtaskUpdate_409OnVersionMismatch(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+	taskID := createTask(t, r, "t")
+
+	w := doJSON(t, r, http.MethodPost,
+		"/api/tasks/"+strconv.FormatInt(taskID, 10)+"/subtasks",
+		map[string]any{"title": "子任务"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("create subtask: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var sub SubtaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &sub)
+	subPath := "/api/tasks/" + strconv.FormatInt(taskID, 10) +
+		"/subtasks/" + strconv.FormatInt(sub.ID, 10)
+
+	// 第一次:doJSON 自动注入子任务当前版本(0)→ 成功,version→1。
+	w = doJSON(t, r, http.MethodPatch, subPath, map[string]any{"status": "done"})
+	if w.Code != http.StatusNoContent && w.Code != http.StatusOK {
+		t.Fatalf("first subtask update: code=%d body=%s", w.Code, w.Body.String())
+	}
+	// 旧 version=0 → 409。
+	w = doJSONNoIfMatch(t, r, http.MethodPatch, subPath, map[string]any{
+		"version": 0,
+		"status":  "active",
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("stale subtask update want 409, got code=%d body=%s", w.Code, w.Body.String())
+	}
+	// 状态未被冲突写覆盖。
+	_, subs, _ := a.SQLite.AITasks().GetTask(taskID)
+	if len(subs) != 1 || subs[0].Status != domain.SubtaskStatusDone {
+		t.Errorf("冲突更新不应改状态, got %+v", subs)
+	}
+}
+
+// TestTaskCreate_SingleWrite 验证 I7:POST /api/tasks 用单次 UpdateTask
+// 写 title+notes+status,version 只 bump 一次(==1),且 notes/status/ai_status
+// 正确落库(不再吞 notes 写的错误)。
+func TestTaskCreate_SingleWrite(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks",
+		map[string]any{"title": "写报告", "notes": "周报备注"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("create: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var created TaskDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Title != "写报告" || created.Notes != "周报备注" {
+		t.Fatalf("title/notes = %q/%q", created.Title, created.Notes)
+	}
+	if created.Status != "active" {
+		t.Errorf("status = %q, want active", created.Status)
+	}
+	if created.AIStatus != "done" {
+		t.Errorf("ai_status = %q, want done", created.AIStatus)
+	}
+	// version 只 bump 一次(单次 UpdateTask),不是旧实现的 2 次。
+	if created.Version != 1 {
+		t.Errorf("version = %d, want 1(单次写);旧实现会写 2 次", created.Version)
+	}
+
+	// 空 notes 也应单次写成功(notes 列 DEFAULT '',语义等价)。
+	w = doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "无备注"})
+	var created2 TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &created2)
+	if created2.Version != 1 {
+		t.Errorf("空 notes version = %d, want 1", created2.Version)
+	}
+	if created2.Notes != "" {
+		t.Errorf("空 notes 应为空, got %q", created2.Notes)
 	}
 }

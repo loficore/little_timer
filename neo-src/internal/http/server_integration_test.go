@@ -126,6 +126,11 @@ func (f *integrationFixture) httpDo(t *testing.T, method, path string, body any)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// ConflictGuard (Task 3): 所有 mutation 必须带版本号。storage 层尚未
+	// 强制比对（Task 4 才实现 WHERE version = ?），这里统一送 "0" 即可。
+	if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
+		req.Header.Set("If-Match", `"0"`)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)

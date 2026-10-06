@@ -29,13 +29,20 @@ async function navigateToAIGtd(page: import("@playwright/test").Page) {
 test.describe("AI GTD E2E", () => {
   test.afterAll(async () => {
     const ctx = await request.newContext({ baseURL: apiURL });
-    await ctx.post("/api/aigtd/_test/prompt", { data: { text: "" } });
+    await ctx.post("/api/aigtd/_test/prompt", {
+      // ConflictGuard (Task 3): 测试端点也在 /api 组,mutation 必须带 version。
+      headers: { "If-Match": '"0"' },
+      data: { text: "" },
+    });
     await ctx.dispose();
   });
 
   test("随手记 → AI 拆解 → 子任务出现在卡片里", async ({ page }) => {
     const ctx = await request.newContext({ baseURL: apiURL });
-    await ctx.post("/api/aigtd/_test/prompt", { data: { text: fixedLLMResponse } });
+    await ctx.post("/api/aigtd/_test/prompt", {
+      headers: { "If-Match": '"0"' },
+      data: { text: fixedLLMResponse },
+    });
     await ctx.dispose();
 
     await page.goto(baseURL);
@@ -51,7 +58,10 @@ test.describe("AI GTD E2E", () => {
 
   test("LLM 5xx → 卡片显示解析失败 + 重新解析按钮", async ({ page }) => {
     const ctx = await request.newContext({ baseURL: apiURL });
-    await ctx.post("/api/aigtd/_test/prompt", { data: { fail_with: 500 } });
+    await ctx.post("/api/aigtd/_test/prompt", {
+      headers: { "If-Match": '"0"' },
+      data: { fail_with: 500 },
+    });
     await ctx.dispose();
 
     await page.goto(baseURL);

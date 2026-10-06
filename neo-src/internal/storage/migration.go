@@ -15,6 +15,16 @@ import (
 // CurrentSchemaVersion 是本构建目标针对的 schema 版本。
 const CurrentSchemaVersion = 11
 
+// reconcileStuckThresholdSeconds 是 reconcileStuckInFlightJobs 判定 in-flight
+// 行"陈旧"的阈值。running 行看 started_at、queued 行看 created_at,均需
+// 早于 now - 此阈值才被清。设阈值的目的是避免 mid-runtime(运维脚本/CLI
+// 在 server 运行中调 Migrate)误杀近期活 job(issue #12)。
+//
+// 取 600s(10 分钟),与 WorkerPool.reclaimThresholdSeconds(300s)同量级
+// 但更保守:worker 启动时只 reclaim running 行,reconcile 额外覆盖滞留的
+// queued 行,阈值更大可降低把尚在正常处理中的行误判为陈旧的概率。
+const reconcileStuckThresholdSeconds = 600
+
 // MigrationError 是迁移失败的类型化哨兵错误。
 type MigrationError string
 
@@ -412,15 +422,25 @@ func (m *MigrationManager) setSchemaVersion(version int) error {
 // reconcileStuckInFlightJobs 在创建 idx_ai_jobs_in_flight 部分 UNIQUE 索引
 // 前调用:若同一 task 已存在多个 queued/running ai_jobs(索引是
 // UNIQUE(task_id) WHERE status IN ('queued','running'),故仅同 task 多行会
-// 触发冲突),直接 UPDATE 为 failed + finished_at,避免 UNIQUE 索引创建失败
-// 被吞掉(reviewer M2)。幂等;若没有 stuck 行,影响 0 行。
+// 触发冲突),把陈旧行 UPDATE 为 failed + finished_at,避免 UNIQUE 索引创建
+// 失败被吞掉(reviewer M2)。
+//
+// 只清真正陈旧的行(running 看 started_at、queued 看 created_at),均需
+// 早于 reconcileStuckThresholdSeconds,避免 mid-runtime 误杀近期 in-flight
+// 活 job(issue #12:若未来某个运维脚本/CLI 在 server 运行中调 Migrate,
+// 无阈值版本会把活 job 标 failed + finished)。幂等;若没有 stuck 行,
+// 影响 0 行。
 func (m *MigrationManager) reconcileStuckInFlightJobs() error {
 	res, err := m.db.Exec(
-		`UPDATE ai_jobs
-		 SET status = 'failed',
-		     finished_at = CURRENT_TIMESTAMP,
-		     error_message = 'reconciled before idx_ai_jobs_in_flight: stale queued/running'
-		 WHERE status IN ('queued', 'running');`,
+		fmt.Sprintf(
+			`UPDATE ai_jobs
+			 SET status = 'failed',
+			     finished_at = CURRENT_TIMESTAMP,
+			     error_message = 'reconciled before idx_ai_jobs_in_flight: stale queued/running'
+			 WHERE (status = 'queued'  AND created_at < datetime('now', '-%d seconds'))
+			    OR (status = 'running' AND started_at < datetime('now', '-%d seconds'));`,
+			reconcileStuckThresholdSeconds, reconcileStuckThresholdSeconds,
+		),
 	)
 	if err != nil {
 		return err

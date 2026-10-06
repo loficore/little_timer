@@ -190,19 +190,22 @@ func TestMigrateReconcileStuckInFlightJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Seed 同一 task 多个 in-flight 行(同 task 的 (queued/running) 行
-	// 重复,会触发 idx_ai_jobs_in_flight 部分 UNIQUE 失败)。
+	// 重复,会触发 idx_ai_jobs_in_flight 部分 UNIQUE 失败)。两条都设成
+	// 20 分钟前(> reconcileStuckThresholdSeconds),才是真正 stuck 的行。
 	if _, err := m.DB().Exec(
 		`INSERT INTO tasks (id, title, source) VALUES (1,'t1','manual');`,
 	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.DB().Exec(
-		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload) VALUES (1,'p','m','queued','{}');`,
+		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload, created_at, started_at)
+		 VALUES (1,'p','m','running','{}', datetime('now','-20 minutes'), datetime('now','-20 minutes'));`,
 	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.DB().Exec(
-		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload) VALUES (1,'p','m','running','{}');`,
+		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload, created_at)
+		 VALUES (1,'p','m','queued','{}', datetime('now','-20 minutes'));`,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -222,6 +225,81 @@ func TestMigrateReconcileStuckInFlightJobs(t *testing.T) {
 	}
 	if running < 2 {
 		t.Errorf("reconcile 后应有 ≥2 行被标 failed, got %d", running)
+	}
+}
+
+// TestMigrateReconcile_KeepsRecentInFlight 验证 issue #12 修复:
+// reconcile 仅清真正 stuck(超过 reconcileStuckThresholdSeconds)的行,
+// mid-runtime 近期 in-flight 行必须存活,不被误杀。
+//
+// 场景:同一 task 两条 in-flight 行(部分 UNIQUE 索引会先因重复失败,
+// 触发 reconcile)——
+//   - 近期 running(started_at=now):模拟 mid-runtime 正在跑的活 job,必须存活;
+//   - 陈旧 queued(created_at=20 分钟前):陈旧滞留行,应被清。
+//
+// 修复后 reconcile 应只清 queued 那条;recent running 存活后,索引唯一性
+// 满足,索引创建成功。
+func TestMigrateReconcile_KeepsRecentInFlight(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	if _, err := m.DB().Exec(v8SchemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(v9TasksAiJobsSQL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(`INSERT INTO schema_version (version, description) VALUES (9,'v9');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(
+		`INSERT INTO tasks (id, title, source) VALUES (1,'t1','manual');`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// 近期 running(started_at=now):不应被 reconcile。
+	if _, err := m.DB().Exec(
+		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload, started_at)
+		 VALUES (1,'p','m','running','{}', datetime('now'));`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// 陈旧 queued(created_at=20min 前):应被 reconcile。
+	if _, err := m.DB().Exec(
+		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload, created_at)
+		 VALUES (1,'p','m','queued','{}', datetime('now','-20 minutes'));`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.Migrate(); err != nil {
+		t.Fatalf("Migrate 应清掉陈旧行后成功,实际: %v", err)
+	}
+
+	// 近期 running 行必须存活(mid-runtime 活 job 不能被误杀)。
+	var stillRunning int
+	if err := m.DB().QueryRow(
+		`SELECT COUNT(*) FROM ai_jobs WHERE status = 'running';`,
+	).Scan(&stillRunning); err != nil {
+		t.Fatal(err)
+	}
+	if stillRunning != 1 {
+		t.Errorf("近期 running 行应存活, got running count = %d, want 1", stillRunning)
+	}
+
+	// 陈旧 queued 行应被 reconcile 标 failed。
+	var reconciled int
+	if err := m.DB().QueryRow(
+		`SELECT COUNT(*) FROM ai_jobs WHERE status = 'failed' AND error_message LIKE 'reconciled%';`,
+	).Scan(&reconciled); err != nil {
+		t.Fatal(err)
+	}
+	if reconciled != 1 {
+		t.Errorf("陈旧 queued 行应被 reconcile 清掉, got reconciled count = %d, want 1", reconciled)
 	}
 }
 

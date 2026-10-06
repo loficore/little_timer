@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
   resumeMock: vi.fn().mockResolvedValue(undefined),
   skipToNextMock: vi.fn(),
   createSessionMock: vi.fn().mockResolvedValue(undefined),
+  getHabitDetailMock: vi.fn().mockResolvedValue({
+    habit_id: 7,
+    today_seconds: 0,
+    goal_seconds: 100,
+  }),
 }));
 
 vi.mock("../utils/apiClientSingleton", () => ({
@@ -22,11 +27,7 @@ vi.mock("../utils/apiClientSingleton", () => ({
     getHabits: vi.fn().mockResolvedValue([
       { id: 7, set_id: 1, name: "Read 10 pages", color: "#ff0000", goal_seconds: 100 },
     ]),
-    getHabitDetail: vi.fn().mockResolvedValue({
-      habit_id: 7,
-      today_seconds: 0,
-      goal_seconds: 100,
-    }),
+    getHabitDetail: mocks.getHabitDetailMock,
     createSession: mocks.createSessionMock,
     startTimer: vi.fn().mockResolvedValue({}),
     pauseTimer: vi.fn().mockResolvedValue({}),
@@ -243,5 +244,41 @@ describe("TimerPage", () => {
     });
 
     expect(mocks.showToastMock).toHaveBeenCalledWith("toast.habit_completed", "success");
+  });
+
+  // Guard: 若 habitDetail.today_seconds 在 session 启动前已达 goal_seconds,
+  // 不应再自动 finish+recordSession(spec §7 layer 3)。
+  // 场景:e2e 跨项目共享后端进程,mobile-412 选中的 habit 可能已在 mobile-390 的
+  // countdown 测试里把 today_seconds 累积到 >= goal,这条 guard 阻止现 session
+  // 被立即误 finish。
+  it("今日目标已达成时不应自动 finish(避免跨测试残留触发现 session)", async () => {
+    // 覆盖 getHabitDetail: today_seconds 已是 200,goal=100 —— 本不应触发自动 finish。
+    const originalImpl = mocks.getHabitDetailMock.getMockImplementation();
+    mocks.getHabitDetailMock.mockResolvedValue({
+      habit_id: 7,
+      today_seconds: 200,
+      goal_seconds: 100,
+    });
+
+    try {
+      render(<TimerPage />);
+
+      fireEvent.click(screen.getByTestId("timer-habit-picker"));
+      fireEvent.click(await screen.findByTestId("habit-option-7"));
+
+      fireEvent.click(screen.getByTestId("timer-start"));
+
+      // 给 effect / tick 一点时间跑(微任务级别),确认 finish/recordSession 未被调用。
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(mocks.finishMock).not.toHaveBeenCalled();
+      expect(mocks.createSessionMock).not.toHaveBeenCalled();
+    } finally {
+      if (originalImpl) {
+        mocks.getHabitDetailMock.mockImplementation(originalImpl);
+      } else {
+        mocks.getHabitDetailMock.mockReset();
+      }
+    }
   });
 });

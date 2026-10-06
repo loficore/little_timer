@@ -43,7 +43,7 @@ import type {
  * 不复用普通 Error(仅 message 含 "409"),保证 instanceof 判定稳。
  */
 export class VersionConflictError extends Error {
-    constructor(message: string = "version conflict") {
+    constructor(message = "version conflict") {
         super(message);
         this.name = "VersionConflictError";
     }

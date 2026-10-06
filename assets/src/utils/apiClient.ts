@@ -662,7 +662,7 @@ export class APIClient {
      *  也回填到 body,handler 通过 middleware.GetVersion(c) 取值做乐观锁。
      */
     async updateTask(id: number, patch: Partial<TaskDTO>): Promise<TaskDTO> {
-        const { version, ...rest } = patch;
+        const { version } = patch;
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (typeof version === "number") {
             headers["If-Match"] = `"${version}"`;

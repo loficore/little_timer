@@ -8,7 +8,7 @@ import { t } from "../utils/i18n";
 import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, CalendarIcon } from "../utils/icons";
 import { SparklesIconComponent } from "../utils/icons";
 
-type Page = "timer" | "habits" | "aigtd" | "schedule" | "stats" | "settings";
+type Page = "timer" | "habits" | "aigtd" | "schedule" | "stats" | "settings" | "dailySweep";
 
 interface SidebarProps {
     /** 当前所在页面 */
@@ -44,6 +44,13 @@ const navItems = [
         labelKey: "schedule.nav_label",
         icon: (
             <CalendarIcon className="h-5 w-5" />
+        ),
+    },
+    {
+        id: "dailySweep" as const,
+        labelKey: "nav.daily_sweep",
+        icon: (
+            <SparklesIconComponent className="h-5 w-5" />
         ),
     },
     {

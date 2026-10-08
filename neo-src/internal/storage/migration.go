@@ -13,7 +13,7 @@ import (
 )
 
 // CurrentSchemaVersion 是本构建目标针对的 schema 版本。
-const CurrentSchemaVersion = 11
+const CurrentSchemaVersion = 12
 
 // reconcileStuckThresholdSeconds 是 reconcileStuckInFlightJobs 判定 in-flight
 // 行"陈旧"的阈值。running 行看 started_at、queued 行看 created_at,均需
@@ -143,6 +143,30 @@ const aiJobsTableSQL = `CREATE TABLE IF NOT EXISTS ai_jobs (
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );`
 
+// dailySweepLogTableSQL 是 GTD Daily Sweep 的同日去重日志(v12)。date 为
+// 本地时区的 YYYY-MM-DD;cron 触发前查此表,手动触发不查。
+const dailySweepLogTableSQL = `CREATE TABLE IF NOT EXISTS daily_sweep_log (
+    date TEXT PRIMARY KEY,
+    swept_at TIMESTAMP NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('cron','manual'))
+);`
+
+// adoptionsTableSQL 是 GTD Review 的用户采纳审计(v12)。change_id 是 AI 提议里
+// 的全局唯一 id(LLM 生成 UUID v4,缺失时 ValidateReviewResult 用
+// taskID-jobID-index 兜底)。idx_adoptions_idempotent(见 indexes)保证
+// (ai_job_id, change_id) 重复采纳只落一行。
+const adoptionsTableSQL = `CREATE TABLE IF NOT EXISTS adoptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    ai_job_id INTEGER NOT NULL,
+    change_id TEXT NOT NULL,
+    version_before INTEGER NOT NULL,
+    version_after INTEGER NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (ai_job_id) REFERENCES ai_jobs(id) ON DELETE CASCADE
+);`
+
 const sessionsTableSQL = `CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     habit_id INTEGER NOT NULL,
@@ -190,6 +214,9 @@ const settingsTableSQL = `CREATE TABLE IF NOT EXISTS settings (
  log_level TEXT NOT NULL CHECK(length(log_level) <= 10),
  log_enable_timestamp BOOLEAN NOT NULL DEFAULT 1,
  log_tick_interval INTEGER NOT NULL DEFAULT 1000 CHECK(log_tick_interval >= 100 AND log_tick_interval <= 10000),
+ -- v12:GTD Daily Sweep 触发配置(enabled + HH:MM 本地时刻;时间格式由应用层校验)
+ daily_sweep_enabled INTEGER NOT NULL DEFAULT 1 CHECK(daily_sweep_enabled IN (0,1)),
+ daily_sweep_time TEXT NOT NULL DEFAULT '08:00',
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);`
 
 // requiredTables 列出 verifyTablesExist 检查的表。任何变动都必须两边同步。
@@ -203,6 +230,8 @@ var requiredTables = []string{
 	"backup_config",
 	"tasks",
 	"ai_jobs",
+	"daily_sweep_log",
+	"adoptions",
 }
 
 // indexes 与 schema 一同创建，用于查询性能。
@@ -227,6 +256,9 @@ var indexes = []struct {
 	// 部分 UNIQUE 索引:同一 task 至多一个 queued/running job,堵住
 	// reparse 的 TOCTOU 并发(handler 转 409)。
 	{"idx_ai_jobs_in_flight", "CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_jobs_in_flight ON ai_jobs(task_id) WHERE status IN ('queued','running');"},
+	// v12:adopt 多端幂等兜底 — handler 命中 (ai_job_id, change_id) 重复时返 200,
+	// DB 层 UNIQUE 是并发竞态的最后防线。
+	{"idx_adoptions_idempotent", "CREATE UNIQUE INDEX IF NOT EXISTS idx_adoptions_idempotent ON adoptions(ai_job_id, change_id);"},
 }
 
 // backupConfigTableSQL 是 v7 的 backup_config 表（带 v8 凭据列）。
@@ -333,6 +365,12 @@ func (m *MigrationManager) CheckAndMigrate() error {
 	if err := m.migrateV10ToV11(); err != nil {
 		return err
 	}
+	// 幂等的 v11 → v12 升级:建 daily_sweep_log / adoptions 两表 + 幂等索引,
+	// settings 补 daily_sweep_enabled / daily_sweep_time 两列(fresh DB 走
+	// settingsTableSQL/createTables 已含,本步骤为 no-op)。
+	if err := m.migrateV11ToV12(); err != nil {
+		return err
+	}
 
 	// 旧 DB 升级后必须把 schema_version 推进到 CurrentSchemaVersion,
 	// 否则它永远停留在旧版本号,下次启动重复走升级分支(当前幂等所以安全,
@@ -393,6 +431,42 @@ func (m *MigrationManager) migrateV10ToV11() error {
 	if err := m.addColumnIfMissing("tasks", "blocked_by",
 		"TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(blocked_by))"); err != nil {
 		return fmt.Errorf("%w: add tasks.blocked_by: %w", ErrMigrationFailed, err)
+	}
+	return nil
+}
+
+// migrateV11ToV12 把 v11 DB 幂等地带到 v12:
+//   - 建 daily_sweep_log / adoptions 两表(IF NOT EXISTS);
+//   - 建 idx_adoptions_idempotent UNIQUE(ai_job_id, change_id) 幂等索引;
+//   - settings 补 daily_sweep_enabled / daily_sweep_time 两列。
+//
+// fresh DB 走 createTables(两表已在 steps 内)/ settingsTableSQL(两列已含),
+// 故本步骤为 no-op。daily_sweep_time 不加列级 CHECK —— HH:MM 需逐字符语义,
+// 应用层正则校验更可靠(参 migrateV9ToV10 注释与 delta §2)。
+func (m *MigrationManager) migrateV11ToV12() error {
+	for _, s := range []struct {
+		name string
+		sql  string
+	}{
+		{"daily_sweep_log", dailySweepLogTableSQL},
+		{"adoptions", adoptionsTableSQL},
+	} {
+		if _, err := m.db.Exec(s.sql); err != nil {
+			return fmt.Errorf("%w: create %s: %w", ErrTableCreationFailed, s.name, err)
+		}
+	}
+	if _, err := m.db.Exec(
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_adoptions_idempotent ON adoptions(ai_job_id, change_id);",
+	); err != nil {
+		return fmt.Errorf("%w: create idx_adoptions_idempotent: %w", ErrMigrationFailed, err)
+	}
+	if err := m.addColumnIfMissing("settings", "daily_sweep_enabled",
+		"INTEGER NOT NULL DEFAULT 1 CHECK(daily_sweep_enabled IN (0,1))"); err != nil {
+		return fmt.Errorf("%w: add settings.daily_sweep_enabled: %w", ErrMigrationFailed, err)
+	}
+	if err := m.addColumnIfMissing("settings", "daily_sweep_time",
+		"TEXT NOT NULL DEFAULT '08:00'"); err != nil {
+		return fmt.Errorf("%w: add settings.daily_sweep_time: %w", ErrMigrationFailed, err)
 	}
 	return nil
 }
@@ -469,6 +543,8 @@ func (m *MigrationManager) createTables() error {
 		{"settings", settingsTableSQL},
 		{"tasks", tasksTableSQL},
 		{"ai_jobs", aiJobsTableSQL},
+		{"daily_sweep_log", dailySweepLogTableSQL},
+		{"adoptions", adoptionsTableSQL},
 	}
 	for _, s := range steps {
 		if _, err := m.db.Exec(s.sql); err != nil {
@@ -573,6 +649,12 @@ func (m *MigrationManager) recreateSingleTable(name string) error {
 		return err
 	case "ai_jobs":
 		_, err := m.db.Exec(aiJobsTableSQL)
+		return err
+	case "daily_sweep_log":
+		_, err := m.db.Exec(dailySweepLogTableSQL)
+		return err
+	case "adoptions":
+		_, err := m.db.Exec(adoptionsTableSQL)
 		return err
 	default:
 		return fmt.Errorf("%w: unknown table %s", ErrTableCreationFailed, name)

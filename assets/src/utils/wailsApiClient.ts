@@ -412,6 +412,27 @@ export class WailsAPIClient {
   async fetchWallpaperByUrl(_url: string): Promise<WallpaperUploadResult> {
     return { filename: "" };
   }
+  // ===== GTD Daily Sweep / Review (v12) =====
+  // Android Wails 绑定尚未包含 daily-sweep 服务 — stub 为 throw,避免 proxy
+  // 静默返回 undefined。Web (HTTP) 路径走 APIClient 完整实现。
+  async startDailySweep(): Promise<{ job_ids: number[] }> {
+    throw new Error("daily_sweep.startDailySweep: not implemented on Android (Wails)");
+  }
+  async getDailySweepToday(): Promise<unknown> {
+    throw new Error("daily_sweep.getDailySweepToday: not implemented on Android (Wails)");
+  }
+  async adoptDailySweep(_body: unknown): Promise<unknown> {
+    throw new Error("daily_sweep.adoptDailySweep: not implemented on Android (Wails)");
+  }
+  async rejectDailySweep(_body: unknown): Promise<void> {
+    throw new Error("daily_sweep.rejectDailySweep: not implemented on Android (Wails)");
+  }
+  async getDailySweepSettings(): Promise<unknown> {
+    throw new Error("daily_sweep.getDailySweepSettings: not implemented on Android (Wails)");
+  }
+  async updateDailySweepSettings(_patch: unknown): Promise<unknown> {
+    throw new Error("daily_sweep.updateDailySweepSettings: not implemented on Android (Wails)");
+  }
 }
 
 export { isAndroid };

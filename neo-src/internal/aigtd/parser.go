@@ -107,3 +107,91 @@ func realParseErrs(errs []string) []string {
 	}
 	return out
 }
+
+// ParseReviewResult 是 ValidateReviewResult 的薄封装,提供给 worker / handler
+// 直接复用;LLM 原始文本解析 + change_id 兜底重写在这里完成。
+func ParseReviewResult(taskID, jobID int64, llmText string) ([]domain.ReviewProposal, []string, error) {
+	return ValidateReviewResult(taskID, jobID, llmText)
+}
+
+// reviewRetryWarnings 过滤掉良性 warning(change_id 兜底重写),只保留真正需要
+// 让 LLM 重试的校验失败(action/op 非法、proposal 反序列化失败)。
+//
+// Ruling(见 ledger):delta §4.2 明确 change_id 缺失/重复由 ValidateReviewResult
+// 兜底重写即可采纳,故此 warning 不得触发重试 —— 否则 LLM 偶发省略 change_id
+// 会被反复拒绝,违背兜底设计。计划 Step 4 的 "len(warnings)==0" 表述与此冲突,
+// 以 spec 为准。
+func reviewRetryWarnings(warnings []string) []string {
+	out := warnings[:0:0]
+	for _, w := range warnings {
+		if strings.Contains(w, "change_id") {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// ReviewParseOutcome 是 ParseReviewWithRetryDetailed 的结果:proposals + 校验
+// warnings + 最后一次 Provider 响应的原始文本与 token 计数(供 ai_jobs 审计 /
+// 成本分析用;即使最终解析失败,RawText 仍保留以便排查)。
+type ReviewParseOutcome struct {
+	Proposals    []domain.ReviewProposal
+	Warnings     []string
+	RawText      string
+	InputTokens  int
+	OutputTokens int
+}
+
+// ParseReviewWithRetryDetailed 与 ParseWithRetryDetailed 同构:最多调用
+// Provider maxAttempts 次,首次失败时把 warnings 反馈进 prompt 末尾再次调用。
+//
+// 与分解路径的关键差异:成功判据是 `len(warnings)==0 && err==nil`(validate
+// 不丢 proposal,只追加 warning);warnings 非空时算失败以触发重试,避免
+// 把非法 action / op 静默落库。
+//
+// taskID/jobID 用于 ValidateReviewResult 的 change_id 兜底重写(Δ2) ——
+// 计划 baseline 签名省略了这两个参数,delta §4.2 要求"对缺失/重复的
+// change_id 用 taskID-jobID-index 兜底",故签名补上。详见 ledger。
+func ParseReviewWithRetryDetailed(ctx context.Context, p Provider, req CompletionRequest, taskID, jobID int64, maxAttempts int) (*ReviewParseOutcome, error) {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	userPrompt := req.UserPrompt
+	out := &ReviewParseOutcome{}
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		r := req
+		r.UserPrompt = userPrompt
+		resp, err := p.Complete(ctx, r)
+		if err != nil {
+			// Provider 上游错误,不进入 parse 重试循环。
+			return nil, err
+		}
+		out.RawText = resp.Text
+		out.InputTokens = resp.InputTokens
+		out.OutputTokens = resp.OutputTokens
+
+		props, warns, perr := ValidateReviewResult(taskID, jobID, resp.Text)
+		// 成功:无解析错误,且没有需要重试的 warning(change_id 兜底属良性,
+		// 不算失败 —— 见 reviewRetryWarnings)。
+		retry := reviewRetryWarnings(warns)
+		if perr == nil && len(retry) == 0 {
+			out.Proposals = props
+			out.Warnings = warns // 良性 warning 仍回报,便于审计
+			return out, nil
+		}
+		// 失败:把真正的问题追加进 user prompt 末尾,让 LLM 下一轮修正。
+		var msg string
+		if perr != nil {
+			msg = perr.Error()
+		} else {
+			msg = strings.Join(retry, "; ")
+		}
+		userPrompt = req.UserPrompt + "\n\n你上次的输出无法通过校验:" + msg + "\n请按规则重新输出合法 JSON。"
+		out.Warnings = warns
+	}
+	if out.RawText == "" {
+		return nil, ErrParseFailed
+	}
+	return out, fmt.Errorf("%w: review validation failed after %d attempts", ErrParseFailed, maxAttempts)
+}

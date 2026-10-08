@@ -19,6 +19,16 @@ Little Timer is a cross-platform timer application built with Go, Gin, SQLite, a
 - Every mutation carries a `version` optimistic lock; cross-device edit conflicts return a strict 409 and prompt a refetch
 - Scoring is grounded in David Allen's GTD, the Eisenhower matrix, Loehr & Schwartz's energy management, and context-switching-cost research
 
+## Daily Sweep / GTD Review
+
+The `/daily-sweep` page offers a lightweight, daily-flavored version of GTD's classic weekly review:
+
+- **Automatic trigger** — Settings → **Daily Review** tab: configure `enabled` + `HH:MM` (default 08:00). Cron runs at that time, once per day (manual trigger bypasses the once-per-day gate).
+- **Manual trigger** — Sidebar entry **Daily Review** → "Run Review Now" button at the top.
+- **Four proposal actions** — `reschedule` (re-schedule) / `drop` (abandon stale, >30 days) / `modify_subtasks` (change / delete / add) / `no_op`. Subtask ops: `delete` / `modify_title` / `add` / **`mark_done`** (active subtasks only — done/archived data is never touched by AI).
+- **Adopt / reject, one by one** — adoption is recorded in the `adoptions` audit table. **Idempotent** — the same `(ai_job_id, change_id)` adopted twice applies only once; a UNIQUE index in the DB is the last line of defense against concurrent races. Task `version` is incremented by exactly 1 per adopt; cross-device conflicts return a strict 409 and prompt a refetch.
+- **Prospective view** — shows today's (last 24h) successful review proposals; the `useDailySweep` hook handles 409 retries. Adopted proposals drop off the list and live in the audit table. A retrospective (yesterday's unfinished) view is left for a future release.
+
 ## License
 
 This project is licensed under the [Apache License 2.0](./LICENSE). Please use it in compliance with the license.

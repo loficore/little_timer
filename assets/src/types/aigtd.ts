@@ -115,3 +115,45 @@ export interface ScheduleApplyPlacement {
   scheduled_end: number;
   version: number;
 }
+
+// ===== GTD Daily Sweep / Review (v12) =====
+
+/** 子任务变更 op 集(delta Δ3)。 */
+export interface SuggestedSubChange {
+  subtask_id?: number | null;
+  op: "delete" | "modify_title" | "add" | "mark_done";
+  new_title?: string | null;
+  reason?: string;
+}
+
+/** AI review 提议(与后端 domain.ReviewProposal 对齐)。 */
+export interface ReviewProposal {
+  change_id: string;
+  task_id: number;
+  action: "reschedule" | "drop" | "modify_subtasks" | "no_op";
+  suggested_scheduled_start?: number | null;
+  suggested_scheduled_end?: number | null;
+  suggested_subtask_changes?: SuggestedSubChange[];
+  reason: string;
+}
+
+/** today 出参里的一条提议:proposal 本体 + 来源 job + 当前 task version + 是否已采纳。 */
+export interface DailySweepProposal {
+  ai_job_id: number;
+  version: number;
+  is_adopted?: boolean;
+  proposal: ReviewProposal;
+}
+
+/** GET /api/daily-sweep/today 出参。 */
+export interface DailySweepToday {
+  swept_at?: string;
+  source?: "cron" | "manual";
+  proposals: DailySweepProposal[];
+}
+
+/** GET /api/settings/daily-sweep 出参。 */
+export interface DailySweepSettings {
+  enabled: boolean;
+  time: string;
+}

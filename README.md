@@ -34,6 +34,16 @@ API Key 通过主密码加密落本地 SQLite，**不上传、不入日志**。L
 - 所有修改带 version 乐观锁，跨端编辑冲突 → 严格 409 + 提示重拉
 - 评分依据：David Allen GTD、Eisenhower 矩阵、Loehr/Schwartz 能量管理、context switching cost 研究
 
+## Daily Sweep / GTD Review
+
+`/daily-sweep` 页面提供 GTD 经典"周回顾"的轻量化日常版：
+
+- **自动触发** — 设置 → **Daily Review** Tab 配 `enabled` + `HH:MM`(默认 08:00),到点 cron 跑一次(同日去重,手动触发不查)。
+- **手动触发** — Sidebar 入口 **Daily Review** → 顶部"立即扫一遍"。
+- **AI 提议四类 action** — `reschedule`(改排期) / `drop`(丢停滞 >30 天) / `modify_subtasks`(改/删/加子任务) / `no_op`(无事可做);子任务级 op 集 `delete` / `modify_title` / `add` / **`mark_done`**(仅对 active 子任务生效,done/archived 数据永不被 AI 改)。
+- **逐条 adopt / reject** — 采纳即落 `adoptions` 审计;**幂等** — 同一 `(ai_job_id, change_id)` 重复采纳只生效一次,DB UNIQUE 索引兜底并发竞态;版本号自增 1,跨端冲突严格 409 + 提示重拉。
+- **前瞻视图** — 显示今日(近 1 天)成功的 review 提议,前端 `useDailySweep` hook 处理 409 重试;已采纳的提议从列表移除,落到审计。回溯(昨日未完成)视图留待后续版本。
+
 ## 开源协议
 
 本项目采用 [Apache License 2.0](./LICENSE) 协议，请遵照协议使用。

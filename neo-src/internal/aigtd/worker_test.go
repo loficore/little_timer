@@ -2,7 +2,9 @@ package aigtd_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -525,4 +527,57 @@ func TestWorkerPool_PersistsScores(t *testing.T) {
 			t.Errorf("context_tag = %q, want general", after.ContextTag)
 		}
 	})
+}
+
+// TestWorkerPool_ReviewProducesProposalsNoMutation 验证 review 模式只产出
+// proposals 存 response_payload,绝不改 tasks(不改 title、不删子任务)。
+func TestWorkerPool_ReviewProducesProposalsNoMutation(t *testing.T) {
+	m := newTestDB(t)
+	c := m.AITasks()
+	taskID, _ := c.CreateTask("待办", "manual")
+	// CreateTask 只填 raw_text,title 默认空;显式设一个 title 以证明 review
+	// 不会覆盖它(若 worker 误走 decomposition 写回,title 会变)。
+	title := "用户标题"
+	if ver, err := c.GetTaskVersion(taskID); err == nil {
+		_ = c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &title}, ver)
+	}
+	subID, _ := c.CreateSubtask(taskID, "子1", 15, nil, 0)
+	jobID, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+
+	aigtd.SetTestOverride(`{"proposals":[{"change_id":"chg-1","task_id":`+
+		strconv.FormatInt(taskID, 10)+`,"action":"modify_subtasks","suggested_subtask_changes":[`+
+		`{"subtask_id":`+strconv.FormatInt(subID, 10)+`,"op":"delete","reason":"stale"}],"reason":"r"}]}`, 0)
+	defer aigtd.ClearTestOverride()
+
+	s := &fakeSettings{date: "2026-10-08", provider: "openai_compat", model: "m", apiKey: "k"}
+	wp := aigtd.NewWorkerPool(c, s, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wp.Start(ctx)
+	defer func() { wp.Stop(); wp.Wait() }()
+
+	waitJobSuccess(t, c, taskID, jobID, 5*time.Second)
+
+	job, _ := c.LatestJobForTask(taskID)
+	var resp struct {
+		Proposals []json.RawMessage `json:"proposals"`
+	}
+	if err := json.Unmarshal([]byte(job.ResponsePayload), &resp); err != nil {
+		t.Fatalf("unmarshal response_payload: %v", err)
+	}
+	if len(resp.Proposals) != 1 {
+		t.Errorf("proposals=%d, want 1", len(resp.Proposals))
+	}
+
+	// review 模式不应改 tasks:title 不被 AI 覆盖,子任务不被删。
+	task, subs, _ := c.GetTask(taskID)
+	if task.Title != "用户标题" {
+		t.Errorf("review 不应改 title, got %q", task.Title)
+	}
+	if len(subs) != 1 {
+		t.Errorf("review 不应删子任务, subs=%d, want 1", len(subs))
+	}
+	if task.AIStatus != domain.AIStatusDone {
+		t.Errorf("ai_status=%s, want done", task.AIStatus)
+	}
 }

@@ -170,6 +170,54 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 	if mode == "" {
 		mode = domain.AIJobModeAppend
 	}
+
+	// review 模式:LLM 只产出 proposals,worker 只把原始 proposals JSON 写
+	// response_payload + 置 ai_status='done',**绝不改 tasks / 子任务**。
+	// 落库由用户逐条 adopt 触发(见 handlers.DailySweepAdopt)。
+	if mode == domain.AIJobModeReview {
+		summaries := []TaskSummary{{
+			ID:              task.ID,
+			Title:           task.Title,
+			Status:          string(task.Status),
+			SubtaskTitles:   make([]string, 0, len(existingSubs)),
+			SubtaskStatuses: make([]string, 0, len(existingSubs)),
+			DueDate:         task.DueDate,
+		}}
+		for _, x := range existingSubs {
+			summaries[0].SubtaskTitles = append(summaries[0].SubtaskTitles, x.Title)
+			summaries[0].SubtaskStatuses = append(summaries[0].SubtaskStatuses, string(x.Status))
+		}
+		// ReviewPrompt 自带 system 段,故 SystemPrompt 留空。
+		req := CompletionRequest{
+			SystemPrompt: "",
+			UserPrompt:   ReviewPrompt(w.settings.CurrentDate(), summaries),
+			Model:        cfg.Model,
+			MaxTokens:    cfg.MaxTokens,
+		}
+		out, err := ParseReviewWithRetryDetailed(ctx, provider, req, task.ID, job.ID, 2)
+		if err != nil {
+			// 即便解析失败,也把最后一次响应 + token 记到 ai_jobs(保留审计)。
+			// 不复用 w.fail:它会用空 respText 覆盖审计字段。
+			var raw string
+			var inTok, outTok int
+			if out != nil {
+				raw = out.RawText
+				inTok = out.InputTokens
+				outTok = out.OutputTokens
+			}
+			_ = w.aiTasks.MarkJobFailed(job.ID, err.Error(), raw, inTok, outTok)
+			_ = w.aiTasks.SetAIStatus(task.ID, domain.AIStatusError, err.Error())
+			return
+		}
+		if err := w.aiTasks.MarkJobSuccess(job.ID, out.RawText, out.InputTokens, out.OutputTokens); err != nil {
+			log.Warn("worker.mark review success failed", "job_id", job.ID, "error", err.Error())
+		}
+		if err := w.aiTasks.SetAIStatus(task.ID, domain.AIStatusDone, ""); err != nil {
+			log.Warn("worker.mark done failed", "task_id", task.ID, "error", err.Error())
+		}
+		return
+	}
+
 	var hints []SubtaskHint
 	if mode != domain.AIJobModeReplace {
 		// 复用 process() 起手 GetTask 拿到的 existingSubs(issue #11)。

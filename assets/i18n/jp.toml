@@ -200,6 +200,7 @@ timer = "集中"
 habits = "習慣"
 stats = "統計"
 settings = "設定"
+daily_sweep = "毎日の見直し"
 
 [gallery]
 title = "壁紙ギャラリー"
@@ -433,3 +434,17 @@ tasks = "タスク採点"
 prev_day = "前日"
 next_day = "翌日"
 summary = "{placed} 配置済 · {unscheduled} 未配置"
+
+[dailySweep]
+title = "毎日の見直し"
+start = "今すぐ実行"
+adopt = "採用"
+reject = "拒否"
+adopted = "採用済み"
+empty = "本日の提案はありません。上のボタンを見直しの実行してください。"
+sweptAt = "最終実行: {at}"
+
+[dailySweep.settings]
+title = "毎日の見直し"
+enabled = "自動見直しを有効化"
+time = "実行時刻"

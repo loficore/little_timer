@@ -255,3 +255,77 @@ func ValidateDecomposition(raw string) (*domain.AIDecompositionResult, []string,
 	}
 	return res, errs, nil
 }
+
+// validActions 与 validOps 是 ReviewProposal / SuggestedSubChange 的白名单枚举
+// (参 spec §6.2 与 delta Δ3)。action 集合是基线 spec 的 4 值;op 集合在基线
+// {delete, modify_title, add} 之上加 mark_done。
+var validActions = map[string]bool{
+	"reschedule":      true,
+	"drop":            true,
+	"modify_subtasks": true,
+	"no_op":           true,
+}
+
+var validOps = map[string]bool{
+	"delete":       true,
+	"modify_title": true,
+	"add":          true,
+	"mark_done":    true,
+}
+
+// IsValidAction 报告 s 是否是合法的 ReviewProposal.Action。供 handler adopt
+// 在写路径前拦截非法 action(与 ValidateReviewResult 共用同一白名单)。
+func IsValidAction(s string) bool { return validActions[s] }
+
+// ValidateReviewResult 解析并校验 LLM 输出的 review JSON:
+//   - 整体 JSON 无法解析 → 返回 error(proposals/warnings 为 nil);
+//   - 逐条 proposal:反序列化后校验 change_id 非空、action ∈ validActions、
+//     suggested_subtask_changes[].op ∈ validOps;
+//   - 缺失或重复的 change_id 用 "taskID-jobID-index" 兜底重写,并追加 warning
+//     让前端 / 日志可追踪(Δ2)。
+//
+// 返回的 proposals 全部包含有效 change_id(handler 即可直接用 (ai_job_id,
+// change_id) 做幂等键)。taskID/jobID 仅用于 change_id 兜底。
+func ValidateReviewResult(taskID, jobID int64, raw string) ([]domain.ReviewProposal, []string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil, fmt.Errorf("empty response")
+	}
+	var probe struct {
+		Proposals []json.RawMessage `json:"proposals"`
+	}
+	if err := json.Unmarshal([]byte(raw), &probe); err != nil {
+		return nil, nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+	out := make([]domain.ReviewProposal, 0, len(probe.Proposals))
+	warns := []string{}
+	seen := map[string]int{} // change_id → 首次出现的 index
+	for i, rawProp := range probe.Proposals {
+		var p domain.ReviewProposal
+		if err := json.Unmarshal(rawProp, &p); err != nil {
+			warns = append(warns, fmt.Sprintf("proposal[%d]: parse error: %v", i, err))
+			continue
+		}
+		if !validActions[p.Action] {
+			warns = append(warns, fmt.Sprintf("proposal[%d] task=%d: invalid action %q", i, p.TaskID, p.Action))
+		}
+		for j, sc := range p.SuggestedSubtaskChanges {
+			if !validOps[sc.Op] {
+				warns = append(warns, fmt.Sprintf("proposal[%d] sub_change[%d]: invalid op %q", i, j, sc.Op))
+			}
+		}
+		switch {
+		case p.ChangeID == "":
+			p.ChangeID = fmt.Sprintf("%d-%d-%d", taskID, jobID, i)
+			warns = append(warns, fmt.Sprintf("proposal[%d] task=%d: missing change_id, rewritten to %q", i, p.TaskID, p.ChangeID))
+		default:
+			if first, ok := seen[p.ChangeID]; ok {
+				p.ChangeID = fmt.Sprintf("%d-%d-%d", taskID, jobID, i)
+				warns = append(warns, fmt.Sprintf("proposal[%d] task=%d: duplicate change_id (first at [%d]), rewritten to %q", i, p.TaskID, first, p.ChangeID))
+			} else {
+				seen[p.ChangeID] = i
+			}
+		}
+		out = append(out, p)
+	}
+	return out, warns, nil
+}

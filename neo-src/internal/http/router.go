@@ -62,6 +62,7 @@ func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	registerHabits(api)
 	registerSettings(api)
 	registerLLMSettings(api)
+	registerDailySweep(api)
 	registerTasks(api)
 	registerAIGtd(api)
 	registerSchedule(api)
@@ -70,6 +71,17 @@ func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	registerEvents(api)
 
 	return r
+}
+
+// registerDailySweep 注册 /api/settings/daily-sweep 与 /api/daily-sweep/*
+// 路由(v12,GTD Daily Sweep)。adopt / reject 由 Task 6 增量加入。
+func registerDailySweep(g *gin.RouterGroup) {
+	g.GET("/settings/daily-sweep", handlers.DailySweepSettingsGet)
+	g.PUT("/settings/daily-sweep", handlers.DailySweepSettingsUpdate)
+	g.POST("/daily-sweep/start", handlers.DailySweepStart)
+	g.GET("/daily-sweep/today", handlers.DailySweepToday)
+	g.POST("/daily-sweep/adopt", handlers.DailySweepAdopt)
+	g.POST("/daily-sweep/reject", handlers.DailySweepReject)
 }
 
 // GET /（SPA 兜底页）。

@@ -103,6 +103,7 @@ timer = "Focus"
 habits = "Habits"
 stats = "Stats"
 settings = "Settings"
+daily_sweep = "Daily Review"
 
 [gallery]
 title = "Wallpaper Gallery"
@@ -432,3 +433,17 @@ tasks = "Task Scores"
 prev_day = "Previous day"
 next_day = "Next day"
 summary = "{placed} placed · {unscheduled} unscheduled"
+
+[dailySweep]
+title = "Daily Review"
+start = "Run Review Now"
+adopt = "Adopt"
+reject = "Reject"
+adopted = "Adopted"
+empty = "No proposals to handle today. Tap the button above to start a review."
+sweptAt = "Last swept: {at}"
+
+[dailySweep.settings]
+title = "Daily Review"
+enabled = "Enable auto review"
+time = "Trigger time"

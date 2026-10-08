@@ -162,3 +162,49 @@ func IsValidTaskStatus(s string) bool {
 	}
 	return false
 }
+
+// Adoption 是 GTD Review 用户采纳审计的一行(ai_jobs.response_payload 是 AI
+// 提议的不可变快照,adoptions 是用户决策记录——v12 新增)。task_id /
+// ai_job_id / change_id / version_before / version_after 构成采纳的
+// 完整可重放链;version_before 与 version_after 之差恒为 1(adopt handler
+// 每次恰好 bump 一次 task version,见 daily_sweep adopt handler)。
+type Adoption struct {
+	ID            int64     `json:"id"`
+	TaskID        int64     `json:"task_id"`
+	AIJobID       int64     `json:"ai_job_id"`
+	ChangeID      string    `json:"change_id"`
+	VersionBefore int64     `json:"version_before"`
+	VersionAfter  int64     `json:"version_after"`
+	AppliedAt     time.Time `json:"applied_at"`
+}
+
+// DailySweepLog 是同日去重日志的一行(对应 daily_sweep_log 表)。cron 触发
+// 前查 date;手动触发不查(用户主动想再做一次)。source 标识 cron | manual。
+type DailySweepLog struct {
+	Date    string    `json:"date"`
+	SweptAt time.Time `json:"swept_at"`
+	Source  string    `json:"source"`
+}
+
+// ReviewProposal 是 GTD Review 模式 LLM 产出的一条提议。Action 决定 dispatch
+// (reschedule/drop/modify_subtasks/no_op);SuggestedSubtaskChanges 仅在
+// Action=modify_subtasks 时被 apply。Reason 由 LLM 提供,供前端展示与人工核对。
+type ReviewProposal struct {
+	ChangeID                string              `json:"change_id"`
+	TaskID                  int64               `json:"task_id"`
+	Action                  string              `json:"action"` // reschedule|drop|modify_subtasks|no_op
+	SuggestedStart          *int64              `json:"suggested_scheduled_start,omitempty"`
+	SuggestedEnd            *int64              `json:"suggested_scheduled_end,omitempty"`
+	SuggestedSubtaskChanges []SuggestedSubChange `json:"suggested_subtask_changes,omitempty"`
+	Reason                  string              `json:"reason"`
+}
+
+// SuggestedSubChange 是 ReviewProposal 内的一条子任务变更。Op 集合:
+// delete | modify_title | add | mark_done。mark_done 仅对 active 子任务生效
+// (delta Δ3);非 active 目标在 apply 阶段被跳过而非报错。
+type SuggestedSubChange struct {
+	SubtaskID *int64  `json:"subtask_id"`
+	Op        string  `json:"op"` // delete|modify_title|add|mark_done
+	NewTitle  *string `json:"new_title,omitempty"`
+	Reason    string  `json:"reason,omitempty"`
+}

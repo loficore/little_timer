@@ -48,6 +48,9 @@ type SqliteManager struct {
 	habits    *HabitCrud
 	timers    *TimerSessionCrud
 	aiTasks   *AITasksCrud
+	// v12:GTD Daily Sweep 子管理器。
+	dailySweep *DailySweepCrud
+	adoptions  *AdoptionCrud
 
 	db *sql.DB // Open() 成功前为 nil
 }
@@ -70,6 +73,8 @@ func (m *SqliteManager) Init(dbPath string) *SqliteManager {
 	m.habits = NewHabitCrud()
 	m.timers = NewTimerSessionCrud()
 	m.aiTasks = NewAITasksCrud()
+	m.dailySweep = NewDailySweepCrud()
+	m.adoptions = NewAdoptionCrud()
 	return m
 }
 
@@ -139,6 +144,8 @@ func (m *SqliteManager) Open() error {
 	m.habits.SetDB(db)
 	m.timers.SetDB(db)
 	m.aiTasks.SetDB(db)
+	m.dailySweep.SetDB(db)
+	m.adoptions.SetDB(db)
 
 	log.Info("storage.open", "db_path", m.dbPath)
 	return nil
@@ -172,6 +179,8 @@ func (m *SqliteManager) Close() error {
 	m.habits.SetDB(nil)
 	m.timers.SetDB(nil)
 	m.aiTasks.SetDB(nil)
+	m.dailySweep.SetDB(nil)
+	m.adoptions.SetDB(nil)
 	return err
 }
 
@@ -201,6 +210,12 @@ func (m *SqliteManager) Timers() *TimerSessionCrud { return m.timers }
 
 // AITasks 返回 tasks / task_subtasks / ai_jobs 子模块。
 func (m *SqliteManager) AITasks() *AITasksCrud { return m.aiTasks }
+
+// DailySweep 返回 daily_sweep_log + settings 的 daily_sweep_* 子模块。
+func (m *SqliteManager) DailySweep() *DailySweepCrud { return m.dailySweep }
+
+// Adoptions 返回 adoptions 表子模块。
+func (m *SqliteManager) Adoptions() *AdoptionCrud { return m.adoptions }
 
 // IsOpen 报告底层 *sql.DB 是否已连接。
 func (m *SqliteManager) IsOpen() bool { return m.db != nil }

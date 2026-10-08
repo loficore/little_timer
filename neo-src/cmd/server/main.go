@@ -39,9 +39,11 @@ import (
 
 	"little-timer/internal/aigtd"
 	"little-timer/internal/cli"
+	"little-timer/internal/cron"
 	"little-timer/internal/domain"
 	httpx "little-timer/internal/http"
 	httpapp "little-timer/internal/http/app"
+	"little-timer/internal/http/handlers"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/webview"
@@ -87,6 +89,15 @@ func runServer(opts *cli.ServeOptions) error {
 		worker.Wait()
 		workerCancel()
 	}()
+
+	// GTD Daily Sweep cron:每分钟读 settings.daily_sweep_enabled/time,
+	// 到点且当日未 sweep 时入队 review jobs。跨包解耦:cmd/server 注入
+	// handlers.StartDailySweep 作为 starter。
+	dailySweepCron := cron.NewDailySweepCron(app.SQLite.DailySweep(), func(ctx context.Context) ([]int64, error) {
+		return handlers.StartDailySweep(ctx, app)
+	})
+	dailySweepCron.Start()
+	defer dailySweepCron.Stop()
 
 	// 调试用:把固定响应注入 worker(覆盖真实 LLM 调用)。仅用于 e2e。
 	if opts.AIGtdTestPrompt != "" || opts.AIGtdTestFailWith != 0 {

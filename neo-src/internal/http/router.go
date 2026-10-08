@@ -80,6 +80,8 @@ func registerDailySweep(g *gin.RouterGroup) {
 	g.PUT("/settings/daily-sweep", handlers.DailySweepSettingsUpdate)
 	g.POST("/daily-sweep/start", handlers.DailySweepStart)
 	g.GET("/daily-sweep/today", handlers.DailySweepToday)
+	g.POST("/daily-sweep/adopt", handlers.DailySweepAdopt)
+	g.POST("/daily-sweep/reject", handlers.DailySweepReject)
 }
 
 // GET /（SPA 兜底页）。

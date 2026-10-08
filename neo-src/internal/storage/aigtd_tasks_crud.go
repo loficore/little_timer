@@ -506,6 +506,76 @@ func (c *AITasksCrud) HasInFlightJob(taskID int64) (bool, error) {
 	return n > 0, nil
 }
 
+// BumpTaskVersionTx 在 tx 里原子地把 task version 自增 +1(乐观锁闸门)。
+//   - 0 行受影响 → ErrVersionConflict 并附带当前 server 端 version(handler 据此返 409);
+//   - adopt 事务里用作纯子任务改动 / no_op 的版本闸门(改 action 不走此路径,
+//     走 UpdateTaskTx 自带的 CAS + bump,避免双 bump)。
+func (c *AITasksCrud) BumpTaskVersionTx(tx *sql.Tx, id int64, version int64) error {
+	res, err := tx.Exec(
+		`UPDATE tasks SET version = version + 1, updated_at = CURRENT_TIMESTAMP
+		 WHERE id = ? AND version = ?;`, id, version)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrAITaskUpdateFailed, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		var cur int64
+		_ = tx.QueryRow(`SELECT version FROM tasks WHERE id = ?;`, id).Scan(&cur)
+		return fmt.Errorf("%w (current=%d)", ErrVersionConflict, cur)
+	}
+	return nil
+}
+
+// GetSubtaskStatusTx 在 tx 里取子任务 status + version(供 applySubChangesTx
+// 决定是否跳过)。顶层 task(parent_id 为空)返错误。
+func (c *AITasksCrud) GetSubtaskStatusTx(tx *sql.Tx, id int64) (domain.SubtaskStatus, int64, error) {
+	var status string
+	var ver int64
+	err := tx.QueryRow(
+		`SELECT status, version FROM tasks WHERE id = ? AND parent_id IS NOT NULL;`, id,
+	).Scan(&status, &ver)
+	if err != nil {
+		return "", 0, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
+	}
+	return domain.SubtaskStatus(status), ver, nil
+}
+
+// DeleteSubtaskTx 在 tx 里删子任务(parent_id 非空)。
+func (c *AITasksCrud) DeleteSubtaskTx(tx *sql.Tx, id int64) error {
+	_, err := tx.Exec(
+		`DELETE FROM tasks WHERE id = ? AND parent_id IS NOT NULL;`, id)
+	return err
+}
+
+// AppendSubtasksTx 是 AppendSubtasks 的事务变体。order_index 接现有最大值之后;
+// 与 adopt handler 共处一个事务,保证 ops + bump + adoption 插入原子。
+func (c *AITasksCrud) AppendSubtasksTx(tx *sql.Tx, taskID int64, subs []SubtaskInput) error {
+	if len(subs) == 0 {
+		return nil
+	}
+	var maxOrder int
+	if err := tx.QueryRow(
+		`SELECT COALESCE(MAX(order_index), -1) FROM tasks WHERE parent_id = ?;`, taskID,
+	).Scan(&maxOrder); err != nil {
+		return err
+	}
+	for i, s := range subs {
+		var due any
+		if s.DueDate != nil {
+			due = *s.DueDate
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO tasks (parent_id, title, estimated_minutes, due_date, order_index, source, status, ai_status)
+			 VALUES (?, ?, ?, ?, ?, 'ai', ?, 'done');`,
+			taskID, s.Title, s.EstimatedMinutes, due, maxOrder+1+i,
+			string(domain.SubtaskStatusActive),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // AppendSubtasks 仅向 task 追加新子任务,不删除/不修改任何已有行。
 // order_index 接在现有同 task 子任务最大值之后。不做 title 去重
 // (spec §3.3 / Q2:LLM 偶发重复由 UI 处理,worker 端不主动去重)。

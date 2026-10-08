@@ -273,6 +273,10 @@ var validOps = map[string]bool{
 	"mark_done":    true,
 }
 
+// IsValidAction 报告 s 是否是合法的 ReviewProposal.Action。供 handler adopt
+// 在写路径前拦截非法 action(与 ValidateReviewResult 共用同一白名单)。
+func IsValidAction(s string) bool { return validActions[s] }
+
 // ValidateReviewResult 解析并校验 LLM 输出的 review JSON:
 //   - 整体 JSON 无法解析 → 返回 error(proposals/warnings 为 nil);
 //   - 逐条 proposal:反序列化后校验 change_id 非空、action ∈ validActions、

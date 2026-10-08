@@ -2,7 +2,9 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/storage"
 )
 
 func nowLocalDate() string { return time.Now().In(time.Local).Format("2006-01-02") }
@@ -25,7 +28,39 @@ func setupDailySweepRouter(t *testing.T, a *app.App) *gin.Engine {
 	r.PUT("/api/settings/daily-sweep", DailySweepSettingsUpdate)
 	r.POST("/api/daily-sweep/start", DailySweepStart)
 	r.GET("/api/daily-sweep/today", DailySweepToday)
+	r.POST("/api/daily-sweep/adopt", DailySweepAdopt)
+	r.POST("/api/daily-sweep/reject", DailySweepReject)
 	return r
+}
+
+// doJSONVersion 发一个显式指定 If-Match 的请求(测试 stale version 幂等用)。
+func doJSONVersion(t *testing.T, r *gin.Engine, method, path string, body any, version string) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	if body != nil {
+		if err := json.NewEncoder(&buf).Encode(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest(method, path, &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", version)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func ptrInt64(v int64) *int64 { return &v }
+
+func ptrSubStatus(v domain.SubtaskStatus) *domain.SubtaskStatus { return &v }
+
+func mustVersion(t *testing.T, a *app.App, taskID int64) int64 {
+	t.Helper()
+	v, err := a.SQLite.AITasks().GetTaskVersion(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }
 
 // TestDailySweepSettings_InvalidTime 锁定非法 HH:MM 全部 400 + code。
@@ -153,5 +188,114 @@ func TestDailySweepToday_ReturnsProposalsWithJobID(t *testing.T) {
 	}
 	if resp.Proposals[0].Proposal.Action != "drop" {
 		t.Errorf("action=%s, want drop", resp.Proposals[0].Proposal.Action)
+	}
+}
+
+// TestAdopt_Idempotent_SameChangeTwice 验证同一 change 第二次 adopt:
+//   - 仍 200 + idempotent:true(即使 body.version=0 stale);
+//   - tasks.version 不再 +1(总 +1);
+//   - adoptions 表只 1 行。
+//
+// 铁证:临时在 FindAdoption 早返 false 处改为返 true,此测试 fail。
+func TestAdopt_Idempotent_SameChangeTwice(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	taskID, _ := a.SQLite.AITasks().CreateTask("x", "manual")
+	jobID, _ := a.SQLite.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+
+	prop := domain.ReviewProposal{ChangeID: "chg-1", TaskID: taskID, Action: "reschedule",
+		SuggestedStart: ptrInt64(100), SuggestedEnd: ptrInt64(200)}
+	body := map[string]any{"change_id": "chg-1", "ai_job_id": jobID, "version": 0, "proposal": prop}
+
+	w := doJSONVersion(t, r, "POST", "/api/daily-sweep/adopt", body, "0")
+	if w.Code != 200 {
+		t.Fatalf("第一次 code=%d body=%s", w.Code, w.Body.String())
+	}
+	// 第二次:body.version 故意用 0(stale)。幂等路径应直接返,不重做修改。
+	w = doJSONVersion(t, r, "POST", "/api/daily-sweep/adopt", body, "0")
+	if w.Code != 200 {
+		t.Fatalf("第二次 code=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"idempotent":true`) {
+		t.Errorf("body 缺 idempotent:true: %s", w.Body.String())
+	}
+	var n int
+	var ver int64
+	a.SQLite.DB().QueryRow(`SELECT COUNT(*) FROM adoptions WHERE ai_job_id=? AND change_id=?`, jobID, "chg-1").Scan(&n)
+	a.SQLite.DB().QueryRow(`SELECT version FROM tasks WHERE id=?`, taskID).Scan(&ver)
+	if n != 1 || ver != 1 {
+		t.Errorf("adoptions=%d version=%d, want 1 / 1", n, ver)
+	}
+}
+
+// TestAdopt_ModifySubtasksOnly_BumpsTaskVersion 验证纯子任务改动(action=modify_subtasks)
+// 也必须 bump task version(delta §5.4 + Review Focus #2):
+// 不 bump 会让同一 task 上的连续 adopt 用同一 version 通过闸门。
+func TestAdopt_ModifySubtasksOnly_BumpsTaskVersion(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	taskID, _ := a.SQLite.AITasks().CreateTask("x", "manual")
+	subID, _ := a.SQLite.AITasks().CreateSubtask(taskID, "子1", 15, nil, 0)
+	jobID, _ := a.SQLite.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+
+	prop := domain.ReviewProposal{ChangeID: "chg-m", TaskID: taskID, Action: "modify_subtasks",
+		SuggestedSubtaskChanges: []domain.SuggestedSubChange{{SubtaskID: &subID, Op: "mark_done"}}}
+	w := doJSONVersion(t, r, "POST", "/api/daily-sweep/adopt",
+		map[string]any{"change_id": "chg-m", "ai_job_id": jobID, "version": 0, "proposal": prop}, "0")
+	if w.Code != 200 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	var ver int64
+	a.SQLite.DB().QueryRow(`SELECT version FROM tasks WHERE id=?`, taskID).Scan(&ver)
+	if ver != 1 {
+		t.Errorf("task version=%d, want 1(纯子任务改动也要 bump)", ver)
+	}
+	var status string
+	a.SQLite.DB().QueryRow(`SELECT status FROM tasks WHERE id=?`, subID).Scan(&status)
+	if status != "done" {
+		t.Errorf("subtask status=%s, want done", status)
+	}
+}
+
+// TestAdopt_MarkDone_NonActiveSkipped 验证 mark_done 目标非 active(done/archived)
+// → 跳过该 change,handler 不报错;done/archived 数据永不被 AI 改。
+func TestAdopt_MarkDone_NonActiveSkipped(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	taskID, _ := a.SQLite.AITasks().CreateTask("x", "manual")
+	subID, _ := a.SQLite.AITasks().CreateSubtask(taskID, "已归档", 15, nil, 0)
+	ver := mustVersion(t, a, subID)
+	archived := domain.SubtaskStatusArchived
+	if err := a.SQLite.AITasks().UpdateSubtask(subID,
+		storage.SubtaskUpdateFields{Status: &archived}, ver); err != nil {
+		t.Fatal(err)
+	}
+	jobID, _ := a.SQLite.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+
+	prop := domain.ReviewProposal{ChangeID: "chg-s", TaskID: taskID, Action: "modify_subtasks",
+		SuggestedSubtaskChanges: []domain.SuggestedSubChange{{SubtaskID: &subID, Op: "mark_done"}}}
+	w := doJSONVersion(t, r, "POST", "/api/daily-sweep/adopt",
+		map[string]any{"change_id": "chg-s", "ai_job_id": jobID, "version": 0, "proposal": prop}, "0")
+	if w.Code != 200 {
+		t.Fatalf("非 active 应跳过而非报错: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var status string
+	a.SQLite.DB().QueryRow(`SELECT status FROM tasks WHERE id=?`, subID).Scan(&status)
+	if status != "archived" {
+		t.Errorf("archived 被改动为 %s", status)
+	}
+}
+
+// TestAdopt_VersionConflict_409 验证 stale version 走 409,而非幂等(change_id 全新时)。
+func TestAdopt_VersionConflict_409(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	taskID, _ := a.SQLite.AITasks().CreateTask("x", "manual")
+	jobID, _ := a.SQLite.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+	prop := domain.ReviewProposal{ChangeID: "chg-c", TaskID: taskID, Action: "no_op"}
+	w := doJSONVersion(t, r, "POST", "/api/daily-sweep/adopt",
+		map[string]any{"change_id": "chg-c", "ai_job_id": jobID, "version": 999, "proposal": prop}, "0")
+	if w.Code != 409 {
+		t.Fatalf("code=%d body=%s, want 409", w.Code, w.Body.String())
 	}
 }

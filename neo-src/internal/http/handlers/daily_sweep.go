@@ -3,9 +3,9 @@
 //   - StartDailySweep 是被 cron 与手动端点共享的入队逻辑(只入队,不写日志);
 //   - DailySweepStart 手动触发:入队 + 写 manual 日志(不查 enabled、不查同日去重);
 //   - DailySweepToday 拉当日(近 1 天)成功 review job 的 proposals,附 ai_job_id
-//     与当前 task version 供前端 adopt。
-//
-// adopt / reject 在 Task 6 的 daily_sweep_adopt.go 中实现。
+//     与当前 task version 供前端 adopt;
+//   - DailySweepAdopt / DailySweepReject 用户逐条采纳 / 拒绝(adopt 幂等 +
+//     mark_done + 事务内版本闸门)。
 package handlers
 
 import (
@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,231 @@ import (
 	"little-timer/internal/http/app"
 	"little-timer/internal/storage"
 )
+
+// adoptRequest 是 POST /api/daily-sweep/adopt 的入参。
+type adoptRequest struct {
+	ChangeID string                 `json:"change_id"`
+	AIJobID  int64                  `json:"ai_job_id"`
+	Version  int64                  `json:"version"`
+	Proposal domain.ReviewProposal  `json:"proposal"`
+}
+
+// DailySweepAdopt POST /api/daily-sweep/adopt
+//
+// 流程(Δ2 + Δ3 + Δ5.4):
+//   0. bind body; proposal.TaskID != 0 且 Action ∈ validActions,否则 400;
+//   1. 幂等前置命中 — FindAdoption(aiJobID, changeID) → 200 {idempotent:true} 不重复改;
+//   2. 开 tx;defer rollback;
+//   3. 版本闸门(恰好一次):
+//        reschedule/drop → UpdateTaskTx(tx, ..., body.Version)(自带 CAS + bump);
+//        modify_subtasks → applySubChangesTx + BumpTaskVersionTx;
+//        no_op → BumpTaskVersionTx(只闸门 + bump);
+//   4. RecordAdoptionTx(…version_after=body.Version+1);
+//   5. commit → 200 {task_id, version_after};ErrVersionConflict → 409;
+//      RecordAdoptionTx 命中 UNIQUE(idx_adoptions_idempotent) 并发兜底
+//      → 重查 FindAdoption 返 200 idempotent。
+//
+// 重要:不双 bump。reschedule/drop 走 UpdateTaskTx 已 bump 版本,不能再调
+// BumpTaskVersionTx,否则 version_after = +2 破坏后续 adopt 的 409 语义。
+func DailySweepAdopt(c *gin.Context) {
+	a := appFromCtx(c)
+	var body adoptRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid json"})
+		return
+	}
+	if body.Proposal.TaskID == 0 || !aigtd.IsValidAction(body.Proposal.Action) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid proposal"})
+		return
+	}
+
+	// 1. 幂等前置
+	if ex, _ := a.SQLite.Adoptions().FindAdoption(body.AIJobID, body.ChangeID); ex != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"task_id":       ex.TaskID,
+			"version_after": ex.VersionAfter,
+			"idempotent":    true,
+		})
+		return
+	}
+
+	// 2. tx
+	tx, err := a.SQLite.DB().Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "begin tx"})
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	taskID := body.Proposal.TaskID
+	version := body.Version
+
+	// 3. 版本闸门(恰好一次)
+	switch body.Proposal.Action {
+	case "reschedule":
+		if err := a.SQLite.AITasks().UpdateTaskTx(tx, taskID,
+			storage.TaskUpdateFields{
+				ScheduledStart: body.Proposal.SuggestedStart,
+				ScheduledEnd:   body.Proposal.SuggestedEnd,
+			}, version); err != nil {
+			respondAdoptVersionOrError(c, a, err, body)
+			return
+		}
+	case "drop":
+		archived := domain.TaskStatusArchived
+		if err := a.SQLite.AITasks().UpdateTaskTx(tx, taskID,
+			storage.TaskUpdateFields{Status: &archived}, version); err != nil {
+			respondAdoptVersionOrError(c, a, err, body)
+			return
+		}
+	case "modify_subtasks":
+		if err := applySubChangesTx(tx, a, body.Proposal, taskID); err != nil {
+			respondAdoptVersionOrError(c, a, err, body)
+			return
+		}
+		if err := a.SQLite.AITasks().BumpTaskVersionTx(tx, taskID, version); err != nil {
+			respondAdoptVersionOrError(c, a, err, body)
+			return
+		}
+	case "no_op":
+		if err := a.SQLite.AITasks().BumpTaskVersionTx(tx, taskID, version); err != nil {
+			respondAdoptVersionOrError(c, a, err, body)
+			return
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid action"})
+		return
+	}
+
+	// 4. adoptions
+	if _, err := a.SQLite.Adoptions().RecordAdoptionTx(tx, domain.Adoption{
+		TaskID:        taskID,
+		AIJobID:       body.AIJobID,
+		ChangeID:      body.ChangeID,
+		VersionBefore: version,
+		VersionAfter:  version + 1,
+	}); err != nil {
+		if errors.Is(err, storage.ErrAdoptionDuplicate) {
+			// 并发兜底 — 重查返 200 idempotent
+			if ex, ferr := a.SQLite.Adoptions().FindAdoption(body.AIJobID, body.ChangeID); ferr == nil && ex != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"task_id":       ex.TaskID,
+					"version_after": ex.VersionAfter,
+					"idempotent":    true,
+				})
+				return
+			}
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "record adoption"})
+		return
+	}
+
+	// 5. commit
+	if err := tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "commit"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"task_id":       taskID,
+		"version_after": version + 1,
+	})
+}
+
+// respondAdoptVersionOrError 把 tx 路径上的错误映射为 HTTP 响应并回滚。
+//   - ErrVersionConflict → 409 + 提示 refresh;
+//   - 其它 → 500。
+func respondAdoptVersionOrError(c *gin.Context, a *app.App, err error, body adoptRequest) {
+	if errors.Is(err, storage.ErrVersionConflict) {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "error": "version conflict", "task_id": body.Proposal.TaskID})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+}
+
+// applySubChangesTx 按 op 派发子任务变更(delta Δ3);目标非 active → 跳过(非错误)。
+//
+// op 集:
+//   - add:AppendSubtasksTx(必须 NewTitle != nil);EstimatedMinutes 缺省 25
+//   - delete:仅 active,DeleteSubtaskTx
+//   - modify_title:仅 active,UpdateSubtaskTx(subVer)
+//   - mark_done:仅 active,UpdateSubtaskTx(Status:&Done, subVer)
+//   - 其它 / nil subtask_id / nil NewTitle:跳过
+//
+// subVer 由 GetSubtaskStatusTx 在 tx 内取,跨 op 复用一次即可。
+func applySubChangesTx(tx *sql.Tx, a *app.App, p domain.ReviewProposal, taskID int64) error {
+	for i, sc := range p.SuggestedSubtaskChanges {
+		switch sc.Op {
+		case "add":
+			if sc.NewTitle == nil {
+				continue
+			}
+			if err := a.SQLite.AITasks().AppendSubtasksTx(tx, taskID, []storage.SubtaskInput{
+				{Title: *sc.NewTitle, EstimatedMinutes: 25},
+			}); err != nil {
+				return err
+			}
+		case "delete":
+			if sc.SubtaskID == nil {
+				continue
+			}
+			status, _, err := a.SQLite.AITasks().GetSubtaskStatusTx(tx, *sc.SubtaskID)
+			if err != nil || status != domain.SubtaskStatusActive {
+				continue // 非 active → 跳过(目标可能已 done/archived,或不存在)
+			}
+			if err := a.SQLite.AITasks().DeleteSubtaskTx(tx, *sc.SubtaskID); err != nil {
+				return err
+			}
+		case "modify_title":
+			if sc.SubtaskID == nil || sc.NewTitle == nil {
+				continue
+			}
+			status, ver, err := a.SQLite.AITasks().GetSubtaskStatusTx(tx, *sc.SubtaskID)
+			if err != nil || status != domain.SubtaskStatusActive {
+				continue
+			}
+			if err := a.SQLite.AITasks().UpdateSubtaskTx(tx, *sc.SubtaskID,
+				storage.SubtaskUpdateFields{Title: sc.NewTitle}, ver); err != nil {
+				return err
+			}
+		case "mark_done":
+			if sc.SubtaskID == nil {
+				continue
+			}
+			status, ver, err := a.SQLite.AITasks().GetSubtaskStatusTx(tx, *sc.SubtaskID)
+			if err != nil || status != domain.SubtaskStatusActive {
+				continue
+			}
+			done := domain.SubtaskStatusDone
+			if err := a.SQLite.AITasks().UpdateSubtaskTx(tx, *sc.SubtaskID,
+				storage.SubtaskUpdateFields{Status: &done}, ver); err != nil {
+				return err
+			}
+		default:
+			// 未知 op 或被丢弃 —— 跳过(非错误)。
+			_ = i
+		}
+	}
+	return nil
+}
+
+// DailySweepReject POST /api/daily-sweep/reject
+//
+// 不写 reject 审计(Δ4.4 — YAGNI);仅返回 204。后续想补 reject audit 时,
+// 加 adoptions(op='reject', change_id) 行即可,索引同样兜底。
+func DailySweepReject(c *gin.Context) {
+	var body struct {
+		ChangeID string `json:"change_id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid json"})
+		return
+	}
+	if strings.TrimSpace(body.ChangeID) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "change_id required"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
 
 // StartDailySweep 为所有顶层非 archived/rejected 的 task 各入队一个 review job,
 // 返回新建 job id。同一 task 已有 queued/running job(ErrJobInFlight)则跳过。

@@ -526,18 +526,21 @@ func (c *AITasksCrud) BumpTaskVersionTx(tx *sql.Tx, id int64, version int64) err
 	return nil
 }
 
-// GetSubtaskStatusTx 在 tx 里取子任务 status + version(供 applySubChangesTx
-// 决定是否跳过)。顶层 task(parent_id 为空)返错误。
-func (c *AITasksCrud) GetSubtaskStatusTx(tx *sql.Tx, id int64) (domain.SubtaskStatus, int64, error) {
+// GetSubtaskStatusTx 在 tx 里取子任务 status + parentID + version(供
+// applySubChangesTx 决定是否跳过 + 跨 task 校验)。顶层 task(parent_id 为空)
+// 返错误。parentID 用于 adopt handler 校验"子任务属于本 task",防止跨 task
+// 误改子任务(Review Fix I-3:子任务必须属于 body.Proposal.TaskID)。
+func (c *AITasksCrud) GetSubtaskStatusTx(tx *sql.Tx, id int64) (domain.SubtaskStatus, int64, int64, error) {
 	var status string
+	var parentID sql.NullInt64
 	var ver int64
 	err := tx.QueryRow(
-		`SELECT status, version FROM tasks WHERE id = ? AND parent_id IS NOT NULL;`, id,
-	).Scan(&status, &ver)
+		`SELECT status, parent_id, version FROM tasks WHERE id = ? AND parent_id IS NOT NULL;`, id,
+	).Scan(&status, &parentID, &ver)
 	if err != nil {
-		return "", 0, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
+		return "", 0, 0, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
 	}
-	return domain.SubtaskStatus(status), ver, nil
+	return domain.SubtaskStatus(status), parentID.Int64, ver, nil
 }
 
 // DeleteSubtaskTx 在 tx 里删子任务(parent_id 非空)。

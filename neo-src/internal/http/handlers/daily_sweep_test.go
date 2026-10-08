@@ -300,6 +300,83 @@ func TestAdopt_VersionConflict_409(t *testing.T) {
 	}
 }
 
+// TestAdopt_RejectsMismatchedProposalTaskID 验证 adopt 不信任 body 里的
+// proposal.task_id:以 ai_jobs.task_id 为准,body 与真实 job 的 task 不符 → 400。
+// (Review Fix I-4)
+func TestAdopt_RejectsMismatchedProposalTaskID(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	realTaskID, _ := a.SQLite.AITasks().CreateTask("real", "manual")
+	otherTaskID, _ := a.SQLite.AITasks().CreateTask("other", "manual")
+	jobID, _ := a.SQLite.AITasks().EnqueueJob(realTaskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+
+	// body 声称 proposal.task_id = otherTaskID,但 job 属于 realTaskID → 400
+	prop := domain.ReviewProposal{ChangeID: "chg-x", TaskID: otherTaskID, Action: "no_op"}
+	w := doJSONVersion(t, r, "POST", "/api/daily-sweep/adopt",
+		map[string]any{"change_id": "chg-x", "ai_job_id": jobID, "version": 0, "proposal": prop}, "0")
+	if w.Code != 400 {
+		t.Fatalf("code=%d body=%s, want 400", w.Code, w.Body.String())
+	}
+	// 验证 otherTaskID 没被 bump
+	var ver int64
+	a.SQLite.DB().QueryRow(`SELECT version FROM tasks WHERE id=?`, otherTaskID).Scan(&ver)
+	if ver != 0 {
+		t.Errorf("other task version=%d, want 0(未被动过)", ver)
+	}
+}
+
+// TestAdopt_RescheduleNoTimes_400 验证 reschedule 但两个时间都缺失 → 400
+// (否则 UpdateTaskTx 无字段可改 → 静默不 bump,审计与响应撒谎)。(Review Fix M-1)
+func TestAdopt_RescheduleNoTimes_400(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	taskID, _ := a.SQLite.AITasks().CreateTask("x", "manual")
+	jobID, _ := a.SQLite.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+	prop := domain.ReviewProposal{ChangeID: "chg-n", TaskID: taskID, Action: "reschedule"} // both nil
+	w := doJSONVersion(t, r, "POST", "/api/daily-sweep/adopt",
+		map[string]any{"change_id": "chg-n", "ai_job_id": jobID, "version": 0, "proposal": prop}, "0")
+	if w.Code != 400 {
+		t.Fatalf("code=%d body=%s, want 400", w.Code, w.Body.String())
+	}
+	// task version 必须没变(没有被静默放过)
+	var ver int64
+	a.SQLite.DB().QueryRow(`SELECT version FROM tasks WHERE id=?`, taskID).Scan(&ver)
+	if ver != 0 {
+		t.Errorf("version=%d, want 0", ver)
+	}
+}
+
+// TestAdopt_SkipSubtaskFromOtherTask 验证 sub_change 指向**别的 task** 的子任务
+// (伪造 subtask_id)→ 该子任务不被改,当前 task 仍正常 bump+采纳。(Review Fix I-3)
+func TestAdopt_SkipSubtaskFromOtherTask(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	taskID, _ := a.SQLite.AITasks().CreateTask("mine", "manual")
+	otherTaskID, _ := a.SQLite.AITasks().CreateTask("other", "manual")
+	otherSubID, _ := a.SQLite.AITasks().CreateSubtask(otherTaskID, "别人的子任务", 15, nil, 0)
+	jobID, _ := a.SQLite.AITasks().EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+
+	prop := domain.ReviewProposal{ChangeID: "chg-cross", TaskID: taskID, Action: "modify_subtasks",
+		SuggestedSubtaskChanges: []domain.SuggestedSubChange{{SubtaskID: &otherSubID, Op: "mark_done"}}}
+	w := doJSONVersion(t, r, "POST", "/api/daily-sweep/adopt",
+		map[string]any{"change_id": "chg-cross", "ai_job_id": jobID, "version": 0, "proposal": prop}, "0")
+	if w.Code != 200 {
+		t.Fatalf("code=%d body=%s, want 200(跳过而非报错)", w.Code, w.Body.String())
+	}
+	// 别人的子任务必须保持 active
+	var status string
+	a.SQLite.DB().QueryRow(`SELECT status FROM tasks WHERE id=?`, otherSubID).Scan(&status)
+	if status != "active" {
+		t.Errorf("他 task 子任务 status=%s, want active(未被跨 task 改动)", status)
+	}
+	// 当前 task 仍应按闸门 bump(恰好一次)
+	var ver int64
+	a.SQLite.DB().QueryRow(`SELECT version FROM tasks WHERE id=?`, taskID).Scan(&ver)
+	if ver != 1 {
+		t.Errorf("task version=%d, want 1", ver)
+	}
+}
+
 // TestDailySweep_FullFlow 端到端:settings 改 → 手动 start → today 拉提议 →
 // adopt 成功 → 重复 adopt 幂等 → 换一个 change 走 mark_done → 子任务变 done。
 //

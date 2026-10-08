@@ -27,7 +27,7 @@ The `/daily-sweep` page offers a lightweight, daily-flavored version of GTD's cl
 - **Manual trigger** — Sidebar entry **Daily Review** → "Run Review Now" button at the top.
 - **Four proposal actions** — `reschedule` (re-schedule) / `drop` (abandon stale, >30 days) / `modify_subtasks` (change / delete / add) / `no_op`. Subtask ops: `delete` / `modify_title` / `add` / **`mark_done`** (active subtasks only — done/archived data is never touched by AI).
 - **Adopt / reject, one by one** — adoption is recorded in the `adoptions` audit table. **Idempotent** — the same `(ai_job_id, change_id)` adopted twice applies only once; a UNIQUE index in the DB is the last line of defense against concurrent races. Task `version` is incremented by exactly 1 per adopt; cross-device conflicts return a strict 409 and prompt a refetch.
-- **Dual view** — retrospective (yesterday's unfinished) + prospective (today's suggestions). The `useDailySweep` hook handles 409 retries for the UI.
+- **Prospective view** — shows today's (last 24h) successful review proposals; the `useDailySweep` hook handles 409 retries. Adopted proposals drop off the list and live in the audit table. A retrospective (yesterday's unfinished) view is left for a future release.
 
 ## License
 

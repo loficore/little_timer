@@ -60,6 +60,30 @@ func DailySweepAdopt(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid proposal"})
 		return
 	}
+	// M-1:reschedule 必须至少给一个时间 — 否则 UpdateTaskTx 无字段可改会静默不 bump,
+	// 导致响应/审计的 version_after 与实际 task.version 不一致(撒谎)。
+	if body.Proposal.Action == "reschedule" &&
+		body.Proposal.SuggestedStart == nil && body.Proposal.SuggestedEnd == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "reschedule requires suggested_scheduled_start or suggested_scheduled_end",
+		})
+		return
+	}
+	// I-4:以 ai_jobs.task_id 为权威 — 不信任 body.proposal.task_id(可能是 LLM 幻觉
+	// 或客户端篡改)。ai_job 不存在或与 body 不符 → 400,后续 gate/audit 全用 realTaskID。
+	realTaskID, err := jobTaskID(a, body.AIJobID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "unknown ai_job_id"})
+		return
+	}
+	if realTaskID != body.Proposal.TaskID {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "proposal.task_id does not match ai_job.task_id",
+		})
+		return
+	}
 
 	// 1. 幂等前置
 	if ex, _ := a.SQLite.Adoptions().FindAdoption(body.AIJobID, body.ChangeID); ex != nil {
@@ -190,9 +214,9 @@ func applySubChangesTx(tx *sql.Tx, a *app.App, p domain.ReviewProposal, taskID i
 			if sc.SubtaskID == nil {
 				continue
 			}
-			status, _, err := a.SQLite.AITasks().GetSubtaskStatusTx(tx, *sc.SubtaskID)
-			if err != nil || status != domain.SubtaskStatusActive {
-				continue // 非 active → 跳过(目标可能已 done/archived,或不存在)
+			status, parentID, _, err := a.SQLite.AITasks().GetSubtaskStatusTx(tx, *sc.SubtaskID)
+			if err != nil || status != domain.SubtaskStatusActive || parentID != taskID {
+				continue // 非 active 或跨 task → 跳过(防误改他 task 的子任务)
 			}
 			if err := a.SQLite.AITasks().DeleteSubtaskTx(tx, *sc.SubtaskID); err != nil {
 				return err
@@ -201,8 +225,8 @@ func applySubChangesTx(tx *sql.Tx, a *app.App, p domain.ReviewProposal, taskID i
 			if sc.SubtaskID == nil || sc.NewTitle == nil {
 				continue
 			}
-			status, ver, err := a.SQLite.AITasks().GetSubtaskStatusTx(tx, *sc.SubtaskID)
-			if err != nil || status != domain.SubtaskStatusActive {
+			status, parentID, ver, err := a.SQLite.AITasks().GetSubtaskStatusTx(tx, *sc.SubtaskID)
+			if err != nil || status != domain.SubtaskStatusActive || parentID != taskID {
 				continue
 			}
 			if err := a.SQLite.AITasks().UpdateSubtaskTx(tx, *sc.SubtaskID,
@@ -213,8 +237,8 @@ func applySubChangesTx(tx *sql.Tx, a *app.App, p domain.ReviewProposal, taskID i
 			if sc.SubtaskID == nil {
 				continue
 			}
-			status, ver, err := a.SQLite.AITasks().GetSubtaskStatusTx(tx, *sc.SubtaskID)
-			if err != nil || status != domain.SubtaskStatusActive {
+			status, parentID, ver, err := a.SQLite.AITasks().GetSubtaskStatusTx(tx, *sc.SubtaskID)
+			if err != nil || status != domain.SubtaskStatusActive || parentID != taskID {
 				continue
 			}
 			done := domain.SubtaskStatusDone
@@ -228,6 +252,26 @@ func applySubChangesTx(tx *sql.Tx, a *app.App, p domain.ReviewProposal, taskID i
 		}
 	}
 	return nil
+}
+
+// jobTaskID 查 ai_jobs 行返回其 task_id。job 不存在 → ErrNotFound。
+// handler 用它把 body 里的 ai_job_id 解析为权威 task_id,避免信任 LLM
+// proposals JSON 里的 task_id(可能被幻觉或被客户端篡改)。
+var errJobNotFound = errors.New("storage: ai_job not found")
+
+func jobTaskID(a *app.App, jobID int64) (int64, error) {
+	if a == nil || a.SQLite == nil || a.SQLite.DB() == nil {
+		return 0, errJobNotFound
+	}
+	var t int64
+	err := a.SQLite.DB().QueryRow(`SELECT task_id FROM ai_jobs WHERE id = ?;`, jobID).Scan(&t)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, errJobNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	return t, nil
 }
 
 // DailySweepReject POST /api/daily-sweep/reject

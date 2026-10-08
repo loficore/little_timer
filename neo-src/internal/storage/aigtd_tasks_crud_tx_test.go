@@ -94,7 +94,8 @@ func TestAppendSubtasksTx_OrderIndex(t *testing.T) {
 	}
 }
 
-// TestGetSubtaskStatusTx 验证返回 status + version;顶层 task 返错误。
+// TestGetSubtaskStatusTx 验证返回 status + parentID + version;顶层 task 返错误。
+// parentID 供 adopt handler 校验"子任务属于本 task",防止跨 task 误改(铁证 I-3)。
 func TestGetSubtaskStatusTx(t *testing.T) {
 	m := openTempSqlite(t)
 	c := m.AITasks()
@@ -103,14 +104,14 @@ func TestGetSubtaskStatusTx(t *testing.T) {
 
 	tx, _ := c.db.Begin()
 	defer tx.Rollback()
-	status, ver, err := c.GetSubtaskStatusTx(tx, subID)
+	status, parent, ver, err := c.GetSubtaskStatusTx(tx, subID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status != domain.SubtaskStatusActive || ver != 0 {
-		t.Errorf("got=(%s,%d), want (active,0)", status, ver)
+	if status != domain.SubtaskStatusActive || parent != parentID || ver != 0 {
+		t.Errorf("got=(%s,%d,%d), want (active,%d,0)", status, parent, ver, parentID)
 	}
-	if _, _, err := c.GetSubtaskStatusTx(tx, parentID); err == nil {
+	if _, _, _, err := c.GetSubtaskStatusTx(tx, parentID); err == nil {
 		t.Error("顶层 task 应返错误")
 	}
 }

@@ -20,6 +20,11 @@ export function DailySweepPage() {
     void refresh();
   }, []);
 
+  // 已采纳的提议是历史,不再堆在待办列表里(Review Fix I-2):server 保留
+  // is_adopted 供审计,前端只展示"还需决策"的。否则每次进页面已采纳项都会
+  // 回来,empty 状态永远出不来。
+  const actionable = proposals.filter((p) => !p.is_adopted);
+
   return (
     <div className="container mx-auto max-w-3xl space-y-3 p-4">
       <div className="flex items-center justify-between">
@@ -57,16 +62,16 @@ export function DailySweepPage() {
         </div>
       )}
 
-      {loading && proposals.length === 0 && (
+      {loading && actionable.length === 0 && (
         <p className="opacity-60">…</p>
       )}
 
-      {proposals.length === 0 && !loading ? (
+      {actionable.length === 0 && !loading ? (
         <div className="text-center opacity-60 py-8" data-testid="empty">
           {t("dailySweep.empty")}
         </div>
       ) : (
-        proposals.map((p) => (
+        actionable.map((p) => (
           <ProposalCard
             key={`${p.ai_job_id}:${p.proposal.change_id}`}
             proposal={p}

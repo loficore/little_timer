@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { getAPIClient } from "../../utils/apiClientSingleton";
+import type { DailySweepSettings as DailySweepSettingsDTO } from "../../types/aigtd";
 import { t } from "../../utils/i18n";
 
 /**
@@ -18,7 +19,7 @@ export function DailySweepSettings() {
   const [feedback, setFeedback] = useState<string | null>(null);
 
   useEffect(() => {
-    void client.getDailySweepSettings().then((c) => {
+      void client.getDailySweepSettings().then((c: DailySweepSettingsDTO) => {
       setCfg(c);
       setEnabled(c.enabled);
       setTime(c.time);

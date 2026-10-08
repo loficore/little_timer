@@ -2,7 +2,7 @@ import { useEffect } from "preact/hooks";
 import { useDailySweep } from "./hooks/useDailySweep";
 import { t } from "./utils/i18n";
 import { ProposalCard } from "./components/DailySweep/ProposalCard";
-import { ArrowPathIcon } from "./utils/icons";
+import { ResetIcon } from "./utils/icons";
 
 /**
  * DailySweepPage —— GTD Daily Sweep / Review 提议页面。
@@ -36,7 +36,7 @@ export function DailySweepPage() {
             onClick={() => void refresh()}
             disabled={loading}
           >
-            <ArrowPathIcon className="h-4 w-4" />
+            <ResetIcon className="h-4 w-4" />
           </button>
           <button
             className="btn btn-primary btn-sm"

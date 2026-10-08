@@ -25,6 +25,7 @@ import type {
     TaskDTO,
     LLMSettingsDTO,
     SchedulerPlan,
+    ScheduleApplyPlacement,
     DailySweepToday,
     DailySweepSettings,
     ReviewProposal,

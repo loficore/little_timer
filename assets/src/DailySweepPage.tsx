@@ -16,9 +16,8 @@ export function DailySweepPage() {
     useDailySweep();
 
   useEffect(() => {
+    // 页面挂载时拉一次(hook 本身不自动刷新,集中在这里做,避免多源)。
     void refresh();
-    // 计划侧:页面挂载时拉一次(hook 本身不挂载刷新,集中在这里做避免多源)。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

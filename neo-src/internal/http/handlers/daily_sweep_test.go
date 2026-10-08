@@ -299,3 +299,129 @@ func TestAdopt_VersionConflict_409(t *testing.T) {
 		t.Fatalf("code=%d body=%s, want 409", w.Code, w.Body.String())
 	}
 }
+
+// TestDailySweep_FullFlow 端到端:settings 改 → 手动 start → today 拉提议 →
+// adopt 成功 → 重复 adopt 幂等 → 换一个 change 走 mark_done → 子任务变 done。
+//
+// 覆盖:Tasks 5 + 6 + 2 (幂等 + 写 adoptions + bump + mark_done) 的链式契约。
+func TestDailySweep_FullFlow(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+
+	// 1) settings 改 time → 读回(指针语义:只改 time → enabled 保持默认)
+	w := doJSON(t, r, "PUT", "/api/settings/daily-sweep", map[string]any{"time": "07:15"})
+	if w.Code != 200 {
+		t.Fatalf("PUT settings code=%d body=%s", w.Code, w.Body.String())
+	}
+	en, at, _ := a.SQLite.DailySweep().GetSettings()
+	if !en || at != "07:15" {
+		t.Fatalf("settings=(%v,%s), want (true,07:15)", en, at)
+	}
+
+	// 2) 准备 task + 活跃子任务
+	taskID, _ := a.SQLite.AITasks().CreateTask("报告", "manual")
+	_ = a.SQLite.AITasks().SetTaskStatus(taskID, domain.TaskStatusActive)
+	subID, _ := a.SQLite.AITasks().CreateSubtask(taskID, "已写完", 15, nil, 0)
+
+	// 3) 手动 start → 应入队一个 review job
+	w = doJSON(t, r, "POST", "/api/daily-sweep/start", map[string]any{})
+	if w.Code != 202 {
+		t.Fatalf("start code=%d body=%s", w.Code, w.Body.String())
+	}
+	var startResp struct {
+		JobIDs []int64 `json:"job_ids"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &startResp)
+	if len(startResp.JobIDs) != 1 {
+		t.Fatalf("job_ids=%v, want 1", startResp.JobIDs)
+	}
+	jobID := startResp.JobIDs[0]
+
+	// 4) 直接把 proposals 写进 response_payload(绕过真实 LLM;worker 路径另测)
+	propsJSON := `{"proposals":[
+      {"change_id":"full-1","task_id":` + strconv.FormatInt(taskID, 10) +
+		`,"action":"reschedule","suggested_scheduled_start":100,"suggested_scheduled_end":200,"reason":"d1"},
+      {"change_id":"full-2","task_id":` + strconv.FormatInt(taskID, 10) +
+		`,"action":"modify_subtasks","suggested_subtask_changes":[
+         {"subtask_id":` + strconv.FormatInt(subID, 10) + `,"op":"mark_done","reason":"done"}],"reason":"d2"}
+    ]}`
+	if err := a.SQLite.AITasks().MarkJobSuccess(jobID, propsJSON, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5) today 拉提议 → 应有 2 条
+	w = doJSON(t, r, "GET", "/api/daily-sweep/today", nil)
+	if w.Code != 200 {
+		t.Fatalf("today code=%d", w.Code)
+	}
+	var todayResp struct {
+		Proposals []struct {
+			AIJobID  int64                 `json:"ai_job_id"`
+			Proposal domain.ReviewProposal `json:"proposal"`
+			Version  int64                 `json:"version"`
+		} `json:"proposals"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &todayResp)
+	if len(todayResp.Proposals) != 2 {
+		t.Fatalf("proposals=%d, want 2", len(todayResp.Proposals))
+	}
+
+	// 6) adopt full-1(reschedule)→ task version +1,scheduled_start=100
+	rescheduleProp := todayResp.Proposals[0].Proposal
+	w = doJSON(t, r, "POST", "/api/daily-sweep/adopt",
+		map[string]any{"change_id": "full-1", "ai_job_id": jobID, "version": 0, "proposal": rescheduleProp})
+	if w.Code != 200 {
+		t.Fatalf("adopt full-1 code=%d body=%s", w.Code, w.Body.String())
+	}
+	var ver int64
+	a.SQLite.DB().QueryRow(`SELECT version FROM tasks WHERE id=?`, taskID).Scan(&ver)
+	if ver != 1 {
+		t.Errorf("adopt 后 version=%d, want 1", ver)
+	}
+	var sched int64
+	a.SQLite.DB().QueryRow(`SELECT scheduled_start FROM tasks WHERE id=?`, taskID).Scan(&sched)
+	if sched != 100 {
+		t.Errorf("scheduled_start=%d, want 100", sched)
+	}
+
+	// 7) 重复 adopt full-1 → 200 idempotent,version 不再 +1
+	w = doJSON(t, r, "POST", "/api/daily-sweep/adopt",
+		map[string]any{"change_id": "full-1", "ai_job_id": jobID, "version": 0, "proposal": rescheduleProp})
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"idempotent":true`) {
+		t.Fatalf("重复 adopt code=%d body=%s, want 200 + idempotent:true", w.Code, w.Body.String())
+	}
+	a.SQLite.DB().QueryRow(`SELECT version FROM tasks WHERE id=?`, taskID).Scan(&ver)
+	if ver != 1 {
+		t.Errorf("幂等后 version=%d, want 仍 1", ver)
+	}
+
+	// 8) adopt full-2(mark_done)→ version +1 到 2,子任务变 done
+	markProp := todayResp.Proposals[1].Proposal
+	w = doJSON(t, r, "POST", "/api/daily-sweep/adopt",
+		map[string]any{"change_id": "full-2", "ai_job_id": jobID, "version": 1, "proposal": markProp})
+	if w.Code != 200 {
+		t.Fatalf("adopt mark_done code=%d body=%s", w.Code, w.Body.String())
+	}
+	a.SQLite.DB().QueryRow(`SELECT version FROM tasks WHERE id=?`, taskID).Scan(&ver)
+	if ver != 2 {
+		t.Errorf("mark_done 后 version=%d, want 2", ver)
+	}
+	var subStatus string
+	a.SQLite.DB().QueryRow(`SELECT status FROM tasks WHERE id=?`, subID).Scan(&subStatus)
+	if subStatus != "done" {
+		t.Errorf("子任务 status=%s, want done", subStatus)
+	}
+
+	// 9) reject full-... (用新 change) → 204
+	w = doJSON(t, r, "POST", "/api/daily-sweep/reject", map[string]any{"change_id": "some-other"})
+	if w.Code != 204 {
+		t.Errorf("reject code=%d, want 204", w.Code)
+	}
+
+	// 10) adoptions 表应只有 2 行(full-1, full-2)
+	var adoptionN int
+	a.SQLite.DB().QueryRow(`SELECT COUNT(*) FROM adoptions WHERE ai_job_id=?`, jobID).Scan(&adoptionN)
+	if adoptionN != 2 {
+		t.Errorf("adoptions=%d, want 2", adoptionN)
+	}
+}

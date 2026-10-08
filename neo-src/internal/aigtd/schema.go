@@ -145,8 +145,10 @@ func ValidateDecomposition(raw string) (*domain.AIDecompositionResult, []string,
 	}
 
 	if d.IsComplex {
-		if len(d.Subtasks) < 2 {
-			errs = append(errs, "is_complex=true 但 subtasks 少于 2 个")
+		// 下限为 1 而非 2:append 模式允许只新增 1 个子任务(#9)。
+		// 仍拒绝 is_complex=true + subtasks=[] 这种自相矛盾的状态。
+		if len(d.Subtasks) < 1 {
+			errs = append(errs, "is_complex=true 但 subtasks 少于 1 个")
 		}
 		if len(d.Subtasks) > 6 {
 			errs = append(errs, fmt.Sprintf("subtasks 数量 %d 过多(≤6)", len(d.Subtasks)))

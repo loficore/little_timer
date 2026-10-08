@@ -52,6 +52,18 @@ func TestSystemPrompt_MentionsIncrementalRule(t *testing.T) {
 	}
 }
 
+// TestSystemPrompt_SubtaskCountAllowsOne 锁定 #9:系统提示词必须允许
+// subtasks 个数为 1(append 模式只新增 1 个子任务的边界),不得再写"0 或 2-4"。
+func TestSystemPrompt_SubtaskCountAllowsOne(t *testing.T) {
+	sp := SystemPrompt("2026-10-05")
+	if !strings.Contains(sp, "0 或 1-4") {
+		t.Fatalf("system prompt 应允许 subtasks 个数为 0 或 1-4: %s", sp)
+	}
+	if strings.Contains(sp, "0 或 2-4") {
+		t.Fatalf("system prompt 仍禁止 1 个子任务(0 或 2-4): %s", sp)
+	}
+}
+
 // TestSystemPrompt_MentionsScoring 锁定 task 7 契约:
 // SystemPrompt 必须明确告知 LLM 输出 4 维评分字段及其范围 / 枚举(spec §5.3)。
 // 缺一个就 fail —— 防止 LLM 输出形态漂移。

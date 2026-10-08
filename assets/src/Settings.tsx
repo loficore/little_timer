@@ -8,6 +8,7 @@ import { CountdownSettings } from "./components/CountdownSettings";
 import { StopwatchSettings } from "./components/StopwatchSettings";
 import { BackupTab } from "./components/settings/BackupTab";
 import { LLMSettings } from "./components/settings/LLMSettings";
+import { DailySweepSettings } from "./components/settings/DailySweepSettings";
 import { GalleryContent } from "./components/GalleryContent";
 import { MasterPasswordModal } from "./components/MasterPasswordModal";
 import { t, setLanguage } from "./utils/i18n";
@@ -30,6 +31,7 @@ const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
   { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
   { id: "llm", labelKey: "llm_settings.title", icon: <SparklesIconComponent /> },
+  { id: "daily-sweep", labelKey: "dailySweep.settings.title", icon: <SparklesIconComponent /> },
   { id: "backup", labelKey: "settings.tabs.backup", icon: <BackupIcon /> },
   { id: "gallery", labelKey: "gallery.title", icon: <PhotoIconComponent /> },
 ];
@@ -543,6 +545,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           )}
           {activeTab === "gallery" && <GalleryContent />}
           {activeTab === "llm" && <LLMSettings />}
+          {activeTab === "daily-sweep" && <DailySweepSettings />}
         </TabPanel>
 
         <div

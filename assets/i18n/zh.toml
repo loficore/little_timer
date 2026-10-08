@@ -25,6 +25,7 @@ timer = "专注"
 habits = "习惯"
 stats = "统计"
 settings = "设置"
+daily_sweep = "每日回顾"
 
 [gallery]
 title = "壁纸图库"
@@ -432,3 +433,17 @@ tasks = "任务评分"
 prev_day = "前一天"
 next_day = "后一天"
 summary = "已排 {placed} · 待排 {unscheduled}"
+
+[dailySweep]
+title = "每日回顾"
+start = "立即扫一遍"
+adopt = "采纳"
+reject = "拒绝"
+adopted = "已采纳"
+empty = "今天没有待处理提议。点上方按钮开始一次回顾。"
+sweptAt = "上次扫一遍：{at}"
+
+[dailySweep.settings]
+title = "每日回顾"
+enabled = "启用自动回顾"
+time = "触发时刻"

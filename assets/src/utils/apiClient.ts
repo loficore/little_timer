@@ -25,7 +25,9 @@ import type {
     TaskDTO,
     LLMSettingsDTO,
     SchedulerPlan,
-    ScheduleApplyPlacement,
+    DailySweepToday,
+    DailySweepSettings,
+    ReviewProposal,
 } from "../types/aigtd";
 
 /**
@@ -751,6 +753,65 @@ export class APIClient {
         clear_key?: boolean;
     }): Promise<LLMSettingsDTO> {
         return this.fetchJson<LLMSettingsDTO>(`${this.baseUrl}/api/settings/llm`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+        });
+    }
+
+    // ===== GTD Daily Sweep / Review (v12) =====
+
+    /** 手动触发一次 review:POST /api/daily-sweep/start → { job_ids }。 */
+    async startDailySweep(): Promise<{ job_ids: number[] }> {
+        return this.fetchJson<{ job_ids: number[] }>(`${this.baseUrl}/api/daily-sweep/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+        });
+    }
+
+    /** 拉当日 review 提议:GET /api/daily-sweep/today。 */
+    async getDailySweepToday(): Promise<DailySweepToday> {
+        return this.fetchJson<DailySweepToday>(`${this.baseUrl}/api/daily-sweep/today`);
+    }
+
+    /** 采纳一条提议:POST /api/daily-sweep/adopt(幂等;409 = version 冲突)。 */
+    async adoptDailySweep(body: {
+        change_id: string;
+        ai_job_id: number;
+        version: number;
+        proposal: ReviewProposal;
+    }): Promise<{ task_id: number; version_after: number; idempotent?: boolean }> {
+        return this.fetchJson<{ task_id: number; version_after: number; idempotent?: boolean }>(
+            `${this.baseUrl}/api/daily-sweep/adopt`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            },
+        );
+    }
+
+    /** 拒绝一条提议:POST /api/daily-sweep/reject → 204。 */
+    async rejectDailySweep(body: { change_id: string }): Promise<void> {
+        return this.fetchJson<void>(`${this.baseUrl}/api/daily-sweep/reject`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+    }
+
+    /** 读 Daily Sweep 设置。 */
+    async getDailySweepSettings(): Promise<DailySweepSettings> {
+        return this.fetchJson<DailySweepSettings>(`${this.baseUrl}/api/settings/daily-sweep`);
+    }
+
+    /** 写 Daily Sweep 设置(字段可选)。非法时间后端 400 daily_sweep.invalid_time。 */
+    async updateDailySweepSettings(patch: {
+        enabled?: boolean;
+        time?: string;
+    }): Promise<DailySweepSettings> {
+        return this.fetchJson<DailySweepSettings>(`${this.baseUrl}/api/settings/daily-sweep`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(patch),

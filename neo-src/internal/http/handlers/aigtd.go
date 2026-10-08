@@ -120,32 +120,26 @@ func AIGtdReparse(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid mode (allowed: append|replace)"})
 		return
 	}
-	rawText := task.RawText
+	var rawUpdate *storage.TaskUpdateFields
 	if req.RawText != nil {
 		raw := strings.TrimSpace(*req.RawText)
 		if raw == "" || len([]rune(raw)) > maxRawTextLen {
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid raw_text"})
 			return
 		}
-		if err := a.SQLite.AITasks().UpdateTask(taskID, taskRawUpdate(raw), middleware.GetVersion(c)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
-			return
-		}
-		rawText = raw
-	}
-
-	if err := a.SQLite.AITasks().SetAIStatus(taskID, domain.AIStatusPending, ""); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "reset failed"})
-		return
+		fields := taskRawUpdate(raw)
+		rawUpdate = &fields
 	}
 	cfg := aiConfigFromApp(a)
-	jobID, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, rawText, mode)
+	jobID, err := a.SQLite.AITasks().EnqueueReparse(
+		taskID, rawUpdate, middleware.GetVersion(c), cfg.Provider, cfg.Model, mode,
+	)
 	if err != nil {
-		if errors.Is(err, storage.ErrJobInFlight) {
+		if errors.Is(err, storage.ErrJobInFlight) || errors.Is(err, storage.ErrVersionConflict) {
 			c.JSON(http.StatusConflict, gin.H{"success": false, "code": "aigtd.processing", "error": "task is being processed"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "enqueue failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "reparse failed"})
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})

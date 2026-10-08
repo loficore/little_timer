@@ -90,6 +90,22 @@ func currentVersionForPath(method, path string) string {
 		return "0"
 	}
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	// /api/aigtd/reparse/{task_id}:生产 apiClient.reparseAIGtd 传真实 version,
+	// 测试也照做,才能确定性触达 reparse 的乐观锁/原子路径。
+	if len(parts) >= 4 && parts[0] == "api" && parts[1] == "aigtd" && parts[2] == "reparse" {
+		if testRouterApp == nil || testRouterApp.SQLite == nil {
+			return "0"
+		}
+		id, err := strconv.ParseInt(parts[3], 10, 64)
+		if err != nil {
+			return "0"
+		}
+		v, err := testRouterApp.SQLite.AITasks().GetTaskVersion(id)
+		if err != nil {
+			return "0"
+		}
+		return strconv.FormatInt(v, 10)
+	}
 	if len(parts) >= 3 && parts[0] == "api" && parts[1] == "tasks" {
 		if testRouterApp == nil || testRouterApp.SQLite == nil {
 			return "0"
@@ -664,5 +680,98 @@ func TestTaskCreate_SingleWrite(t *testing.T) {
 	}
 	if created2.Notes != "" {
 		t.Errorf("空 notes 应为空, got %q", created2.Notes)
+	}
+}
+
+// TestAIGtdReparse_LoserAtomicity 锁定 #8:并发两个都带 raw_text 的 reparse,
+// 最终 task.raw_text 必须等于 winner 的输入,loser 输入零残留。
+func TestAIGtdReparse_LoserAtomicity(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "t", "raw_text": "base"})
+	var task TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	path := "/api/aigtd/reparse/" + strconv.FormatInt(task.ID, 10)
+
+	texts := []string{"输入A", "输入B"}
+	const n = 2
+	codes := make([]int, n)
+	bodies := make([]string, n)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			rr := doJSON(t, r, http.MethodPost, path, map[string]any{"raw_text": texts[idx]})
+			codes[idx] = rr.Code
+			bodies[idx] = rr.Body.String()
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	winnerText := ""
+	accepted, conflict := 0, 0
+	for i, c := range codes {
+		switch c {
+		case http.StatusAccepted:
+			accepted++
+			winnerText = texts[i]
+		case http.StatusConflict:
+			conflict++
+		default:
+			t.Fatalf("unexpected status %d body=%s (codes=%v bodies=%v)", c, bodies[i], codes, bodies)
+		}
+	}
+	if accepted != 1 || conflict != 1 {
+		t.Fatalf("want exactly one 202 + one 409, got %v", codes)
+	}
+	after, _, _ := a.SQLite.AITasks().GetTask(task.ID)
+	if after.RawText != winnerText {
+		t.Errorf("raw_text = %q, want winner 输入 %q", after.RawText, winnerText)
+	}
+}
+
+// TestAIGtdReparse_RawTextVersionConflict 锁定 #8:带 raw_text 但 version 过期
+// → 409,且 task 状态完全没动。
+func TestAIGtdReparse_RawTextVersionConflict(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/tasks", map[string]any{"title": "t"})
+	var task TaskDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	// TaskCreate 只解析 body 的 title/notes,把 title 当 raw_text 落库(不读
+	// body 的 raw_text)。这里显式把 raw_text 覆盖为测试基线 "旧文"(版本随之
+	// +1),使下面的 reparse 冲突后能断言 raw_text 未被改动。
+	rawText := "旧文"
+	if err := a.SQLite.AITasks().UpdateTask(task.ID, storage.TaskUpdateFields{RawText: &rawText}, task.Version); err != nil {
+		t.Fatalf("set raw_text baseline: %v", err)
+	}
+
+	// 再把 version 推一档(PATCH title),确保 reparse 的 If-Match=0 必过期。
+	w = doJSON(t, r, http.MethodPatch, "/api/tasks/"+strconv.FormatInt(task.ID, 10),
+		map[string]any{"title": "改过"})
+	if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+		t.Fatalf("patch: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 用过期 If-Match(0)直接构造请求,模拟另一端已把 version 推到 1 之后的陈旧写。
+	body, _ := json.Marshal(map[string]any{"raw_text": "新文", "version": 0})
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/aigtd/reparse/"+strconv.FormatInt(task.ID, 10), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", "0")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("version 冲突应 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	after, _, _ := a.SQLite.AITasks().GetTask(task.ID)
+	if after.RawText != "旧文" {
+		t.Errorf("冲突后 raw_text 应不变, got %q", after.RawText)
 	}
 }

@@ -357,6 +357,16 @@ func (c *AITasksCrud) SetAIStatus(taskID int64, status domain.AIStatus, errMsg s
 	return err
 }
 
+// setAIStatusTx 是 SetAIStatus 的事务变体(供 EnqueueReparse 复用),SQL 与
+// 语义完全一致,仅把执行器从 *sql.DB 换成 *sql.Tx。
+func (c *AITasksCrud) setAIStatusTx(tx *sql.Tx, taskID int64, status domain.AIStatus, errMsg string) error {
+	_, err := tx.Exec(
+		`UPDATE tasks SET ai_status = ?, ai_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;`,
+		string(status), errMsg, taskID,
+	)
+	return err
+}
+
 // SetTaskStatus 更新 status 与 updated_at。
 func (c *AITasksCrud) SetTaskStatus(id int64, status domain.TaskStatus) error {
 	_, err := c.db.Exec(
@@ -606,6 +616,70 @@ func (c *AITasksCrud) EnqueueJob(taskID int64, provider, model, reqPayload strin
 			return 0, ErrJobInFlight
 		}
 		return 0, fmt.Errorf("%w: %v", ErrAITaskInsertFailed, err)
+	}
+	return res.LastInsertId()
+}
+
+// readRawTextTx 在事务内读取 task 当前 raw_text(不存在 → 空串)。
+// EnqueueReparse 用它做"写后读",保证 request_payload 等于本事务落库的
+// raw_text。
+func (c *AITasksCrud) readRawTextTx(tx *sql.Tx, taskID int64) (string, error) {
+	var raw string
+	err := tx.QueryRow(`SELECT COALESCE(raw_text, '') FROM tasks WHERE id = ?;`, taskID).Scan(&raw)
+	return raw, err
+}
+
+// EnqueueReparse 是 reparse 的原子入口:
+//   - rawUpdate 非空: 用 version 乐观锁改写 raw_text(0 行影响 → ErrVersionConflict)
+//   - 总是: ai_status 置为 pending, ai_error 清空
+//   - 总是: 入队一条 queued ai_job(同 task 已有 queued/running → ErrJobInFlight)
+//
+// 三步在同一个 *sql.Tx 内,任一失败 → 整段 rollback(loser 零残留:
+// raw_text / ai_status / ai_jobs 行数都像没发生过这次 reparse)。
+// request_payload 取事务内写后读的 raw_text。
+//
+// rawUpdate==nil 时 version 入参被忽略(无乐观锁需要)。
+func (c *AITasksCrud) EnqueueReparse(
+	taskID int64,
+	rawUpdate *TaskUpdateFields,
+	version int64,
+	provider, model string,
+	mode domain.AIJobMode,
+) (int64, error) {
+	if mode == "" {
+		mode = domain.AIJobModeAppend
+	}
+	tx, err := c.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }() // 已 Commit 后 Rollback 是 no-op
+
+	if rawUpdate != nil {
+		if err := c.updateWithVersion(tx, taskID, *rawUpdate, version); err != nil {
+			return 0, err
+		}
+	}
+	if err := c.setAIStatusTx(tx, taskID, domain.AIStatusPending, ""); err != nil {
+		return 0, err
+	}
+	payload, err := c.readRawTextTx(tx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(
+		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload, mode)
+		 VALUES (?, ?, ?, 'queued', ?, ?);`,
+		taskID, provider, model, payload, string(mode),
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return 0, ErrJobInFlight
+		}
+		return 0, fmt.Errorf("%w: %v", ErrAITaskInsertFailed, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
 	}
 	return res.LastInsertId()
 }

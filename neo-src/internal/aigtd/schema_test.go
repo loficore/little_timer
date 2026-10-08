@@ -1,6 +1,7 @@
 package aigtd_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -121,6 +122,64 @@ func TestValidateDecomposition_ScoresBounds(t *testing.T) {
 			}
 			if !found {
 				t.Errorf("errs 中缺含 %q 的警告,实际 errs = %v", c.wantWarn, errs)
+			}
+		})
+	}
+}
+
+// TestValidateDecomposition_ComplexSubtaskBounds 锁定 issue #9 的契约:
+// append 模式下 LLM 可能只想新增 1 个子任务,因此 is_complex=true 的下限
+// 必须放宽到 ≥1(不再强制 ≥2);同时仍拒绝 is_complex=true + subtasks=[]
+// 这种自相矛盾的状态,以及 is_complex=false + 非空 subtasks。
+func TestValidateDecomposition_ComplexSubtaskBounds(t *testing.T) {
+	sub := func(n int) string {
+		items := make([]string, n)
+		for i := range items {
+			items[i] = `{"title":"step","estimated_minutes":15}`
+		}
+		return "[" + strings.Join(items, ",") + "]"
+	}
+	cases := []struct {
+		name      string
+		isComplex bool
+		nSub      int
+		wantErr   string // 非空=期望 errs 含该子串;空=期望无错误
+	}{
+		{"complex + 1 子任务 → 通过(append 边界)", true, 1, ""},
+		{"complex + 0 子任务 → 报错(矛盾状态)", true, 0, "少于 1 个"},
+		{"complex + 6 子任务 → 通过(上限)", true, 6, ""},
+		{"complex + 7 子任务 → 报错(超上限)", true, 7, "过多"},
+		{"not complex + 0 子任务 → 通过", false, 0, ""},
+		{"not complex + 1 子任务 → 报错", false, 1, "is_complex=false 但存在 subtasks"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			raw := fmt.Sprintf(
+				`{"title":"x","is_complex":%t,"estimated_minutes":30,"subtasks":%s}`,
+				c.isComplex, sub(c.nSub),
+			)
+			res, errs, err := aigtd.ValidateDecomposition(raw)
+			if err != nil {
+				t.Fatalf("解析失败: %v", err)
+			}
+			if res == nil {
+				t.Fatal("返回 nil res")
+			}
+			if c.wantErr == "" {
+				if len(errs) != 0 {
+					t.Fatalf("期望无错误,实际 errs = %v", errs)
+				}
+				return
+			}
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e, c.wantErr) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("errs 中缺含 %q 的错误,实际 errs = %v", c.wantErr, errs)
 			}
 		})
 	}

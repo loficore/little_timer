@@ -625,7 +625,9 @@ func TestSettingsColumnsMatchZigSchema(t *testing.T) {
 		"id", "timezone", "language", "default_mode", "theme_mode", "wallpaper",
 		"duration_seconds", "countdown_loop", "countdown_loop_count",
 		"countdown_loop_interval", "stopwatch_max_seconds",
-		"log_level", "log_enable_timestamp", "log_tick_interval", "updated_at",
+		"log_level", "log_enable_timestamp", "log_tick_interval",
+		"daily_sweep_enabled", "daily_sweep_time",
+		"updated_at",
 		"llm_provider", "llm_model", "llm_api_key_encrypted",
 		"llm_base_url", "llm_max_tokens", "llm_timeout_seconds",
 	}

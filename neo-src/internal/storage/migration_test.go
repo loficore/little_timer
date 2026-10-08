@@ -511,15 +511,151 @@ func TestMigrateV10ToV11_AddsAllColumns(t *testing.T) {
 		t.Error("CHECK(json_valid(blocked_by)) 未生效: blocked_by='not-json' 应被拒")
 	}
 
-	// 5. schema_version 已被推进到 11。
+	// 5. schema_version 已被推进到 CurrentSchemaVersion(v12)。
+	// 注:种子是 v10,跑 Migrate() 会顺次执行 v10→v11→v12 的幂等迁移,
+	// 终态为 CurrentSchemaVersion(任务期间从 11 升到 12);测的是 6 列的
+	// ALTER ... ADD COLUMN ... CHECK(...) 路径,v11→v12 的存在不改变该断言。
 	var v int
 	if err := m.DB().QueryRow(
 		`SELECT MAX(version) FROM schema_version`).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != 11 {
-		t.Errorf("schema_version.max = %d, want 11", v)
+	if v != CurrentSchemaVersion {
+		t.Errorf("schema_version.max = %d, want %d", v, CurrentSchemaVersion)
 	}
+}
+
+// v11TasksAiJobsSQL 是 v11 版(含 v11 的 6 列 + user_edited_title + ai_jobs.mode,
+// 但不含 v12 的 daily_sweep_log / adoptions / settings.daily_sweep_*)的
+// tasks / ai_jobs 建表语句。用于 TestMigrateV11ToV12_TablesAndColumns 模拟
+// "已是 v11 但缺 v12 增量"的 DB,强制 migrateV11ToV12 真实执行
+// CREATE TABLE / CREATE INDEX / addColumnIfMissing,而不是走 fresh-create 路径。
+const v11TasksAiJobsSQL = `
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER,
+    raw_text TEXT DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    notes TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'inbox'
+        CHECK(status IN ('inbox','active','done','archived','rejected')),
+    due_date TEXT,
+    scheduled_start INTEGER,
+    scheduled_end INTEGER,
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),
+    estimated_minutes INTEGER NOT NULL DEFAULT 0,
+    order_index INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    ai_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(ai_status IN ('pending','processing','done','error')),
+    ai_error TEXT,
+    user_edited_title INTEGER NOT NULL DEFAULT 0 CHECK(user_edited_title IN (0,1)),
+    version INTEGER NOT NULL DEFAULT 0,
+    priority_score INTEGER NOT NULL DEFAULT 3 CHECK(priority_score BETWEEN 1 AND 5),
+    urgency_score INTEGER NOT NULL DEFAULT 5 CHECK(urgency_score BETWEEN 1 AND 10),
+    energy_required INTEGER NOT NULL DEFAULT 2 CHECK(energy_required BETWEEN 1 AND 3),
+    context_tag TEXT NOT NULL DEFAULT 'general',
+    blocked_by TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(blocked_by)),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    parsed_at TIMESTAMP,
+    FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS ai_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    status TEXT NOT NULL
+        CHECK(status IN ('queued','running','success','failed')),
+    request_payload TEXT NOT NULL,
+    response_payload TEXT,
+    error_message TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 1,
+    mode TEXT NOT NULL DEFAULT 'append' CHECK(mode IN ('append','replace','review')),
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+`
+
+// TestMigrateV11ToV12_TablesAndColumns 验证 v11 → v12 落地:
+//   - daily_sweep_log / adoptions 两表存在;
+//   - idx_adoptions_idempotent UNIQUE 索引存在;
+//   - settings 表新增 daily_sweep_enabled (INTEGER 0/1) 与 daily_sweep_time
+//     (TEXT),默认 1 与 "08:00";
+//   - schema_version 被推进到 12 (CurrentSchemaVersion)。
+//
+// 同时验证两条路径:fresh DB 与"已是 v11 缺 v12 增量"的升级 DB,避免
+// CurrentSchemaVersion=12 但实际迁移只跑了 fresh 分支的盲区。
+func TestMigrateV11ToV12_TablesAndColumns(t *testing.T) {
+    run := func(t *testing.T, seed func(db *sql.DB)) {
+        dbPath := filepath.Join(t.TempDir(), "lt.db")
+        m := NewSqliteManager().Init(dbPath)
+        if err := m.Open(); err != nil { t.Fatal(err) }
+        defer m.Close()
+        if seed != nil { seed(m.DB()) }
+        if err := m.Migrate(); err != nil { t.Fatalf("Migrate: %v", err) }
+
+        // 两表必须存在
+        for _, table := range []string{"daily_sweep_log", "adoptions"} {
+            var n int
+            if err := m.DB().QueryRow(
+                `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?;`, table,
+            ).Scan(&n); err != nil { t.Fatalf("query %s: %v", table, err) }
+            if n != 1 { t.Errorf("table %s 缺失", table) }
+        }
+        // 幂等索引必须存在
+        var nIdx int
+        if err := m.DB().QueryRow(
+            `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_adoptions_idempotent';`,
+        ).Scan(&nIdx); err != nil { t.Fatalf("query index: %v", err) }
+        if nIdx != 1 { t.Error("idx_adoptions_idempotent 缺失") }
+        // settings 两列存在且默认正确
+        if !hasColumn(m.DB(), "settings", "daily_sweep_enabled") {
+            t.Error("settings.daily_sweep_enabled 缺失")
+        }
+        if !hasColumn(m.DB(), "settings", "daily_sweep_time") {
+            t.Error("settings.daily_sweep_time 缺失")
+        }
+        var enabled int
+        var at string
+        if err := m.DB().QueryRow(
+            `SELECT daily_sweep_enabled, daily_sweep_time FROM settings WHERE id=1;`,
+        ).Scan(&enabled, &at); err != nil {
+            t.Fatalf("read settings defaults: %v", err)
+        }
+        if enabled != 1 || at != "08:00" {
+            t.Errorf("settings 默认=(%d,%s), want (1,08:00)", enabled, at)
+        }
+        // schema_version 推进到 12
+        var v int
+        if err := m.DB().QueryRow(`SELECT MAX(version) FROM schema_version;`).Scan(&v); err != nil {
+            t.Fatal(err)
+        }
+        if v != 12 { t.Errorf("schema_version.max = %d, want 12", v) }
+    }
+
+    t.Run("fresh", func(t *testing.T) { run(t, nil) })
+    t.Run("upgrade_from_v11", func(t *testing.T) {
+        run(t, func(db *sql.DB) {
+            if _, err := db.Exec(v8SchemaSQL); err != nil { t.Fatalf("seed v8: %v", err) }
+            if _, err := db.Exec(v11TasksAiJobsSQL); err != nil { t.Fatalf("seed v11 tasks/ai_jobs: %v", err) }
+            // 真实 v11 用户已有 settings id=1 行(initializeDefaultSettings 在
+            // fresh 路径才种;upgrade 路径假定已有)。补上以让 addColumnIfMissing
+            // 之后的 defaults 读取得以命中。
+            if _, err := db.Exec(
+                `INSERT INTO settings (id, timezone, language, default_mode, theme_mode, duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval)
+                 VALUES (1, 8, 'ZH', 'countdown', 'dark', 1500, 0, 0, 0, 86400, 'INFO', 1, 1000);`,
+            ); err != nil { t.Fatalf("seed settings: %v", err) }
+            if _, err := db.Exec(`INSERT INTO schema_version (version, description) VALUES (11, 'v11');`); err != nil {
+                t.Fatalf("seed version=11: %v", err)
+            }
+        })
+    })
 }
 
 // hasColumn 通过 PRAGMA table_info 检查列是否存在。

@@ -638,3 +638,149 @@ func TestEnqueueJob_RejectsSecondInFlightJob(t *testing.T) {
 		t.Fatalf("enqueue after terminal: %v", err)
 	}
 }
+
+func TestEnqueueReparse_NilRawText(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("原文", "manual")
+	jobID, err := c.EnqueueReparse(taskID, nil, 0, "openai_compat", "m", domain.AIJobModeAppend)
+	if err != nil {
+		t.Fatalf("EnqueueReparse: %v", err)
+	}
+	if jobID == 0 {
+		t.Fatal("jobID 应为非零")
+	}
+	task, _, _ := c.GetTask(taskID)
+	if task.RawText != "原文" {
+		t.Errorf("raw_text 应不变, got %q", task.RawText)
+	}
+	if task.AIStatus != domain.AIStatusPending {
+		t.Errorf("ai_status = %q, want pending", task.AIStatus)
+	}
+}
+
+func TestEnqueueReparse_RawTextSuccess(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("旧文", "manual")
+	fields := TaskUpdateFields{RawText: stringPtr("新文")}
+	jobID, err := c.EnqueueReparse(taskID, &fields, 0, "openai_compat", "m", domain.AIJobModeReplace)
+	if err != nil {
+		t.Fatalf("EnqueueReparse: %v", err)
+	}
+	task, _, _ := c.GetTask(taskID)
+	if task.RawText != "新文" {
+		t.Errorf("raw_text = %q, want 新文", task.RawText)
+	}
+	if task.AIStatus != domain.AIStatusPending {
+		t.Errorf("ai_status = %q, want pending", task.AIStatus)
+	}
+	job, _ := c.LatestJobForTask(taskID)
+	if job == nil || job.ID != jobID {
+		t.Fatalf("latest job = %v, want id=%d", job, jobID)
+	}
+	if job.RequestPayload != "新文" {
+		t.Errorf("request_payload = %q, want 新文", job.RequestPayload)
+	}
+	if job.Mode != domain.AIJobModeReplace {
+		t.Errorf("mode = %q, want replace", job.Mode)
+	}
+}
+
+func TestEnqueueReparse_VersionConflict(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("旧文", "manual")
+	// 把 version 推到 1。
+	title := "改过"
+	if err := c.UpdateTask(taskID, TaskUpdateFields{Title: &title}, 0); err != nil {
+		t.Fatal(err)
+	}
+	// 用过期 version=0 + raw_text → 整段回滚。
+	fields := TaskUpdateFields{RawText: stringPtr("新文")}
+	_, err := c.EnqueueReparse(taskID, &fields, 0, "openai_compat", "m", domain.AIJobModeAppend)
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("want ErrVersionConflict, got %v", err)
+	}
+	task, _, _ := c.GetTask(taskID)
+	if task.RawText != "旧文" {
+		t.Errorf("version 冲突后 raw_text 应不变, got %q", task.RawText)
+	}
+	var n int
+	_ = m.DB().QueryRow(`SELECT COUNT(*) FROM ai_jobs WHERE task_id=?`, taskID).Scan(&n)
+	if n != 0 {
+		t.Errorf("version 冲突后不应有 ai_jobs 行, got %d", n)
+	}
+	if task.AIStatus != domain.AIStatusPending {
+		// 新建 task 默认 pending;冲突后不应被改成其他值。
+		t.Errorf("ai_status = %q, want pending(默认)", task.AIStatus)
+	}
+}
+
+func TestEnqueueReparse_InFlightRollback(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lt.db")
+	m := NewSqliteManager().Init(dbPath)
+	if err := m.Open(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	c := m.AITasks()
+
+	taskID, _ := c.CreateTask("旧文", "manual")
+	// 预种一个 queued job 占用 in-flight 槽。
+	if _, err := c.EnqueueJob(taskID, "openai_compat", "m", `pre`, domain.AIJobModeAppend); err != nil {
+		t.Fatal(err)
+	}
+	// 把 ai_status 手动改成 done,以便验证回滚是否真的把它复位失败。
+	if err := c.SetAIStatus(taskID, domain.AIStatusDone, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	fields := TaskUpdateFields{RawText: stringPtr("新文")}
+	_, err := c.EnqueueReparse(taskID, &fields, 0, "openai_compat", "m", domain.AIJobModeAppend)
+	if !errors.Is(err, ErrJobInFlight) {
+		t.Fatalf("want ErrJobInFlight, got %v", err)
+	}
+	task, _, _ := c.GetTask(taskID)
+	if task.RawText != "旧文" {
+		t.Errorf("in-flight 冲突后 raw_text 应回滚, got %q", task.RawText)
+	}
+	if task.AIStatus != domain.AIStatusDone {
+		t.Errorf("in-flight 冲突后 ai_status 应回滚为 done, got %q", task.AIStatus)
+	}
+	var n int
+	_ = m.DB().QueryRow(`SELECT COUNT(*) FROM ai_jobs WHERE task_id=?`, taskID).Scan(&n)
+	if n != 1 {
+		t.Errorf("in-flight 冲突后 ai_jobs 行数应仍为 1, got %d", n)
+	}
+}

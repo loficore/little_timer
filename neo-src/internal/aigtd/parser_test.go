@@ -113,6 +113,42 @@ func TestParseWithRetry_AllFailReturnsError(t *testing.T) {
 	}
 }
 
+// TestParseReviewWithRetry_Succeeds 验证 review 路径单次成功:返回 Proposals +
+// RawText,warnings 为空。
+func TestParseReviewWithRetry_Succeeds(t *testing.T) {
+	mock := &mockProvider{responses: []string{
+		`{"proposals":[{"change_id":"c1","task_id":1,"action":"no_op","reason":""}]}`,
+	}}
+	out, err := aigtd.ParseReviewWithRetryDetailed(context.Background(), mock, aigtd.CompletionRequest{}, 1, 100, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out == nil || len(out.Proposals) != 1 || out.Proposals[0].ChangeID != "c1" {
+		t.Fatalf("out=%+v", out)
+	}
+	if len(out.Warnings) != 0 {
+		t.Errorf("warnings=%v, want empty", out.Warnings)
+	}
+	if out.RawText == "" {
+		t.Error("RawText 应保留")
+	}
+}
+
+// TestParseReviewWithRetry_ChangeIDFallback 验证缺失 change_id 经 taskID-jobID
+// 兜底重写;返回的 proposal[0].ChangeID 应是 "1-100-0"。
+func TestParseReviewWithRetry_ChangeIDFallback(t *testing.T) {
+	mock := &mockProvider{responses: []string{
+		`{"proposals":[{"task_id":1,"action":"no_op","reason":""}]}`,
+	}}
+	out, err := aigtd.ParseReviewWithRetryDetailed(context.Background(), mock, aigtd.CompletionRequest{}, 1, 100, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Proposals) != 1 || out.Proposals[0].ChangeID != "1-100-0" {
+		t.Fatalf("ChangeID=%q, want 1-100-0", out.Proposals[0].ChangeID)
+	}
+}
+
 func TestParseWithRetry_MaxAttemptsOneNoRetry(t *testing.T) {
 	mock := &mockProvider{responses: []string{`bad`}}
 	_, err := aigtd.ParseWithRetry(context.Background(), mock, aigtd.CompletionRequest{}, 1)

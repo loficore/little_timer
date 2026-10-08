@@ -7,6 +7,81 @@ import (
 	"little-timer/internal/domain"
 )
 
+// ReviewPromptTemplate 是 GTD Review 模式的提示词模板,内含 system 段(规则 +
+// 输出契约)与任务清单。worker 在 review 分支直接以 UserPrompt 字段传整段;
+// SystemPrompt 留空,因为 review 的 system 约束已在此模板里。
+//
+// 规则要点(参 docs/superpowers/specs/2026-10-08-gtd-review-gaps-design.md Δ3):
+//   - action ∈ {reschedule, drop, modify_subtasks, no_op}
+//   - suggested_subtask_changes[].op ∈ {delete, modify_title, add, mark_done}
+//   - mark_done 只针对 active 子任务;delete/modify_title 也只针对 active
+//   - done / archived 子任务不要提议任何改动("用户数据最重要")
+//   - change_id 必须全局唯一(优先 UUID v4);缺失/重复由 ValidateReviewResult 兜底
+//   - 长期停滞(>30 天)可建议 drop,reason 必填
+const ReviewPromptTemplate = `你是 GTD 智能助理(Weekly Review 模式)。当前日期 %s。
+
+任务:审视以下积压任务,识别延误、改期、拆分、放弃、已完成未勾、重写;返回 JSON 提议。
+**只返回 JSON,不要附加任何解释、markdown 代码块或前后缀文字。**
+
+规则:
+- action ∈ {reschedule, drop, modify_subtasks, no_op}
+- suggested_subtask_changes[].op ∈ {delete, modify_title, add, mark_done}
+- mark_done 只针对 status='active' 的子任务(用户其实已完成但没勾)
+- delete / modify_title 也只针对 active 子任务
+- status='done' 或 'archived' 的子任务不要提议任何改动
+- change_id 必须全局唯一(优先 UUID v4);同结果内不能重复
+- 长期停滞(>30 天)可建议 drop,reason 必填
+- is_complex=false 的简单任务直接 no_op,不要再补
+
+输出契约:
+{
+  "proposals": [
+    {"change_id":"...", "task_id": N, "action":"reschedule|drop|modify_subtasks|no_op",
+     "suggested_scheduled_start": <unix>, "suggested_scheduled_end": <unix>,
+     "suggested_subtask_changes": [
+       {"subtask_id": M, "op":"delete|modify_title|mark_done", "new_title":"...", "reason":"..."},
+       {"op":"add", "new_title":"...", "reason":"..."}
+     ],
+     "reason":"..."}
+  ]
+}
+
+任务清单:
+%s
+`
+
+// TaskSummary 描述一个被 review 的任务摘要,喂给 ReviewPrompt。
+// SubtaskTitles 与 SubtaskStatuses 等长;SubtaskStatuses 用于在 prompt 里
+// 标注哪些子任务已 done(LLM 据此知道不要提议改动)。
+type TaskSummary struct {
+	ID              int64
+	Title           string
+	Status          string // active/inbox/done/archived/rejected
+	SubtaskTitles   []string
+	SubtaskStatuses []string
+	DueDate         *string
+}
+
+// ReviewPrompt 渲染 review 模式提示词(currentDate: 本地 YYYY-MM-DD)。
+func ReviewPrompt(currentDate string, pending []TaskSummary) string {
+	var b strings.Builder
+	for i, t := range pending {
+		fmt.Fprintf(&b, "\n[%d] id=%d title=%q status=%s", i, t.ID, t.Title, t.Status)
+		if t.DueDate != nil {
+			fmt.Fprintf(&b, " due=%s", *t.DueDate)
+		}
+		b.WriteString("\n  子任务:\n")
+		for j, st := range t.SubtaskTitles {
+			status := ""
+			if j < len(t.SubtaskStatuses) {
+				status = t.SubtaskStatuses[j]
+			}
+			fmt.Fprintf(&b, "  - %q [%s]\n", st, status)
+		}
+	}
+	return fmt.Sprintf(ReviewPromptTemplate, currentDate, b.String())
+}
+
 // systemPromptTemplate 是发给 LLM 的系统提示词模板。`%s` 注入当前日期。
 // 必须与 DecompositionJSONSchema 描述一致。
 const systemPromptTemplate = `你是 GTD 智能助理。输入是一段用户随手记,可能是中文/英文混杂。

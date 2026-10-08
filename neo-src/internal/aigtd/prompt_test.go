@@ -7,6 +7,21 @@ import (
 	"little-timer/internal/domain"
 )
 
+func TestReviewPrompt_IncludesTasksAndMarkDone(t *testing.T) {
+	p := ReviewPrompt("2026-10-08", []TaskSummary{
+		{
+			ID: 1, Title: "写报告", Status: "active",
+			SubtaskTitles:   []string{"起草", "定稿"},
+			SubtaskStatuses: []string{"active", "done"},
+		},
+	})
+	for _, kw := range []string{"写报告", "起草", "定稿", "mark_done", "delete", "modify_title", "change_id", "reschedule", "drop", "modify_subtasks", "no_op"} {
+		if !strings.Contains(p, kw) {
+			t.Errorf("ReviewPrompt 缺 %q", kw)
+		}
+	}
+}
+
 func TestBuildUserPrompt_IncludesExistingSubtasks(t *testing.T) {
 	out := BuildUserPrompt("写周报", []SubtaskHint{
 		{Title: "收集数据", Status: "done"},

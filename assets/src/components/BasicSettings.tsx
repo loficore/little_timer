@@ -162,6 +162,7 @@ export const BasicSettings = ({ config, onChange, isAnimated = true, onWallpaper
         </label>
         <button
           type="button"
+          data-testid="wallpaper-entry"
           className="w-full h-24 rounded-xl border-2 border-[var(--my-outline)] bg-[var(--my-surface-strong)] hover:border-[var(--my-primary)] transition-colors flex items-center justify-center gap-3"
           onClick={() => onWallpaperClick?.()}
         >

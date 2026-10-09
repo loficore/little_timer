@@ -164,7 +164,9 @@
     position: fixed;
     inset: -15%;
     pointer-events: none;
-    z-index: 0;
+    /* 装饰层必须位于内容之下：z-index:0 会把半透明蒙层画在所有内容上方，
+       整体 UI（含白字按钮）被均匀提亮冲淡。 */
+    z-index: -1;
     backdrop-filter: blur(18px) saturate(120%);
     -webkit-backdrop-filter: blur(18px) saturate(120%);
     background:

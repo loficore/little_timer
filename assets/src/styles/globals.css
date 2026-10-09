@@ -614,8 +614,10 @@ html:not(.light-mode) {
   --color-base-content: rgba(255, 255, 255, 0.92);
   --color-primary: #515bd4;
   --color-primary-content: #ffffff;
-  --color-secondary: #007aff;
-  --color-secondary-content: #ffffff;
+  /* secondary 语义 = 次级中性动作（如计时重置），不占品牌色；
+     daisy 默认 #007aff 白字仅 ≈2.3:1，不过 AA */
+  --color-secondary: #1f1f1f;
+  --color-secondary-content: rgba(255, 255, 255, 0.92);
   --color-accent: #515bd4;
   --color-accent-content: #ffffff;
   --color-neutral: #3a3f4a;
@@ -636,10 +638,10 @@ html.light-mode {
   --color-base-200: #e7dac3;
   --color-base-300: #ddccb0;
   --color-base-content: rgba(42, 31, 20, 0.94);
-  --color-primary: #8b6b42;
+  --color-primary: #6d5232;
   --color-primary-content: #ffffff;
-  --color-secondary: #8b6b42;
-  --color-secondary-content: #ffffff;
+  --color-secondary: #dccec0;
+  --color-secondary-content: rgba(42, 31, 20, 0.94);
   --color-accent: #8b6b42;
   --color-accent-content: #ffffff;
   --color-neutral: #b3a188;
@@ -652,6 +654,13 @@ html.light-mode {
   --color-warning-content: #1a1204;
   --color-error: #f87272;
   --color-error-content: #1a0404;
+}
+
+html.light-mode.light-style-mist {
+  --color-primary: #3d5f6e;
+  --color-primary-content: #ffffff;
+  --color-secondary: #d7d0c4;
+  --color-secondary-content: rgba(35, 45, 52, 0.95);
 }
 
 /* DaisyUI select/input/textarea 的边框色统一走项目 --my-outline，避免边框过深。

@@ -43,6 +43,7 @@ export const TabPanel = ({
         {tabs.map((tab) => (
           <button
             key={tab.id}
+            data-testid={`tab-${tab.id}`}
             onClick={() => onTabChange(tab.id)}
             className={`my-tab truncate whitespace-nowrap min-w-0 ${activeTab === tab.id ? "my-tab-active" : ""}`}
           >

@@ -118,7 +118,7 @@
 
   .my-bottom-nav {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 0.25rem;
     padding: 0.35rem max(0.5rem, env(safe-area-inset-right)) calc(0.35rem + env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
     background: linear-gradient(180deg, color-mix(in oklab, var(--my-surface) 55%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 55%, transparent) 100%);

@@ -2,20 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
-    paths:
-      - "assets/src/**"
-      - "assets/playwright.config.ts"
-      - "assets/package.json"
-      - "assets/pnpm-lock.yaml"
-      - "neo-src/**"
-      - "scripts/**"
-      - "android/**"
-      - "scripts/build-android.sh"
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/vrt.yml"
+    branches: [main]
   release:
     types: [published]
   workflow_dispatch:
@@ -99,6 +88,9 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: e2e-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -204,6 +196,7 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

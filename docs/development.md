@@ -1,0 +1,19 @@
+# 开发流程（main-only / GitHub Flow）
+
+## 分支模型
+- `main` 是唯一长期分支，也是唯一发布线；任何时刻都应处于可发布状态。
+- 所有改动从 `main` 拉短命分支（`feat/*`、`fix/*`、`chore/*`），PR 合入后自动删除。
+- 合并方式固定为 **squash**；`main` 保持线性历史。
+
+## 必需检查
+- 合并到 `main` 前必须通过：`frontend`、`backend`、`e2e`。
+- `vrt`（视觉回归）目前为 advisory（`continue-on-error`），不阻断合并。
+- 平台构建（`build` matrix）只在 release / 手动触发时运行，不阻断 PR。
+
+## 发布
+- 在 `main` 上打 tag 并发 GitHub Release；`release.yml` 随即打包产物。
+- 不再需要「同步 develop 到 main」的步骤。
+
+## 本地（jj-colocated）
+- 用 jj bookmark 对应 GitHub 分支：`jj bookmark create <name> -r @`，推送用 `jj git push`。
+- 定期 `jj git fetch` 同步远程；删除已合并的 bookmark 用 `jj bookmark delete <name>`。

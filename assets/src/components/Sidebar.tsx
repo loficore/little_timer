@@ -6,7 +6,7 @@
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
 import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, CalendarIcon } from "../utils/icons";
-import { SparklesIconComponent } from "../utils/icons";
+import { SparklesIconComponent, DailySweepIcon } from "../utils/icons";
 
 type Page = "timer" | "habits" | "aigtd" | "schedule" | "stats" | "settings" | "dailySweep";
 
@@ -50,7 +50,7 @@ const navItems = [
         id: "dailySweep" as const,
         labelKey: "nav.daily_sweep",
         icon: (
-            <SparklesIconComponent className="h-5 w-5" />
+            <DailySweepIcon className="h-5 w-5" />
         ),
     },
     {
@@ -81,11 +81,12 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
             </div>
 
             {/* 导航 */}
-            <nav className="flex-1 p-2">
+            <nav className="flex-1 p-2" aria-label={t("common.app_name")}>
                 {navItems.map((item) => (
                     <button
                         key={item.id}
                         data-testid={`nav-${item.id}`}
+                        aria-current={currentPage === item.id ? "page" : undefined}
                         className={`my-sidebar-nav-btn ${currentPage === item.id ? "is-active" : ""}`}
                         onClick={() => onNavigate(item.id)}
                     >

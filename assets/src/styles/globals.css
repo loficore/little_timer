@@ -26,6 +26,8 @@
   }
 
   .btn,
+  .btn-primary,
+  .btn-secondary,
   .timer-option-control {
     transition: none !important;
   }
@@ -448,25 +450,6 @@ html.light-mode .apexcharts-yaxistooltip {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  html,
-  html.light-mode,
-  body::before,
-  .time-value-swap,
-  .time-running-glow,
-  .animate-slideDown,
-  .animate-slideUp,
-  .animate-fadeIn {
-    animation: none !important;
-  }
-
-  .btn,
-  .btn-primary,
-  .btn-secondary {
-    transition: none !important;
-  }
-}
-
 @layer utilities {
   .ripple-effect {
     position: absolute;
@@ -671,12 +654,14 @@ html.light-mode {
   --color-error-content: #1a0404;
 }
 
-/* DaisyUI select/input 的边框色统一走项目 --my-outline，避免边框过深。
+/* DaisyUI select/input/textarea 的边框色统一走项目 --my-outline，避免边框过深。
    放在 @layer 之外（普通 CSS 优先于 @layer），确保覆盖 DaisyUI 组件样式。 */
 .select,
 .input,
+.textarea,
 .select-bordered,
-.input-bordered {
+.input-bordered,
+.textarea-bordered {
   --input-color: color-mix(in oklab, var(--my-outline) 70%, var(--my-surface-strong));
   border-color: var(--input-color);
   box-shadow: none;
@@ -684,12 +669,19 @@ html.light-mode {
 
 .select:focus,
 .input:focus,
+.textarea:focus,
 .select:focus-within,
 .input:focus-within,
+.textarea:focus-within,
 .select:open {
   --input-color: var(--accent-color);
   border-color: var(--input-color);
-  outline-color: var(--accent-color);
+  outline-color: var(--input-color);
+}
+
+/* 应用内 textarea 不允许拖拽缩放（统一设计） */
+.textarea {
+  resize: none;
 }
 
 /* 未选中的 toggle：边框/滑块走浅色轮廓，避免深棕显得突兀 */

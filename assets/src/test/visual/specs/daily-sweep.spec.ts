@@ -154,6 +154,7 @@ test.describe("Daily Sweep E2E", () => {
       ai_job_id: number; proposal: { change_id: string }; version: number;
     }>).find((x) => x.proposal.change_id === `e2e-ds-${runId}`);
     expect(p, "proposal 仍在 today(is_adopted=true 也会列出来)").toBeTruthy();
+    expect(p!.is_adopted, "第一次 adopt 后 server 标 is_adopted=true(today 读 adoptions 表)").toBe(true);
 
     const adoptAgain = await apiCtx.post("/api/daily-sweep/adopt", {
       headers: { "Content-Type": "application/json", "If-Match": '"2"' },

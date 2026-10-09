@@ -5,6 +5,11 @@
 - 所有改动从 `main` 拉短命分支（`feat/*`、`fix/*`、`chore/*`），PR 合入后自动删除。
 - 合并方式固定为 **squash**；`main` 保持线性历史。
 
+## 提交约定
+- 遵循 Conventional Commits：`type(scope): 描述`（如 `fix(aigtd): ...`、`ci: ...`、`chore(vrt): ...`）。
+- 描述用中文；scope 可选，按目录/模块（`ci`、`vrt`、`aigtd`、`docs` 等）。
+- 历史提交（`git log --oneline`）均已遵守此约定。
+
 ## 必需检查
 - 合并到 `main` 前必须通过：`frontend`、`backend`、`e2e`。
 - `vrt`（视觉回归）目前为 advisory（`continue-on-error`），不阻断合并。

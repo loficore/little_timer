@@ -83,20 +83,37 @@ describe("dominantContrast", () => {
     );
 
   test("浅字深底：少数堆为 fg", () => {
-    const { fg, bg } = dominantContrast(rows([240, 240, 240], [30, 30, 30], 0.2) as never, 128);
+    const { fg, bg } = dominantContrast(rows([240, 240, 240], [30, 30, 30], 0.2) as never);
     expect(fg.r).toBeGreaterThan(128);
     expect(bg.r).toBeLessThan(128);
   });
 
   test("深字浅底：少数堆仍为 fg", () => {
-    const { fg, bg } = dominantContrast(rows([30, 30, 30], [240, 240, 240], 0.2) as never, 128);
+    const { fg, bg } = dominantContrast(rows([30, 30, 30], [240, 240, 240], 0.2) as never);
     expect(fg.r).toBeLessThan(128);
     expect(bg.r).toBeGreaterThan(128);
   });
 
   test("分离出的两堆满足给定对比度", () => {
-    const { fg, bg } = dominantContrast(rows([255, 255, 255], [81, 91, 212], 0.25) as never, 128);
+    const { fg, bg } = dominantContrast(rows([255, 255, 255], [81, 91, 212], 0.25) as never);
     expect(contrastRatio(fg, bg)).toBeGreaterThan(4.5);
+  });
+
+  test("稀疏前景（1% 像素）仍可分离", () => {
+    const bg = [34, 34, 41];
+    const fg = [230, 230, 240];
+    const pixels = Array.from({ length: 20 }, (_, y) =>
+      Array.from({ length: 20 }, (_, x) => (y === 0 && x < 4 ? fg : bg)),
+    );
+    const { fg: f, bg: b } = dominantContrast(pixels as never);
+    expect(contrastRatio(f, b)).toBeGreaterThan(3);
+  });
+
+  test("单色图退化为 fg === bg", () => {
+    const { fg, bg } = dominantContrast(
+      rows([34, 34, 41], [34, 34, 41], 0.5) as never,
+    );
+    expect(fg).toEqual(bg);
   });
 });
 

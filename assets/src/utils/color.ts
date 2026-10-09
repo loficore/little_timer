@@ -39,30 +39,57 @@ export const contrastRatio = (a: Rgb, b: Rgb): number => {
 };
 
 /**
- * 从像素堆中分离前景/背景：按亮度阈值分两堆，较少堆视为文字前景。
- * pixels 为行优先的 [r,g,b] 或 [r,g,b,a] 数组的数组。
+ * 从像素堆中分离前景/背景：背景取 WCAG 相对亮度直方图的众数（±1 bin 内
+ * 的像素均值）；前景取亮度两端的极值堆（各 0.5% 尾部）中离背景更远一堆
+ * 的均值。尾部取 0.5% 分位以命中字形核心像素——更宽的尾部会被边框/
+ * 抗锯齿中间调稀释前景色。若极值堆与背景对比 < 1.2 视为单色退化，
+ * 返回 fg === bg。pixels 为行优先的 [r,g,b] 或 [r,g,b,a] 数组的数组。
  */
 export const dominantContrast = (
   pixels: number[][][],
-  threshold: number,
 ): { fg: Rgb; bg: Rgb } => {
-  const groups: [number[], number[]] = [[], []];
+  const lums: number[] = [];
+  const px: Rgb[] = [];
   for (const row of pixels) {
     for (const p of row) {
-      groups[p[0] + p[1] + p[2] >= threshold * 3 ? 1 : 0].push(p);
+      if (p.length > 3 && p[3] < 128) continue;
+      const c = { r: p[0], g: p[1], b: p[2] };
+      lums.push(relativeLuminance(c));
+      px.push(c);
     }
   }
-  const [dark, light] = groups;
-  const [fgSet, bgSet] = dark.length <= light.length ? [dark, light] : [light, dark];
-  const avg = (set: number[][]) => {
-    const n = Math.max(set.length, 1);
+  if (px.length === 0) return { fg: { r: 0, g: 0, b: 0 }, bg: { r: 0, g: 0, b: 0 } };
+
+  const avg = (idx: number[]): Rgb => {
+    const n = Math.max(idx.length, 1);
     return {
-      r: set.reduce((s, p) => s + p[0], 0) / n,
-      g: set.reduce((s, p) => s + p[1], 0) / n,
-      b: set.reduce((s, p) => s + p[2], 0) / n,
+      r: idx.reduce((s, i) => s + px[i].r, 0) / n,
+      g: idx.reduce((s, i) => s + px[i].g, 0) / n,
+      b: idx.reduce((s, i) => s + px[i].b, 0) / n,
     };
   };
-  return { fg: avg(fgSet), bg: avg(bgSet) };
+
+  const bins = new Uint32Array(256);
+  const lumBin = lums.map((l) => Math.min(255, Math.round(l * 255)));
+  for (const b of lumBin) bins[b]++;
+  let bgBin = 0;
+  for (let b = 1; b < 256; b++) if (bins[b] > bins[bgBin]) bgBin = b;
+
+  const bgIdx: number[] = [];
+  for (let i = 0; i < px.length; i++) if (Math.abs(lumBin[i] - bgBin) <= 1) bgIdx.push(i);
+  const bg = avg(bgIdx);
+
+  const order = lumBin.map((_, i) => i).sort((a, b) => lums[a] - lums[b]);
+  const tail = Math.max(2, Math.floor(px.length * 0.005));
+  const darkAvg = avg(order.slice(0, tail));
+  const lightAvg = avg(order.slice(-tail));
+  const bgL = relativeLuminance(bg);
+  const fg =
+    relativeLuminance(lightAvg) - bgL >= bgL - relativeLuminance(darkAvg)
+      ? lightAvg
+      : darkAvg;
+  if (contrastRatio(fg, bg) < 1.2) return { fg: bg, bg };
+  return { fg, bg };
 };
 
 export interface DecodedPng {

@@ -284,6 +284,15 @@ export const App = () => {
         </button>
         <button
           type="button"
+          data-testid="nav-dailySweep"
+          className={`my-bottom-nav-item ${page === "dailySweep" ? "active" : ""}`}
+          onClick={() => navigateTo("dailySweep")}
+        >
+          <SparklesIconComponent className="h-5 w-5" />
+          <span className="btm-nav-label">{t("dailySweep.nav_label_short")}</span>
+        </button>
+        <button
+          type="button"
           data-testid="nav-stats"
           className={`my-bottom-nav-item ${page === "stats" ? "active" : ""}`}
           onClick={() => navigateTo("stats")}

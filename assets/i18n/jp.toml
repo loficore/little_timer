@@ -436,6 +436,7 @@ next_day = "翌日"
 summary = "{placed} 配置済 · {unscheduled} 未配置"
 
 [dailySweep]
+nav_label_short = "見直し"
 title = "毎日の見直し"
 start = "今すぐ実行"
 adopt = "採用"

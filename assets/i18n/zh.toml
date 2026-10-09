@@ -435,6 +435,7 @@ next_day = "后一天"
 summary = "已排 {placed} · 待排 {unscheduled}"
 
 [dailySweep]
+nav_label_short = "回顾"
 title = "每日回顾"
 start = "立即扫一遍"
 adopt = "采纳"

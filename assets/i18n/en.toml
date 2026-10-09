@@ -435,6 +435,7 @@ next_day = "Next day"
 summary = "{placed} placed · {unscheduled} unscheduled"
 
 [dailySweep]
+nav_label_short = "Review"
 title = "Daily Review"
 start = "Run Review Now"
 adopt = "Adopt"

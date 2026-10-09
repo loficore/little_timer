@@ -103,7 +103,7 @@ describe("HabitPicker 组件", () => {
       />
     );
 
-    const closeButton = screen.getByRole("button", { name: "" });
+    const closeButton = screen.getByRole("button", { name: "关闭" });
     expect(closeButton).toBeTruthy();
   });
 });

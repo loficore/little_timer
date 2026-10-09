@@ -236,6 +236,12 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* 全局键盘焦点环：:where() 保持零特异性，组件自身的 focus 样式可覆盖 */
+  :where(a, button, [tabindex], select, input, textarea):focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+  }
+
   /* 深色模式（默认）下的文字颜色 - 确保在深色背景上清晰可见 */
   .text-base-content {
     color: #ffffff !important;

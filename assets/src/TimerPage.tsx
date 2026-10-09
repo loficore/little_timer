@@ -556,7 +556,7 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
                     <div className="relative my-surface-modal rounded-xl w-full max-w-md mx-4 max-h-[70vh] overflow-hidden flex flex-col">
                         <div className="p-4 border-b border-[var(--my-outline)] flex justify-between items-center">
                             <h3 className="text-lg font-bold">{t("timer.select_habit")}</h3>
-                            <button className="btn btn-ghost btn-sm btn-circle" onClick={() => setShowHabitPicker(false)}>
+                            <button className="btn btn-ghost btn-sm btn-circle" onClick={() => setShowHabitPicker(false)} aria-label={t("common.close")}>
                                 <CloseIcon className="h-5 w-5" />
                             </button>
                         </div>

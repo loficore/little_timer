@@ -118,7 +118,7 @@
 
   .my-bottom-nav {
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0.25rem;
     padding: 0.35rem max(0.5rem, env(safe-area-inset-right)) calc(0.35rem + env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
     background: linear-gradient(180deg, color-mix(in oklab, var(--my-surface) 55%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 55%, transparent) 100%);
@@ -169,6 +169,60 @@
     background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 84%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 94%, transparent) 100%);
     color: var(--my-on-primary-container);
     box-shadow: inset 0 1px 0 var(--my-glass-highlight), inset 0 0 0 1px color-mix(in oklab, var(--my-outline) 65%, transparent);
+  }
+
+  /* 移动端顶部工具条：次级导航（stats / settings） */
+  .my-topbar-utility {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    padding: 0.4rem max(0.75rem, env(safe-area-inset-right)) 0.4rem max(0.75rem, env(safe-area-inset-left));
+    padding-top: calc(0.4rem + env(safe-area-inset-top));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--my-surface) 55%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 55%, transparent) 100%);
+    border-bottom: 1px solid color-mix(in oklab, var(--my-outline) 50%, transparent);
+    backdrop-filter: blur(22px) saturate(128%);
+    -webkit-backdrop-filter: blur(22px) saturate(128%);
+  }
+
+  .my-topbar-utility-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-height: 2.25rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid color-mix(in oklab, var(--my-outline) 46%, transparent);
+    border-radius: 0.7rem;
+    background: transparent;
+    cursor: pointer;
+    color: var(--my-on-surface-variant);
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1;
+    transition: background-color 140ms ease-out, color 140ms ease-out;
+  }
+
+  .my-topbar-utility-item svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    flex-shrink: 0;
+  }
+
+  .my-topbar-utility-item:hover {
+    color: var(--my-on-surface);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 62%, transparent) 0%, color-mix(in oklab, var(--my-surface) 86%, transparent) 100%);
+  }
+
+  .my-topbar-utility-item.active {
+    color: var(--my-on-primary-container);
+    background: linear-gradient(160deg, color-mix(in oklab, var(--my-primary-container) 84%, transparent) 0%, color-mix(in oklab, var(--my-surface-strong) 94%, transparent) 100%);
+    box-shadow: inset 0 1px 0 var(--my-glass-highlight), inset 0 0 0 1px color-mix(in oklab, var(--my-outline) 65%, transparent);
+  }
+
+  html.light-mode .my-topbar-utility-item.active {
+    background: color-mix(in oklab, var(--my-primary-container) 76%, var(--my-surface-strong));
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--my-glass-highlight) 34%, transparent), var(--my-elevation-1);
   }
 
   html.light-mode .my-clock-glass {

@@ -13,7 +13,7 @@ import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, lo
 import { useAppSettings, logWallpaperDebug } from "./hooks/useAppSettings";
 import { resolveWallpaperUrl, WALLPAPER_FALLBACK_GRADIENT } from "./utils/constants";
 import { t } from "./utils/i18n";
-import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, SparklesIconComponent, CalendarIcon } from "./utils/icons";
+import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, SparklesIconComponent, CalendarIcon, DailySweepIcon } from "./utils/icons";
 
 type Page = "timer" | "habits" | "aigtd" | "schedule" | "stats" | "settings" | "dailySweep";
 
@@ -210,6 +210,29 @@ export const App = () => {
 
         {/* 主内容区 */}
         <main className="flex-1 flex flex-col overflow-hidden pb-20 lg:pb-0">
+          {/* 移动端顶部工具条：承载 stats / settings（次级导航，底部 nav 仅保留 5 个主入口） */}
+          <nav className="my-topbar-utility lg:hidden" aria-label={t("common.app_name")}>
+            <button
+              type="button"
+              data-testid="nav-stats"
+              aria-current={page === "stats" ? "page" : undefined}
+              className={`my-topbar-utility-item ${page === "stats" ? "active" : ""}`}
+              onClick={() => navigateTo("stats")}
+            >
+              <ChartIcon className="h-5 w-5" />
+              <span>{t("nav.stats")}</span>
+            </button>
+            <button
+              type="button"
+              data-testid="nav-settings"
+              aria-current={page === "settings" ? "page" : undefined}
+              className={`my-topbar-utility-item ${page === "settings" ? "active" : ""}`}
+              onClick={() => navigateTo("settings")}
+            >
+              <SettingsIcon className="h-5 w-5" />
+              <span>{t("nav.settings")}</span>
+            </button>
+          </nav>
           <ErrorBoundary onError={handlePageError}>
             <div className={page === "timer" ? "flex-1" : "hidden"}>
               <TimerPage
@@ -245,10 +268,12 @@ export const App = () => {
       <nav
         className="my-bottom-nav lg:hidden fixed inset-x-0 bottom-0 w-full z-50"
         data-testid="bottom-nav"
+        aria-label={t("nav.timer")}
       >
         <button
           type="button"
           data-testid="nav-timer"
+          aria-current={page === "timer" ? "page" : undefined}
           className={`my-bottom-nav-item ${page === "timer" ? "active" : ""}`}
           onClick={() => navigateTo("timer")}
         >
@@ -258,6 +283,7 @@ export const App = () => {
         <button
           type="button"
           data-testid="nav-habits"
+          aria-current={page === "habits" ? "page" : undefined}
           className={`my-bottom-nav-item ${page === "habits" ? "active" : ""}`}
           onClick={() => navigateTo("habits")}
         >
@@ -267,6 +293,7 @@ export const App = () => {
         <button
           type="button"
           data-testid="nav-aigtd"
+          aria-current={page === "aigtd" ? "page" : undefined}
           className={`my-bottom-nav-item ${page === "aigtd" ? "active" : ""}`}
           onClick={() => navigateTo("aigtd")}
         >
@@ -276,6 +303,7 @@ export const App = () => {
         <button
           type="button"
           data-testid="nav-schedule"
+          aria-current={page === "schedule" ? "page" : undefined}
           className={`my-bottom-nav-item ${page === "schedule" ? "active" : ""}`}
           onClick={() => navigateTo("schedule")}
         >
@@ -285,29 +313,12 @@ export const App = () => {
         <button
           type="button"
           data-testid="nav-dailySweep"
+          aria-current={page === "dailySweep" ? "page" : undefined}
           className={`my-bottom-nav-item ${page === "dailySweep" ? "active" : ""}`}
           onClick={() => navigateTo("dailySweep")}
         >
-          <SparklesIconComponent className="h-5 w-5" />
+          <DailySweepIcon className="h-5 w-5" />
           <span className="btm-nav-label">{t("dailySweep.nav_label_short")}</span>
-        </button>
-        <button
-          type="button"
-          data-testid="nav-stats"
-          className={`my-bottom-nav-item ${page === "stats" ? "active" : ""}`}
-          onClick={() => navigateTo("stats")}
-        >
-          <ChartIcon className="h-5 w-5" />
-          <span className="btm-nav-label">{t("nav.stats")}</span>
-        </button>
-        <button
-          type="button"
-          data-testid="nav-settings"
-          className={`my-bottom-nav-item ${page === "settings" ? "active" : ""}`}
-          onClick={() => navigateTo("settings")}
-        >
-          <SettingsIcon className="h-5 w-5" />
-          <span className="btm-nav-label">{t("nav.settings")}</span>
         </button>
       </nav>
     </>

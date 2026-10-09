@@ -43,9 +43,9 @@ describe("layout.css 样式一致性测试", () => {
     expect(block).toContain("transform: translateY(0)");
   });
 
-  it("my-bottom-nav 用 7 列网格容纳全部导航项(timer/habits/aigtd/schedule/dailySweep/stats/settings)", () => {
+  it("my-bottom-nav 用 5 列网格容纳主导航项(timer/habits/aigtd/schedule/dailySweep)；stats/settings 移至移动端顶栏", () => {
     const navMatch = cssContent.match(/\.my-bottom-nav\s*\{[^}]*grid-template-columns[^}]*\}/s);
     expect(navMatch, ".my-bottom-nav 应有 grid-template-columns 规则").toBeTruthy();
-    expect(navMatch![0]).toContain("repeat(7, minmax(0, 1fr))");
+    expect(navMatch![0]).toContain("repeat(5, minmax(0, 1fr))");
   });
 });

@@ -180,23 +180,25 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                     <div className="flex gap-2" onClick={(e: Event) => e.stopPropagation()}>
                                         <button
                                             className="btn btn-ghost btn-sm btn-circle"
+                                            aria-label={t("modal.edit_set")}
                                             onClick={() => setModalState({
                                                 isOpen: true,
                                                 mode: "set",
                                                 editData: set,
                                             })}
                                         >
-                                            <PencilIconComponent aria-label={t("modal.edit_set")} />
+                                            <PencilIconComponent />
                                         </button>
                                         <button
                                             className="btn btn-ghost btn-sm btn-circle"
+                                            aria-label={t("button.delete")}
                                             onClick={() => setDeleteConfirm({
                                                 type: "set",
                                                 id: set.id,
                                                 name: set.name,
                                             })}
                                         >
-                                            <TrashIconComponent aria-label={t("button.delete")} />
+                                            <TrashIconComponent />
                                         </button>
                                     </div>
                                 </div>
@@ -231,6 +233,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                                     <div className="flex gap-2 shrink-0">
                                                         <button
                                                             className="btn btn-ghost btn-sm btn-circle"
+                                            aria-label={t("modal.edit_habit")}
                                             onClick={() => setModalState({
                                                 isOpen: true,
                                                 mode: "habit",
@@ -238,17 +241,18 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
                                                 setId: set.id,
                                             })}
                                         >
-                                            <PencilIconComponent aria-label={t("modal.edit_habit")} />
+                                            <PencilIconComponent />
                                         </button>
                                         <button
                                             className="btn btn-ghost btn-sm btn-circle"
+                                            aria-label={t("button.delete")}
                                             onClick={() => setDeleteConfirm({
                                                 type: "habit",
                                                 id: habit.id,
                                                 name: habit.name,
                                             })}
                                         >
-                                            <TrashIconComponent aria-label={t("button.delete")} />
+                                            <TrashIconComponent />
                                         </button>
                                                     </div>
                                                 </div>

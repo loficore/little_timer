@@ -62,6 +62,9 @@ jobs:
         with:
           version: latest
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Make scripts executable
         run: |
           chmod +x scripts/*.sh || true
@@ -81,7 +84,7 @@ jobs:
             pkg-config
 
       - name: Generate Wails bindings
-        # 与 ci.yml:57-58 对齐：package_go.sh 直接 pnpm build，但前端
+        # 与 ci.yml:57-58 对齐：`just package` 直接 pnpm build，但前端
         # 通过 wailsApiClient.ts 引入 assets/src/bindings/ 下的生成产物，
         # 该目录在 .gitignore 中，需在 build 前由 wails3 生成。
         run: bash scripts/generate-bindings.sh
@@ -105,7 +108,7 @@ jobs:
           fi
           VERSION="${VERSION#v}"
           echo "Using VERSION=$VERSION"
-          ./scripts/package_go.sh --version "$VERSION"
+          just package "$VERSION"
 
       - name: Create GitHub Release and attach artifacts
         uses: ncipollo/release-action@v1

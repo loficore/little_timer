@@ -26,17 +26,22 @@ frontend-build:
 
 go_src := justfile_directory() / "neo-src"
 
+# go-sqlite3 是 cgo-only，构建需要 CGO_ENABLED=1 + 一个 C 编译器。
+# 优先 zig cc（自带 libc，CI 无 gcc 时兜底），其次 gcc / clang / cc。
+export CC := `command -v zig >/dev/null 2>&1 && echo "zig cc" || (command -v gcc >/dev/null 2>&1 && echo gcc || (command -v clang >/dev/null 2>&1 && echo clang || echo cc))`
+export CGO_ENABLED := "1"
+
 go-build:
-        @cd {{go_src}} && ../scripts/go-wrapper.sh build -o bin/server ./cmd/server
+        @cd {{go_src}} && go build -o bin/server ./cmd/server
 
 go-test:
-        @cd {{go_src}} && ../scripts/go-wrapper.sh test ./...
+        @cd {{go_src}} && go test ./...
 
 go-test-race:
-        @cd {{go_src}} && ../scripts/go-wrapper.sh test -race ./...
+        @cd {{go_src}} && go test -race ./...
 
 go-vet:
-        @cd {{go_src}} && ../scripts/go-wrapper.sh vet ./...
+        @cd {{go_src}} && go vet ./...
 
 go-tidy:
         @cd {{go_src}} && go mod tidy
@@ -74,7 +79,7 @@ go-dev host="":
         sleep 3
 
         echo "=== 启动 Go 后端 ==="
-        cd {{go_src}} && ../scripts/go-wrapper.sh build -o bin/server ./cmd/server && bin/server serve --http-only --port $GO_PORT 2>&1 &
+        cd {{go_src}} && go build -o bin/server ./cmd/server && bin/server serve --http-only --port $GO_PORT 2>&1 &
         GO_PID=$!
 
         FRONTEND_URL="http://localhost:5173"
@@ -114,7 +119,7 @@ go-dev-webview:
         sleep 3
 
         echo "=== 启动 Go 后端 (webview) ==="
-        cd {{go_src}} && ../scripts/go-wrapper.sh build -o bin/server ./cmd/server && bin/server serve --webview --port $GO_PORT &
+        cd {{go_src}} && go build -o bin/server ./cmd/server && bin/server serve --webview --port $GO_PORT &
         GO_PID=$!
 
         echo ""
@@ -132,7 +137,7 @@ go-clean:
         @rm -rf {{go_src}}/bin
 
 go-build-embed:
-        @cd {{go_src}} && ../scripts/go-wrapper.sh build -tags embed_ui -o bin/server ./cmd/server
+        @cd {{go_src}} && go build -tags embed_ui -o bin/server ./cmd/server
 
 apk:
         @./scripts/build-android.sh
@@ -152,6 +157,32 @@ webview-image:
                 .
 
 webview-build:
-        @podman run --rm --network=host -v "{{ROOT}}:/workspace:Z" -v little-timer-gomod:/root/go/pkg/mod -v little-timer-gocache:/root/.cache/go-build -w /workspace little-timer-webview:latest bash -c 'mkdir -p neo-src/bin && cd neo-src && go build -tags "webview,embed_ui" -o bin/server ./cmd/server && cd .. && bash scripts/generate-bindings.sh && bash scripts/verify-webview-build.sh'
+        @podman run --rm --network=host -v "{{ROOT}}:/workspace:Z" -v little-timer-gomod:/root/go/pkg/mod -v little-timer-gocache:/root/.cache/go-build -w /workspace little-timer-webview:latest bash -c 'mkdir -p neo-src/bin && cd neo-src && go build -tags "webview,embed_ui" -o bin/server ./cmd/server && cd .. && bash scripts/generate-bindings.sh'
+
+# 打包发布产物：前端 build + go build (embed_ui) + tar.gz 到 dist/
+# 用法: just package [version] [embed_ui]
+#   version   默认值 = 今天日期 (YYYYMMDD)
+#   embed_ui  默认值 = true；传 false 关闭
+package version="" embed_ui="true":
+        #!/usr/bin/env bash
+        set -euo pipefail
+        ver="{{version}}"
+        if [ -z "$ver" ]; then ver="$(date +%Y%m%d)"; fi
+        if [ "{{embed_ui}}" = "true" ]; then tag="embed_ui"; else tag=""; fi
+        cd {{ROOT}}/assets
+        [ -d node_modules ] || pnpm install
+        pnpm run build
+        mkdir -p dist/i18n
+        cp -f {{ROOT}}/assets/i18n/*.toml dist/i18n/
+        cd {{ROOT}}/neo-src
+        go build -tags "$tag" -ldflags="-s -w -X little-timer/internal/app.Version=$ver" -o bin/server ./cmd/server
+        stage={{ROOT}}/dist/stage
+        rm -rf "$stage"
+        mkdir -p "$stage"
+        cp bin/server "$stage/"
+        sanitized="$(echo "$ver" | sed -E 's/[^A-Za-z0-9._-]/_/g')"
+        mkdir -p {{ROOT}}/dist
+        tar -czf {{ROOT}}/dist/little_timer-${sanitized}-linux-x64.tar.gz -C "$stage" .
+        echo "✅ {{ROOT}}/dist/little_timer-${sanitized}-linux-x64.tar.gz"
 
 default: go-dev

@@ -54,26 +54,6 @@
   }
 }
 
-@keyframes ambientFlowDark {
-  0%,
-  100% {
-    background-position: 0% 30%;
-  }
-  50% {
-    background-position: 100% 70%;
-  }
-}
-
-@keyframes ambientFlowLight {
-  0%,
-  100% {
-    background-position: 10% 20%;
-  }
-  50% {
-    background-position: 90% 75%;
-  }
-}
-
 @keyframes timeValueSwap {
   0% {
     opacity: 0.92;

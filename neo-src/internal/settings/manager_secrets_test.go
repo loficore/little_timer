@@ -379,6 +379,81 @@ func TestNewAndSeedDefaultsWithoutSecretStore(t *testing.T) {
 	}
 }
 
+// Fix round 1 —— 构造窗口期时序危害:New() 的 loadAll 在未接线时把 has_*=1
+// 的凭据读成空串;调用方接上 store 后、显式 Load 之前,任何变更触发的 Save
+// 都会让 writeBackupConfigRow 用空值对着健康 store 走 Delete 分支,把真实
+// secrets 误删(has_* 归零)。SetSecretStore 必须接线即回填,消除该窗口。
+func TestSetSecretStoreRefillsCredentialsWithoutExplicitLoad(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "settings.db")
+
+	// 实例 A:接 store、保存凭据、关闭(模拟正常使用后进程退出)。
+	mgrA, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("New #1: %v", err)
+	}
+	h := newSecretHarness(t, dir)
+	mgrA.SetSecretStore(h.store)
+	mustUpdateBackupJSON(t, mgrA, map[string]any{
+		"webdav_password": "s3cret-pwd",
+		"s3_access_key":   "AKIA-KEEP",
+		"s3_secret_key":   "sk-KEEP",
+	})
+	if err := mgrA.Close(); err != nil {
+		t.Fatalf("Close #1: %v", err)
+	}
+
+	// 模拟重启:新实例构造时 store 未接线,内存凭据为空,而库里 has_*=1。
+	mgrB, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("New #2: %v", err)
+	}
+	defer mgrB.Close()
+	if bc := mgrB.BackupConfig(); bc.WebDAVPassword != "" || bc.S3AccessKey != "" || bc.S3SecretKey != "" {
+		t.Fatalf("前置条件:未接线窗口期内存凭据应为空,得 %+v", bc)
+	}
+	if _, _, _, hasWebdav, _, _ := queryBackupRowFlags(t, mgrB); hasWebdav != 1 {
+		t.Fatalf("前置条件:has_webdav_password 应为 1,得 %d", hasWebdav)
+	}
+
+	// 接线(同一 fake keystore + 同一 secret 文件的重建 store),不显式
+	// Load —— 接线本身就应把真实凭据回填进 BackupConfig。
+	mgrB.SetSecretStore(h.reloadStore())
+	if bc := mgrB.BackupConfig(); bc.WebDAVPassword != "s3cret-pwd" ||
+		bc.S3AccessKey != "AKIA-KEEP" || bc.S3SecretKey != "sk-KEEP" {
+		t.Errorf("接线后备份凭据应已回填真实值,得 %+v", bc)
+	}
+
+	// 窗口期变更:UpdateBasic(只置 dirty)+ Save。
+	if err := mgrB.UpdateBasic(BasicConfig{
+		Timezone:    5,
+		Language:    "EN",
+		DefaultMode: domain.DefaultModeCountdown,
+	}); err != nil {
+		t.Fatalf("UpdateBasic: %v", err)
+	}
+	if err := mgrB.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// secrets 必须还活着:has_* 仍全 1,重建 store 后 Retrieve 返回原值。
+	_, _, _, hasWebdav, hasAccess, hasSecret := queryBackupRowFlags(t, mgrB)
+	if hasWebdav != 1 || hasAccess != 1 || hasSecret != 1 {
+		t.Errorf("接线后未 Load 的 Save 误删了凭据:has_* = (%d,%d,%d), want (1,1,1)",
+			hasWebdav, hasAccess, hasSecret)
+	}
+	storeAfter := h.reloadStore()
+	if got := retrieveSecret(t, storeAfter, SecretWebDAVPassword); got != "s3cret-pwd" {
+		t.Errorf("secret %s = %q, want 原值仍在", SecretWebDAVPassword, got)
+	}
+	if got := retrieveSecret(t, storeAfter, SecretS3AccessKey); got != "AKIA-KEEP" {
+		t.Errorf("secret %s = %q, want 原值仍在", SecretS3AccessKey, got)
+	}
+	if got := retrieveSecret(t, storeAfter, SecretS3SecretKey); got != "sk-KEEP" {
+		t.Errorf("secret %s = %q, want 原值仍在", SecretS3SecretKey, got)
+	}
+}
+
 // 三处同步之"列补齐":backup_config 的 CREATE(storage/migration.go)本
 // 期不加列,manager 打开时幂等 ALTER 补三列;重复打开(老库路径)不报错。
 func TestHasCredentialColumnsAreEnsuredIdempotently(t *testing.T) {

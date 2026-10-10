@@ -128,12 +128,22 @@ func newFromSqlite(mgr *storage.SqliteManager) (*SettingsManager, error) {
 }
 
 // SetSecretStore 注入 keystore envelope 凭据存储(Task 3 的
-// *crypto.SecretStorage)。生产接线顺序是 构造 → SetSecretStore → Load():
-// 构造期 store 尚未就绪,has_*=1 的既有凭据要等接线后的 Load() 才回填进
-// BackupConfig。传 nil 解除接线 —— 此后用户触发的保存返回
-// errSecretStoreNotWired。
+// *crypto.SecretStorage)。接线即回填:非 nil 时立即复用既有读路径
+// (loadBackupConfigFromDB)重拉 backup_config,把 has_*=1 的凭据灌回内存
+// —— 消除构造窗口期(loadAll 未接线、凭据读成空串)里任何变更触发的 Save
+// 用空值对着健康 store 误删真实 secrets 的时序危害。调用方无需在接线后再
+// 手动 Load()。重拉失败时保留现有内存值并记 warn(与常规 Load 路径一致的
+// 尽力而为降级;日志只带错误文本,绝不带凭据值)。传 nil 解除接线,行为
+// 不变 —— 此后用户触发的保存返回 errSecretStoreNotWired。
 func (sm *SettingsManager) SetSecretStore(ss *crypto.SecretStorage) {
 	sm.secretStore = ss
+	if ss == nil {
+		return
+	}
+	if err := sm.loadBackupConfigFromDB(); err != nil {
+		log.Warn("settings: reload backup_config after wiring secret store failed, keeping in-memory values",
+			"error", err.Error())
+	}
 }
 
 // Load / Save。

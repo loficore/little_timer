@@ -24,6 +24,7 @@ export function LLMSettings() {
   const [clearKey, setClearKey] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
+  // cfg 加载完后填表单(一次性同步;之后用户编辑表单不覆盖 cfg)。
   useEffect(() => {
     if (cfg) {
       setProvider(cfg.provider);

@@ -80,6 +80,8 @@ export default defineConfig({
       workers: 1,
     },
     // VRT projects — serial, exclude E2E tests
+    // 跨项目也要串行：contrast.spec 会临时改共享后端的 theme_mode，
+    // 并行时会在还原前被其他项目的截图用例读到 dark 中间态。
     {
       name: "vrt-mobile-390",
       use: { browserName: "chromium", viewport: { width: 390, height: 844 } },
@@ -91,12 +93,14 @@ export default defineConfig({
       use: { browserName: "chromium", viewport: { width: 412, height: 915 } },
       grepInvert: /E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程|用户旅程 E2E/,
       workers: 1,
+      dependencies: ["vrt-mobile-390"],
     },
     {
       name: "vrt-desktop-1280",
       use: { browserName: "chromium", viewport: { width: 1280, height: 800 } },
       grepInvert: /E2E|完整用户旅程|stopwatch.*journey|Timer 用户旅程|用户旅程 E2E/,
       workers: 1,
+      dependencies: ["vrt-mobile-412"],
     },
   ],
 });

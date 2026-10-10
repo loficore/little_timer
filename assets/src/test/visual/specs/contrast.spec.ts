@@ -85,7 +85,8 @@ async function gotoPage(page: Page, id: PageId): Promise<void> {
 }
 
 test.describe("按钮 WCAG AA 对比度像素断言", () => {
-  test.describe.configure({ timeout: 180_000 });
+  // 共享后端 theme_mode：与 timer.spec 一样强制单 worker，避免并行互踩
+  test.describe.configure({ timeout: 180_000, mode: "serial" });
   for (const theme of ["dark", "light"] as const) {
     test(`按钮对比度 AA (${theme})`, async ({ page }) => {
       const baseline = await api("GET");

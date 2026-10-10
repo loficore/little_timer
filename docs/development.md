@@ -15,6 +15,19 @@
 - `vrt`（视觉回归）目前为 advisory（`continue-on-error`），不阻断合并。
 - 平台构建（`build` matrix）只在 release / 手动触发时运行，不阻断 PR。
 
+## VRT 基线重生成
+- 基线必须在与 CI runner 等价的字体环境生成：本机 CJK 回退字形/行高与
+  runner（Ubuntu 24.04 + `fonts-noto-cjk=1:20230817+repack1-3`）不一致，
+  直接本机 `test:vrt:update` 会导致 vrt.yml 确定性失败。
+- 用容器重生成（与 `.github/workflows/vrt.yml` 同栈）：
+  `mcr.microsoft.com/playwright:v<与 package.json 同版本>-noble` 挂载仓库，
+  容器内 `apt-get install fonts-noto-cjk=1:20230817+repack1-3 gcc` →
+  `scripts/generate-bindings.sh`（需 `GOPROXY=https://goproxy.cn,direct`）→
+  `CGO_ENABLED=1 go build -o bin/server ./cmd/server`（neo-src）→
+  删除 `assets/test_tmp` 后 `CI=true PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+  pnpm exec playwright test --update-snapshots --project=vrt-mobile-390
+  --project=vrt-mobile-412 --project=vrt-desktop-1280 --workers=1`。
+
 ## 发布
 - 在 `main` 上打 tag 并发 GitHub Release；`release.yml` 随即打包产物。
 - 不再需要「同步 develop 到 main」的步骤。

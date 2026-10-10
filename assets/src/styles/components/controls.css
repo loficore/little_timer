@@ -20,8 +20,8 @@
 
   .btn-primary {
     @apply px-4 sm:px-6 py-2 sm:py-3 rounded-xl font-medium text-sm sm:text-sm cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 border-none;
-    background-color: var(--accent-color);
-    color: #ffffff;
+    background-color: var(--my-primary-solid);
+    color: var(--my-on-primary-solid);
     min-height: var(--touch-target-min);
   }
 

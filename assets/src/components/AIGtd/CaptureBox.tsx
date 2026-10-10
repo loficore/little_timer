@@ -56,6 +56,7 @@ export function CaptureBox({ onCapture, disabled }: CaptureBoxProps) {
           }}
         />
         <button
+          data-testid="aigtd-submit"
           className="btn btn-primary"
           disabled={disabled || busy || !text.trim()}
           onClick={() => void submit()}

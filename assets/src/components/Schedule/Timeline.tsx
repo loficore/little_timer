@@ -44,7 +44,7 @@ export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23 }: TimelineP
 
   return (
     <div
-      className="timeline relative w-full rounded border border-base-300 bg-base-100 p-3"
+      className="schedule-timeline relative w-full rounded border border-base-300 bg-base-100 p-3"
       data-testid="timeline"
     >
       {/* 小时轴 */}

@@ -75,7 +75,7 @@ CC="zig cc" CGO_ENABLED=1 go run ./cmd/server serve --http-only
 
 - **Go**：使用 `neo-src/go.mod` 声明的 Go 1.25.0
 - **Node.js + pnpm**：用于前端开发与构建（前端代码位于 assets/）
-- **C 编译器**：`just go-build` / `just go-dev` 需要 gcc、clang、cc 或 `zig cc`（自动探测，优先级递减）。go-sqlite3 需要 cgo，无 C 编译器会导致运行时 "go-sqlite3 requires cgo" 错误。`just` 配方通过 `scripts/go-wrapper.sh` 自动设置 `CGO_ENABLED=1` 并选择编译器。
+- **C 编译器**：`just go-build` / `just go-dev` 需要 gcc、clang、cc 或 `zig cc`（自动探测，优先级递减）。go-sqlite3 需要 cgo，无 C 编译器会导致运行时 "go-sqlite3 requires cgo" 错误。`just` 配方在文件顶部以 `export CC := …` + `export CGO_ENABLED := "1"` 自动设置 cgo 环境并选择编译器。
 - **系统库**（仅桌面 WebView 模式）：`webkit2gtk-4.1` 或 `webkitgtk-6.0`（+ `libgtk-4-dev` 构建依赖）。缺少此库时 WebView 窗口模式运行时 panic，HTTP-only 模式不受影响。
 
 > 若你只运行后端，HTTP-only 模式默认使用已存在的前端产物；需要修改 UI 时请看下方“前端开发与构建流程”。
@@ -126,7 +126,7 @@ go build -o bin/server ./cmd/server/
 打包脚本：
 
 ```bash
-./scripts/package_go.sh --version 1.0.0
+just package 1.0.0
 ```
 
 ## 桌面 WebView 容器构建 (podman)
@@ -178,7 +178,7 @@ just --list
 A：确认 Go 1.25.0、Node.js 和 pnpm 已安装。嵌入前端时还要先在 `assets/` 执行 `pnpm run build`。
 
 **Q：运行时报 "go-sqlite3 requires cgo"？**
-A：go-sqlite3 是 cgo-only 驱动。`just go-dev` / `just go-build` 已自动通过 `scripts/go-wrapper.sh` 设置 cgo 环境。手动执行 `go run` 时需加 `CC="zig cc" CGO_ENABLED=1` 前缀（或用 gcc/clang，无需显式设置 CC）。
+A：go-sqlite3 是 cgo-only 驱动。`just go-dev` / `just go-build` 已自动通过 justfile 顶部的 `export CC` / `export CGO_ENABLED` 设置 cgo 环境。手动执行 `go run` 时需加 `CC="zig cc" CGO_ENABLED=1` 前缀（或用 gcc/clang，无需显式设置 CC）。
 
 **Q：编译很慢？**
 A：首次构建会下载 Go 和前端依赖，后续构建会使用本地缓存。

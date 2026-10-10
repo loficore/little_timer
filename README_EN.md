@@ -110,7 +110,7 @@ go build -o bin/server ./cmd/server/
 Package the Go backend on Linux:
 
 ```bash
-./scripts/package_go.sh --version 1.0.0
+just package 1.0.0
 ```
 
 ## Configuration

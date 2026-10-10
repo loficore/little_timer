@@ -13,7 +13,7 @@ export class SettingsPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.basicTab = '[data-testid="settings-tab-basic"]';
+    this.basicTab = '[data-testid="tab-basic"]';
     this.countdownTab = '[data-testid="settings-tab-countdown"]';
     this.stopwatchTab = '[data-testid="settings-tab-stopwatch"]';
     this.themeToggle = '[data-testid="theme-toggle"]';

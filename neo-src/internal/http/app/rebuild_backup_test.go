@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"little-timer/internal/domain"
+	"little-timer/internal/keystore/keystoretest"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
@@ -34,7 +35,7 @@ func TestRebuildBackupSwitchesTargetType(t *testing.T) {
 	a := NewApp(domain.NewClockManager(domain.NewDefaultClockTaskConfig()), sm, sqlite, nil, dbPath)
 	// 去锁化(Task 5):UpdateBackupConfigFromJSON 需要已接线的凭据 store,
 	// 注入内存 keystore 并先 a.Secrets() 完成接线。
-	a.Keystore = testKeystore{name: "secret-service", hasKey: true}
+	a.Keystore = keystoretest.New("secret-service", true)
 	_ = a.Secrets()
 
 	assertTarget := func(want backup.BackupTarget) *backup.BackupManager {
@@ -110,7 +111,7 @@ func TestRebuildBackupDisablesOnCloudConfigError(t *testing.T) {
 
 	a := NewApp(domain.NewClockManager(domain.NewDefaultClockTaskConfig()), sm, sqlite, nil, dbPath)
 	// 去锁化(Task 5):UpdateBackupConfigFromJSON 需要已接线的凭据 store。
-	a.Keystore = testKeystore{name: "secret-service", hasKey: true}
+	a.Keystore = keystoretest.New("secret-service", true)
 	_ = a.Secrets()
 
 	if err := sm.UpdateBackupConfigFromJSON(`{"target_type": "s3"}`); err != nil {

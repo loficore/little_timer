@@ -7,46 +7,17 @@ import (
 
 	"little-timer/internal/domain"
 	"little-timer/internal/keystore"
+	"little-timer/internal/keystore/keystoretest"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 )
 
-// testKeystore 是 app 包测试用的内存 keystore:master key 由 hasKey 开关控制,
-// Seal/Unseal 用固定前缀做可逆变换(不依赖任何 keyring daemon),足以驱动
-// SecretStorage v2 的真实磁盘 round-trip(Seal → 落盘 → 重建实例 → Unseal)。
+// 测试用内存 keystore 已去重到 keystoretest(master key 由 hasKey 开关控制,
+// Seal/Unseal 用固定前缀做可逆变换,不依赖任何 keyring daemon,足以驱动
+// SecretStorage v2 的真实磁盘 round-trip)。
 //
 // 编译期断言:满足 keystore.Keystore 全集,从而也能隐式传入 crypto.Keystore 子集。
-type testKeystore struct {
-	name   string
-	hasKey bool
-}
-
-var _ keystore.Keystore = testKeystore{}
-
-func (k testKeystore) Name() string                { return k.name }
-func (k testKeystore) Available() error            { return nil }
-func (k testKeystore) EnsureMasterKey() error      { return nil }
-func (k testKeystore) DeleteMasterKey() error      { return nil }
-func (k testKeystore) HasMasterKey() (bool, error) { return k.hasKey, nil }
-
-func (k testKeystore) Seal(plaintext []byte) ([]byte, error) {
-	if !k.hasKey {
-		return nil, keystore.ErrNotFound
-	}
-	out := make([]byte, 0, len(plaintext)+2)
-	out = append(out, 'k', ':')
-	return append(out, plaintext...), nil
-}
-
-func (k testKeystore) Unseal(blob []byte) ([]byte, error) {
-	if !k.hasKey {
-		return nil, keystore.ErrNotFound
-	}
-	if len(blob) < 2 || blob[0] != 'k' || blob[1] != ':' {
-		return nil, keystore.ErrUnseal
-	}
-	return append([]byte(nil), blob[2:]...), nil
-}
+var _ keystore.Keystore = keystoretest.FakeKeystore{}
 
 // newSecretTestApp 构造一个接了真实 SQLite + SettingsManager 的 App,并把
 // 注入用的 keystore 放进 a.Keystore,以便 Secrets()/CredentialStatus 惰性建
@@ -73,7 +44,7 @@ func newSecretTestApp(t *testing.T, ks keystore.Keystore) *App {
 
 // 覆盖 round-trip:Store → Retrieve(内存)→ 从磁盘重建的第二实例(真实 Unseal)。
 func TestSecrets_LoadsV2StoreRoundTrip(t *testing.T) {
-	ks := testKeystore{name: "secret-service", hasKey: true}
+	ks := keystoretest.New("secret-service", true)
 	a := newSecretTestApp(t, ks)
 
 	store := a.Secrets()
@@ -108,7 +79,7 @@ func TestSecrets_LoadsV2StoreRoundTrip(t *testing.T) {
 
 // Secrets() 接线 settings 的凭据流:App 建 store 后,Settings 保存能落 secrets。
 func TestSecrets_WiresSettingsStore(t *testing.T) {
-	ks := testKeystore{name: "secret-service", hasKey: true}
+	ks := keystoretest.New("secret-service", true)
 	a := newSecretTestApp(t, ks)
 	_ = a.Secrets() // 触发 ensureSecrets → Settings.SetSecretStore 接线
 
@@ -124,7 +95,7 @@ func TestSecrets_WiresSettingsStore(t *testing.T) {
 }
 
 func TestCredentialStatus_Normal(t *testing.T) {
-	ks := testKeystore{name: "secret-service", hasKey: true}
+	ks := keystoretest.New("secret-service", true)
 	a := newSecretTestApp(t, ks)
 
 	cs := a.CredentialStatus()
@@ -137,7 +108,7 @@ func TestCredentialStatus_Normal(t *testing.T) {
 }
 
 func TestCredentialStatus_HasSecret(t *testing.T) {
-	ks := testKeystore{name: "secret-service", hasKey: true}
+	ks := keystoretest.New("secret-service", true)
 	a := newSecretTestApp(t, ks)
 	if err := a.Secrets().Store([]byte("llm_api_key"), []byte("sk-1")); err != nil {
 		t.Fatalf("Store: %v", err)
@@ -155,7 +126,7 @@ func TestCredentialStatus_HasSecret(t *testing.T) {
 // Review Focus #2:keystore item 缺失但 secret.db 文件存在 —— 必须报
 // Backend="unavailable" + 非空 Detail,绝不假装"没有凭据"。
 func TestCredentialStatus_UnavailableWhenFileExistsWithoutKey(t *testing.T) {
-	ks := testKeystore{name: "secret-service", hasKey: true}
+	ks := keystoretest.New("secret-service", true)
 	a := newSecretTestApp(t, ks)
 	// 先用有 key 的 keystore 落一个真实 blob。
 	if err := a.Secrets().Store([]byte("llm_api_key"), []byte("sk-1")); err != nil {
@@ -163,7 +134,7 @@ func TestCredentialStatus_UnavailableWhenFileExistsWithoutKey(t *testing.T) {
 	}
 
 	// 换一个 key 缺失的 keystore,并让 App 重新构造 store(新建 App 复用同一 DBPath)。
-	broke := testKeystore{name: "secret-service", hasKey: false}
+	broke := keystoretest.New("secret-service", false)
 	a2 := NewApp(a.Clock, a.Settings, a.SQLite, nil, a.DBPath)
 	a2.Keystore = broke
 

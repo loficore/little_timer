@@ -13,6 +13,7 @@ import (
 
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/keystore/keystoretest"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
@@ -54,7 +55,7 @@ func newBackupTestApp(t *testing.T) (*app.App, string) {
 	// 去锁化(Task 5):UpdateBackupConfigFromJSON 需要已接线的凭据 store
 	// (即便 local target 空凭据也要显式建/删 secret),因此注入内存 keystore
 	// 并先 a.Secrets() 完成接线,再写配置。
-	a.Keystore = fakeKeystore{name: "secret-service", hasKey: true}
+	a.Keystore = keystoretest.New("secret-service", true)
 	_ = a.Secrets()
 
 	cfg := domain.NewDefaultBackupConfig()
@@ -641,7 +642,7 @@ func TestHandleBackupCreate_FailOnSHA256Mismatch(t *testing.T) {
 	)
 	// 去锁化(Task 5):UpdateBackupConfigFromJSON 需已接线的凭据 store,
 	// 注入内存 keystore 并先 a.Secrets() 接线,再写配置。
-	a.Keystore = fakeKeystore{name: "secret-service", hasKey: true}
+	a.Keystore = keystoretest.New("secret-service", true)
 	_ = a.Secrets()
 
 	cfg := domain.NewDefaultBackupConfig()

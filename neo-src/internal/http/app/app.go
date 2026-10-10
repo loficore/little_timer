@@ -57,9 +57,10 @@ type App struct {
 	// CurrentTimerSessionID 是当前计时会话 ID。
 	CurrentTimerSessionID *int64
 
-	// secrets 是进程内凭据存储，由辅助方法惰性创建,因此调用方构造时可以
-	// 省略它。
-	secrets *crypto.SecretStorage
+	// secrets 是进程内凭据存储，由 secretsOnce 惰性创建，因此调用方构造时
+	// 可以省略它。每个 App 持有自己的 Once：新建 App 会重新解析 keystore。
+	secretsOnce sync.Once
+	secrets     *crypto.SecretStorage
 }
 
 // NewApp 使用给定的依赖与默认内存状态构造一个 App。
@@ -319,9 +320,10 @@ func secretFileExists(dbPath string) bool {
 
 // ensureSecrets 惰性构造 SecretStorage，并把同一个实例接线到 SettingsManager
 // （后者据此把 WebDAV/S3 凭据分流到 keystore Secrets，见 Task 4）。keystore
-// 取自 a.Keystore，未注入时回退 keystore.Current()。构造后只建一次。
+// 取自 a.Keystore，未注入时回退 keystore.Current()。构造由 sync.Once 保护：
+// 并发首调只建一次、只接线一次，且 happens-before 保证后续读 a.secrets 无竞争。
 func (a *App) ensureSecrets() *crypto.SecretStorage {
-	if a.secrets == nil {
+	a.secretsOnce.Do(func() {
 		ks := a.Keystore
 		if ks == nil {
 			ks = keystore.Current()
@@ -330,7 +332,7 @@ func (a *App) ensureSecrets() *crypto.SecretStorage {
 		if a.Settings != nil {
 			a.Settings.SetSecretStore(a.secrets)
 		}
-	}
+	})
 	return a.secrets
 }
 
@@ -363,12 +365,18 @@ func (a *App) CredentialStatus() domain.CredentialStatus {
 	}
 	ks := a.activeKeystore()
 	backend := "unavailable"
+	detail := ""
 	if ks != nil {
 		backend = ks.Name()
+	} else {
+		// 维持 "unavailable ⇒ Detail 非空" 不变式:平台 keystore 缺失时
+		// 也要透出原因,绝不留下空的不可用说明。
+		detail = "平台 keystore 未注册"
 	}
 	items, err := store.Items()
 	return domain.CredentialStatus{
 		Backend:   backend,
+		Detail:    detail,
 		HasSecret: err == nil && len(items) > 0,
 	}
 }

@@ -519,6 +519,9 @@ func (s *SettingsService) GetSettings() (any, error) {
 
 func (s *SettingsService) UpdateSettings(json string) (any, error) {
 	log.Debug("settings.update", "method", "SettingsService.UpdateSettings")
+	// 去锁化(Task 5):HandleSettingsEvent 经 Save 落 backup 段,需已接线的
+	// 凭据 store;惰性确保接线,与 HTTP handler 一致。
+	_ = s.app.Secrets()
 	if err := s.app.Settings.HandleSettingsEvent(domain.SettingsChangeEvent{JSON: json}); err != nil {
 		log.Error("settings.update failed", "method", "SettingsService.UpdateSettings", "error", err.Error())
 		return map[string]any{"success": false, "error": err.Error()}, nil
@@ -529,7 +532,8 @@ func (s *SettingsService) UpdateSettings(json string) (any, error) {
 
 // BackupService
 
-// BackupService 向 Wails v3 前端暴露 backup 配置 + 主口令生命周期。
+// BackupService 向 Wails v3 前端暴露 backup 配置读写(主口令生命周期已随
+// 去锁化移除,凭据端点见后续 Task 9)。
 type BackupService struct {
 	app *App
 }
@@ -562,6 +566,9 @@ func (s *BackupService) GetBackupConfig() (any, error) {
 func (s *BackupService) UpdateBackupConfig(json string) (any, error) {
 	cfg := s.app.Settings.BackupConfig()
 	log.Debug("backup.update_config", "method", "BackupService.UpdateBackupConfig", "target_type", cfg.TargetType.String())
+	// 去锁化(Task 5):确保凭据 store 已建并接线 SettingsManager,
+	// UpdateBackupConfigFromJSON 需要已接线 store 才能把云端凭据分流到 secrets。
+	_ = s.app.Secrets()
 	if err := s.app.Settings.UpdateBackupConfigFromJSON(json); err != nil {
 		log.Error("backup.update_config failed", "method", "BackupService.UpdateBackupConfig", "error", err.Error())
 		return map[string]any{"success": false, "error": err.Error()}, nil
@@ -663,44 +670,9 @@ func (s *BackupService) ListBackups() (any, error) {
 	return map[string]any{"success": true, "backups": items}, nil
 }
 
-func (s *BackupService) GetMasterPasswordStatus() (any, error) {
-	status := s.app.GetMasterPasswordStatus()
-	log.Debug("backup.master_status", "method", "BackupService.GetMasterPasswordStatus", "has_cred", status.HasPassword)
-	return status, nil
-}
-
-func (s *BackupService) SetMasterPassword(password string) (any, error) {
-	log.Debug("backup.set_master", "method", "BackupService.SetMasterPassword", "has_cred", password != "")
-	if password == "" {
-		return map[string]any{"success": false, "error": "missing password"}, nil
-	}
-	if len(password) < 4 {
-		return map[string]any{"success": false, "error": "password too short (minimum 4 characters)"}, nil
-	}
-	if err := s.app.SetMasterPassword(password); err != nil {
-		log.Error("backup.set_master failed", "method", "BackupService.SetMasterPassword", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
-	}
-	log.Info("backup.set_master ok", "method", "BackupService.SetMasterPassword")
-	return map[string]any{"success": true}, nil
-}
-
-func (s *BackupService) UnlockCredentials(password string) (any, error) {
-	log.Debug("backup.unlock", "method", "BackupService.UnlockCredentials")
-	res := s.app.UnlockCredentials(password)
-	log.Info("backup.unlock ok", "method", "BackupService.UnlockCredentials", "success", res.Success)
-	return map[string]any{
-		"success":      res.Success,
-		"locked_until": res.LockedUntil,
-	}, nil
-}
-
-func (s *BackupService) LockCredentials() (any, error) {
-	log.Debug("backup.lock", "method", "BackupService.LockCredentials")
-	s.app.LockCredentials()
-	log.Info("backup.lock ok", "method", "BackupService.LockCredentials")
-	return map[string]any{"success": true}, nil
-}
+// 主口令生命周期方法(GetMasterPasswordStatus/SetMasterPassword/UnlockCredentials/
+// LockCredentials)已随去锁化删除(Task 5):凭据改由平台 keystore 托管,不再有
+// 锁/解锁概念;凭据端点由后续任务(Task 9)以 /api/credentials/* 形式重建。
 
 // 共享辅助函数 —— 从 handlers/ 复制而来，保持本文件自包含。
 

@@ -40,10 +40,12 @@ import (
 	"little-timer/internal/aigtd"
 	"little-timer/internal/cli"
 	"little-timer/internal/cron"
+	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
 	httpx "little-timer/internal/http"
 	httpapp "little-timer/internal/http/app"
 	"little-timer/internal/http/handlers"
+	"little-timer/internal/log"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/webview"
@@ -80,7 +82,8 @@ func runServer(opts *cli.ServeOptions) error {
 	}
 
 	// AI GTD 异步 worker:启动 2 个 goroutine 从 ai_jobs 队列取任务。
-	// 用户在设置页配好 API Key 并解锁凭据后,worker 就能真实调用 LLM。
+	// 用户在设置页配好 API Key 后(凭据由平台 keystore 托管,无锁概念),
+	// worker 就能真实调用 LLM。
 	worker := aigtd.NewWorkerPool(app.SQLite.AITasks(), appSettingsAdapter{app: app}, 2)
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	worker.Start(workerCtx)
@@ -200,10 +203,19 @@ func (s appSettingsAdapter) LLMSettings() aigtd.LLMConfig {
 	if cfg.TimeoutSeconds == 0 {
 		cfg.TimeoutSeconds = 30
 	}
-	if !s.app.Secrets().IsLocked() {
-		if key, err := s.app.Secrets().Retrieve([]byte(aigtd.APIKeySecretName)); err == nil {
-			cfg.APIKey = string(key)
-		}
+	// 去锁化(Task 5):凭据由 keystore 托管,worker 直接取 Key,不再判锁。
+	// 未配置(ErrSecretNotFound)属常态静默跳过;keystore 不可用
+	// (ErrKeystoreUnavailable)记 Warn 提示运维,日志绝不包含 secret 值。
+	key, err := s.app.Secrets().Retrieve([]byte(aigtd.APIKeySecretName))
+	switch {
+	case err == nil:
+		cfg.APIKey = string(key)
+	case errors.Is(err, crypto.ErrKeystoreUnavailable):
+		log.Warn("LLMSettings: 凭据不可用,跳过 API Key 读取", "error", err.Error())
+	case errors.Is(err, crypto.ErrSecretNotFound):
+		log.Debug("LLMSettings: 未配置 API Key")
+	default:
+		log.Warn("LLMSettings: 读取 API Key 失败", "error", err.Error())
 	}
 	return cfg
 }
@@ -231,6 +243,9 @@ func bootstrapApp(dbPath string) (*httpapp.App, func(), error) {
 	// 备份可选——从持久化的 BackupConfig 重建;RebuildBackup 会回退到
 	// local 适配器，只有回退也失败时才返回错误（本进程禁用备份）。
 	a := httpapp.NewApp(clk, sm, sqlite, nil, dbPath)
+	// 尽早建凭据存储并接线 SettingsManager:RebuildBackup 及后续配置保存
+	// 路径都需要已接线的 secret store(Task 4 的凭据分流)。
+	_ = a.Secrets()
 	if err := a.RebuildBackup(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: backup disabled (%v)\n", err)
 	}

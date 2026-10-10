@@ -141,10 +141,8 @@ func TestAllRoutesRegistered(t *testing.T) {
 		{http.MethodGet, "/api/backup/list"},
 		{http.MethodGet, "/api/backup/info"},
 		{http.MethodPost, "/api/backup/verify"},
-		{http.MethodPost, "/api/backup/unlock"},
-		{http.MethodPost, "/api/backup/lock"},
-		{http.MethodGet, "/api/backup/master-password"},
-		{http.MethodPost, "/api/backup/master-password"},
+		// 去锁化(Task 5):/api/backup/unlock、/api/backup/lock、
+		// /api/backup/master-password 端点已移除。
 
 		// 鉴权
 		{http.MethodGet, "/api/auth/status"},

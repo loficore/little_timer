@@ -9,6 +9,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
+	"little-timer/internal/keystore"
 	"little-timer/internal/log"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
@@ -44,13 +46,19 @@ type App struct {
 	// DBPath 是数据库文件路径，构造时捕获，供备份处理器使用。
 	DBPath string
 
+	// Keystore 是注入的 master key 托管(供 Secrets()/CredentialStatus 惰性
+	// 建 store 时使用)。为 nil 时 ensureSecrets 回退到 keystore.Current(),
+	// 便于测试替换、同时不让生产引导路径遗漏接线;启动期 fail-fast 校验由
+	// Task 6 落地。
+	Keystore keystore.Keystore
+
 	// CurrentHabitID 是当前计时关联的习惯 ID。
 	CurrentHabitID *int64
 	// CurrentTimerSessionID 是当前计时会话 ID。
 	CurrentTimerSessionID *int64
 
-	// secrets 是进程内主密码存储，由辅助方法惰性创建，
-	// 因此调用方构造时可以省略它。
+	// secrets 是进程内凭据存储，由辅助方法惰性创建,因此调用方构造时可以
+	// 省略它。
 	secrets *crypto.SecretStorage
 }
 
@@ -293,100 +301,76 @@ func (a *App) SaveProgressLocked() {
 	log.Info("timer.session.save_progress", "session_id", row.ID, "elapsed", state.GetElapsedSeconds())
 }
 
-// 主密码辅助方法。状态存放在 SettingsManager 的 BackupConfig（已带锁定
-// 字段）加上用于保存解锁密码本身的 SecretStorage。
-//
-// 所有辅助方法都容忍 Secrets 为 nil（视为"未设置主密码"）。
+// 凭据辅助方法。SecretStorage 由平台 keystore 托管 master key,不再有
+// 主口令 / 锁的概念;SettingsManager 的 WebDAV/S3 凭据分流依赖这里的接线。
 
+// secretStorePath 返回与 DB 同级的 secret blob 路径。裸文件名 DB 路径
+// （Dir 为 "" 或 "."）解析为当前目录下的 secret.db。
+func secretStorePath(dbPath string) string {
+	return filepath.Join(filepath.Dir(dbPath), "secret.db")
+}
+
+// secretFileExists 报告磁盘上是否已存在 secret blob（用于区分"新装"与
+// "有历史凭据但读不出来"）。
+func secretFileExists(dbPath string) bool {
+	_, err := os.Stat(secretStorePath(dbPath))
+	return err == nil
+}
+
+// ensureSecrets 惰性构造 SecretStorage，并把同一个实例接线到 SettingsManager
+// （后者据此把 WebDAV/S3 凭据分流到 keystore Secrets，见 Task 4）。keystore
+// 取自 a.Keystore，未注入时回退 keystore.Current()。构造后只建一次。
 func (a *App) ensureSecrets() *crypto.SecretStorage {
 	if a.secrets == nil {
-		a.secrets = crypto.New(filepath.Join(filepath.Dir(a.DBPath), "secret.db"))
+		ks := a.Keystore
+		if ks == nil {
+			ks = keystore.Current()
+		}
+		a.secrets = crypto.NewSecretStorage(secretStorePath(a.DBPath), ks)
+		if a.Settings != nil {
+			a.Settings.SetSecretStore(a.secrets)
+		}
 	}
 	return a.secrets
 }
 
-// Secrets 返回 SecretStorage(惰性初始化)。供需要存/取受主密码保护的 secret
-// 的处理器使用(例如 LLM API Key)。
+// Secrets 返回 SecretStorage（惰性初始化 + 接线 settings）。供需要存 / 取受
+// keystore 保护的 secret 的调用方使用（例如 LLM API Key、备份凭据）。
 func (a *App) Secrets() *crypto.SecretStorage {
 	return a.ensureSecrets()
 }
 
-// HasMasterPassword 返回是否已设置主密码（基于磁盘上的凭据或 BackupConfig 标志）。
-func (a *App) HasMasterPassword() bool {
-	cfg := a.Settings.BackupConfig()
-	if cfg.HasMasterPassword {
-		return true
+// activeKeystore 返回当前生效的 keystore：注入优先，否则回退平台实现。
+func (a *App) activeKeystore() keystore.Keystore {
+	if a.Keystore != nil {
+		return a.Keystore
 	}
-	return a.ensureSecrets().HasMasterPassword()
+	return keystore.Current()
 }
 
-// IsUnlocked 返回凭据是否已解锁且锁定期已过。
-func (a *App) IsUnlocked() bool {
-	cfg := a.Settings.BackupConfig()
-	if !a.ensureSecrets().IsLocked() && cfg.CredentialLockedUntil <= time.Now().Unix() {
-		return true
+// CredentialStatus 概览凭据子系统健康度。载入失败态（磁盘有 blob 但 master
+// key 缺失 / 解封失败）透出 Backend="unavailable" + 非空 Detail，绝不假装
+// "没有凭据"；否则取生效 keystore 的 Name()，HasSecret 反映 store 内是否
+// 已有 secret。Detail / 日志只带错误文本，绝不含凭据值。
+func (a *App) CredentialStatus() domain.CredentialStatus {
+	store := a.ensureSecrets()
+	if lf := store.LoadFailure(); lf != nil {
+		return domain.CredentialStatus{
+			Backend:   "unavailable",
+			Detail:    lf.Error(),
+			HasSecret: secretFileExists(a.DBPath),
+		}
 	}
-	return false
-}
-
-// UnlockCredentials 使用给定密码解锁凭据并返回结构化结果。
-// 未设置主密码时 `Success` 恒为 true。
-func (a *App) UnlockCredentials(password string) domain.UnlockResult {
-	cfg := a.Settings.BackupConfig()
-	if !a.HasMasterPassword() {
-		log.Info("UnlockCredentials: no master password")
-		// 无主密码:总是成功。
-		cfg.CredentialLockedUntil = 0
-		cfg.CredentialsUnlockTime = time.Now().Unix()
-		_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
-		return domain.UnlockResult{Success: true, LockedUntil: 0}
+	ks := a.activeKeystore()
+	backend := "unavailable"
+	if ks != nil {
+		backend = ks.Name()
 	}
-	err := a.ensureSecrets().Unlock([]byte(password))
-	if err != nil {
-		log.Error("UnlockCredentials: failed", "error", err.Error())
-		return domain.UnlockResult{Success: false, LockedUntil: a.ensureSecrets().LockoutUntil()}
+	items, err := store.Items()
+	return domain.CredentialStatus{
+		Backend:   backend,
+		HasSecret: err == nil && len(items) > 0,
 	}
-	log.Info("UnlockCredentials: success")
-	cfg.CredentialLockedUntil = 0
-	cfg.CredentialsUnlockTime = time.Now().Unix()
-	_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
-	return domain.UnlockResult{Success: true, LockedUntil: 0}
-}
-
-// SetMasterPassword 设置主密码并同步更新 BackupConfig 中的标志。
-func (a *App) SetMasterPassword(password string) error {
-	if len(password) < 4 {
-		return errPasswordTooShort
-	}
-	if err := a.ensureSecrets().SetMasterPassword([]byte(password)); err != nil {
-		log.Error("SetMasterPassword: failed", "error", err.Error())
-		return err
-	}
-	log.Info("SetMasterPassword: success")
-	cfg := a.Settings.BackupConfig()
-	cfg.HasMasterPassword = true
-	cfg.CredentialLockedUntil = 0
-	return a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
-}
-
-// GetMasterPasswordStatus 返回主密码相关的状态信息。
-func (a *App) GetMasterPasswordStatus() domain.MasterPasswordStatus {
-	cfg := a.Settings.BackupConfig()
-	return domain.MasterPasswordStatus{
-		HasPassword: a.HasMasterPassword(),
-		Unlocked:    a.IsUnlocked(),
-		LockedUntil: cfg.CredentialLockedUntil,
-		UnlockTime:  cfg.CredentialsUnlockTime,
-	}
-}
-
-// LockCredentials 立即锁定凭据：将锁定期设为当前时间并清空内存中的密钥缓存。
-func (a *App) LockCredentials() {
-	log.Info("LockCredentials: success")
-	cfg := a.Settings.BackupConfig()
-	cfg.CredentialLockedUntil = time.Now().Unix() + 1
-	_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
-	a.ensureSecrets().Lock()
 }
 
 // 认证辅助方法。
@@ -396,15 +380,3 @@ func (a *App) LockCredentials() {
 func GenerateToken() string {
 	return base64Raw(crypto.GenerateKey())
 }
-
-// 错误。
-
-// errPasswordTooShort 在 SetMasterPassword 接收到不足 4 个字符的密码时返回。
-var errPasswordTooShort = &httpError{code: "password_too_short", message: "password too short (minimum 4 characters)"}
-
-// httpError 是供内部使用的轻量错误类型，便于在 JSON 响应中生成稳定的错误字符串。
-type httpError struct {
-	code, message string
-}
-
-func (e *httpError) Error() string { return e.message }

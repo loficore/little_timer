@@ -1,4 +1,4 @@
-// Package handlers —— Backup + 主口令 + 鉴权 endpoint。
+// Package handlers —— Backup + 鉴权 endpoint(主口令端点已随去锁化移除)。
 package handlers
 
 import (
@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
 	"little-timer/internal/log"
 )
@@ -39,8 +38,10 @@ func BackupConfigGet(c *gin.Context) {
 	})
 }
 
-// handleBackupConfigUpdate。切换到云端 target 时，handler 会在持久化变更
-// 之前强制主口令 + 解锁检查。
+// handleBackupConfigUpdate。去锁化(Task 5):云端 target 的主口令闸门已移除
+// —— 凭据改由 keystore 托管,缺凭据时 RebuildBackup 把本进程备份置 nil(下游
+// 503),不再要求先设/解锁主口令。凭据端点由后续 Task 9 以 /api/credentials/*
+// 重建。
 func BackupConfigUpdate(c *gin.Context) {
 	a := appFromCtx(c)
 	raw, err := c.GetRawData()
@@ -49,50 +50,9 @@ func BackupConfigUpdate(c *gin.Context) {
 		return
 	}
 
-	// 凭据闸门 —— 仅在切换到云端 target 时强制。
-	var probe struct {
-		TargetType string `json:"target_type"`
-	}
-	_ = jsonUnmarshal(raw, &probe)
-	isCloud := probe.TargetType == "webdav" || probe.TargetType == "s3"
-	if isCloud {
-		current := a.Settings.BackupConfig()
-		hasCreds := false
-		switch probe.TargetType {
-		case "webdav":
-			hasCreds = current.WebDAVPassword != ""
-		case "s3":
-			hasCreds = current.S3AccessKey != "" && current.S3SecretKey != ""
-		}
-		if !hasCreds {
-			if !a.HasMasterPassword() {
-				c.JSON(http.StatusOK, gin.H{
-					"success": false,
-					"error":   "master_password_required",
-					"message": "请先设置主密码才能使用云端备份",
-					"action": gin.H{
-						"type":   "show_modal",
-						"target": "master_password",
-						"params": gin.H{"mode": "setup"},
-					},
-				})
-				return
-			}
-			if !a.IsUnlocked() {
-				c.JSON(http.StatusOK, gin.H{
-					"success": false,
-					"error":   "master_password_not_unlocked",
-					"message": "凭证已过期，请重新解锁",
-					"action": gin.H{
-						"type":   "show_modal",
-						"target": "master_password",
-						"params": gin.H{"mode": "unlock"},
-					},
-				})
-				return
-			}
-		}
-	}
+	// 确保 secret store 已建并接线 SettingsManager:UpdateBackupConfigFromJSON
+	// 需要已接线的凭据存储才能把 WebDAV/S3 凭据分流到 secrets(Task 4)。
+	_ = a.Secrets()
 
 	if err := a.Settings.UpdateBackupConfigFromJSON(string(raw)); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
@@ -121,28 +81,8 @@ func BackupCreate(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": "backup not enabled"})
 		return
 	}
-	cfg := a.Settings.BackupConfig()
-	if cfg.TargetType == domain.BackupTargetWebDAV || cfg.TargetType == domain.BackupTargetS3 {
-		credsOK := true
-		switch cfg.TargetType {
-		case domain.BackupTargetWebDAV:
-			credsOK = cfg.WebDAVPassword != ""
-		case domain.BackupTargetS3:
-			credsOK = cfg.S3AccessKey != "" && cfg.S3SecretKey != ""
-		}
-		if !credsOK {
-			actionMode := "setup"
-			if a.HasMasterPassword() {
-				actionMode = "unlock"
-			}
-			c.JSON(http.StatusOK, masterPasswordError("credentials_not_available", "凭证不可用，请先设置主密码", actionMode))
-			return
-		}
-		if !a.IsUnlocked() {
-			c.JSON(http.StatusOK, masterPasswordError("master_password_not_unlocked", "凭证已过期，请重新解锁", "unlock"))
-			return
-		}
-	}
+	// 去锁化(Task 5):云端凭据闸门移除。缺凭据时 RebuildBackup 已把 a.Backup
+	// 置 nil,上面的 "backup not configured" 503 分支会拦住;凭据校验归 Task 9。
 
 	name, err := bm.CreateBackup()
 	if err != nil {
@@ -169,28 +109,8 @@ func BackupRestore(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "missing name"})
 		return
 	}
-	cfg := a.Settings.BackupConfig()
-	if cfg.TargetType == domain.BackupTargetWebDAV || cfg.TargetType == domain.BackupTargetS3 {
-		credsOK := true
-		switch cfg.TargetType {
-		case domain.BackupTargetWebDAV:
-			credsOK = cfg.WebDAVPassword != ""
-		case domain.BackupTargetS3:
-			credsOK = cfg.S3AccessKey != "" && cfg.S3SecretKey != ""
-		}
-		if !credsOK {
-			actionMode := "setup"
-			if a.HasMasterPassword() {
-				actionMode = "unlock"
-			}
-			c.JSON(http.StatusOK, masterPasswordError("credentials_not_available", "凭证不可用，请先设置主密码", actionMode))
-			return
-		}
-		if !a.IsUnlocked() {
-			c.JSON(http.StatusOK, masterPasswordError("master_password_not_unlocked", "凭证已过期，请重新解锁", "unlock"))
-			return
-		}
-	}
+	// 去锁化(Task 5):云端凭据闸门移除,缺凭据时 RebuildBackup 已把 bm 置 nil,
+	// 上面的 503 分支拦住;凭据校验归 Task 9。
 	if err := bm.RestoreFromBackup(req.Name); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
@@ -326,57 +246,9 @@ func BackupVerify(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// /api/backup/unlock  /  /api/backup/lock
-
-func BackupUnlock(c *gin.Context) {
-	a := appFromCtx(c)
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "missing password"})
-		return
-	}
-	res := a.UnlockCredentials(req.Password)
-	c.JSON(http.StatusOK, gin.H{
-		"success":      res.Success,
-		"locked_until": res.LockedUntil,
-	})
-}
-
-func BackupLock(c *gin.Context) {
-	a := appFromCtx(c)
-	a.LockCredentials()
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
-// /api/backup/master-password
-
-func MasterPasswordGet(c *gin.Context) {
-	a := appFromCtx(c)
-	c.JSON(http.StatusOK, a.GetMasterPasswordStatus())
-}
-
-// MasterPasswordSet 要求口令至少 4 个字符。
-func MasterPasswordSet(c *gin.Context) {
-	a := appFromCtx(c)
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "missing password"})
-		return
-	}
-	if len(req.Password) < 4 {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "password too short (minimum 4 characters)"})
-		return
-	}
-	if err := a.SetMasterPassword(req.Password); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
+// 去锁化(Task 5):/api/backup/unlock、/api/backup/lock、
+// /api/backup/master-password 端点随主口令概念一并移除,凭据端点由后续
+// Task 9 以 /api/credentials/* 重建。
 
 // /api/auth/*
 
@@ -424,22 +296,4 @@ func mask(s string) string {
 		return ""
 	}
 	return "******"
-}
-
-// masterPasswordError 构造 backup handler 使用的标准“需要主口令” JSON
-// 响应。
-func masterPasswordError(code, message, actionMode string) gin.H {
-	action := gin.H{
-		"type":   "show_modal",
-		"target": "master_password",
-	}
-	if actionMode != "" {
-		action["params"] = gin.H{"mode": actionMode}
-	}
-	return gin.H{
-		"success": false,
-		"error":   code,
-		"message": message,
-		"action":  action,
-	}
 }

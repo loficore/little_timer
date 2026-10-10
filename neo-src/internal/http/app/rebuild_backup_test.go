@@ -32,6 +32,10 @@ func TestRebuildBackupSwitchesTargetType(t *testing.T) {
 	}
 
 	a := NewApp(domain.NewClockManager(domain.NewDefaultClockTaskConfig()), sm, sqlite, nil, dbPath)
+	// 去锁化(Task 5):UpdateBackupConfigFromJSON 需要已接线的凭据 store,
+	// 注入内存 keystore 并先 a.Secrets() 完成接线。
+	a.Keystore = testKeystore{name: "secret-service", hasKey: true}
+	_ = a.Secrets()
 
 	assertTarget := func(want backup.BackupTarget) *backup.BackupManager {
 		t.Helper()
@@ -105,6 +109,9 @@ func TestRebuildBackupDisablesOnCloudConfigError(t *testing.T) {
 	}
 
 	a := NewApp(domain.NewClockManager(domain.NewDefaultClockTaskConfig()), sm, sqlite, nil, dbPath)
+	// 去锁化(Task 5):UpdateBackupConfigFromJSON 需要已接线的凭据 store。
+	a.Keystore = testKeystore{name: "secret-service", hasKey: true}
+	_ = a.Secrets()
 
 	if err := sm.UpdateBackupConfigFromJSON(`{"target_type": "s3"}`); err != nil {
 		t.Fatalf("update backup config: %v", err)

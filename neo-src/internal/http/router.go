@@ -202,10 +202,6 @@ func registerBackup(g *gin.RouterGroup) {
 	g.DELETE("/backup/delete/:name", handlers.BackupDeleteByName)
 	g.DELETE("/backup/:id", handlers.BackupDelete)
 	g.POST("/backup/verify", handlers.BackupVerify)
-	g.POST("/backup/unlock", handlers.BackupUnlock)
-	g.POST("/backup/lock", handlers.BackupLock)
-	g.GET("/backup/master-password", handlers.MasterPasswordGet)
-	g.POST("/backup/master-password", handlers.MasterPasswordSet)
 
 	g.GET("/auth/status", handlers.AuthStatus)
 	g.POST("/auth/enable", handlers.AuthEnable)

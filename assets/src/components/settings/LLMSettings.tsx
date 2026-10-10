@@ -1,5 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { useLLMSettings } from "../../hooks/useLLMSettings";
+import { SettingItem } from "../SettingItem";
+import { SelectInput } from "../SelectInput";
 import { t } from "../../utils/i18n";
 
 /**
@@ -7,6 +9,9 @@ import { t } from "../../utils/i18n";
  *
  * 字段:Provider / Base URL / Model / Max Tokens / Timeout / API Key。
  * API Key 用密码框 + 末 4 位掩码;留空表示不动现有 Key;"清除" 显式删除。
+ *
+ * 布局沿用 BasicSettings/CountdownSettings 的 SettingItem 模式(左标签 + 右控件),
+ * 与其他设置子选项保持一致。
  */
 export function LLMSettings() {
   const { cfg, saving, error, save } = useLLMSettings();
@@ -19,7 +24,6 @@ export function LLMSettings() {
   const [clearKey, setClearKey] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  // cfg 加载完后填表单(一次性同步;之后用户编辑表单不覆盖 cfg)。
   useEffect(() => {
     if (cfg) {
       setProvider(cfg.provider);
@@ -54,100 +58,82 @@ export function LLMSettings() {
     return <p className="opacity-60">…</p>;
   }
 
-  return (
-    <div className="space-y-3">
-      <div className="form-control">
-        <label className="label">
-          <span className="label-text">{t("llm_settings.provider")}</span>
-        </label>
-        <select
-          className="select select-bordered"
-          value={provider}
-          onChange={(e) => setProvider((e.currentTarget as HTMLSelectElement).value)}
-        >
-          <option value="openai_compat">{t("llm_settings.provider_openai_compat")}</option>
-          <option value="anthropic">{t("llm_settings.provider_anthropic")}</option>
-        </select>
-      </div>
+  const providerOptions = [
+    { value: "openai_compat", label: t("llm_settings.provider_openai_compat") },
+    { value: "anthropic", label: t("llm_settings.provider_anthropic") },
+  ];
 
-      <div className="form-control">
-        <label className="label">
-          <span className="label-text">{t("llm_settings.base_url")}</span>
-        </label>
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      <SettingItem label={t("llm_settings.provider")}>
+        <SelectInput
+          value={provider}
+          options={providerOptions}
+          onChange={(v) => setProvider(v)}
+        />
+      </SettingItem>
+
+      <SettingItem label={t("llm_settings.base_url")}>
         <input
-          className="input input-bordered"
+          className="input input-bordered w-full"
           value={baseURL}
           placeholder="https://api.deepseek.com/v1"
           onInput={(e) => setBaseURL((e.currentTarget as HTMLInputElement).value)}
         />
-      </div>
+      </SettingItem>
 
-      <div className="form-control">
-        <label className="label">
-          <span className="label-text">{t("llm_settings.model")}</span>
-        </label>
+      <SettingItem label={t("llm_settings.model")}>
         <input
-          className="input input-bordered"
+          className="input input-bordered w-full"
           value={model}
           onInput={(e) => setModel((e.currentTarget as HTMLInputElement).value)}
         />
-      </div>
+      </SettingItem>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="form-control">
-          <label className="label">
-            <span className="label-text">{t("llm_settings.max_tokens")}</span>
-          </label>
-          <input
-            type="number"
-            className="input input-bordered"
-            value={maxTokens}
-            onInput={(e) => setMaxTokens(Number((e.currentTarget as HTMLInputElement).value))}
-          />
-        </div>
-        <div className="form-control">
-          <label className="label">
-            <span className="label-text">{t("llm_settings.timeout_seconds")}</span>
-          </label>
-          <input
-            type="number"
-            className="input input-bordered"
-            value={timeout}
-            onInput={(e) => setTimeout(Number((e.currentTarget as HTMLInputElement).value))}
-          />
-        </div>
-      </div>
+      <SettingItem label={t("llm_settings.max_tokens")}>
+        <input
+          type="number"
+          className="input input-bordered w-full"
+          value={maxTokens}
+          onInput={(e) => setMaxTokens(Number((e.currentTarget as HTMLInputElement).value))}
+        />
+      </SettingItem>
 
-      <div className="form-control">
-        <label className="label">
-          <span className="label-text">{t("llm_settings.api_key")}</span>
-          {cfg.api_key_set && (
-            <span className="label-text-alt">
-              {t("llm_settings.api_key_set")} · {cfg.api_key_masked}
-            </span>
-          )}
-        </label>
+      <SettingItem label={t("llm_settings.timeout_seconds")}>
+        <input
+          type="number"
+          className="input input-bordered w-full"
+          value={timeout}
+          onInput={(e) => setTimeout(Number((e.currentTarget as HTMLInputElement).value))}
+        />
+      </SettingItem>
+
+      <SettingItem label={t("llm_settings.api_key")}>
         <input
           type="password"
-          className="input input-bordered"
+          className="input input-bordered w-full"
           value={apiKey}
           placeholder={cfg.api_key_set ? "••••" : ""}
           onInput={(e) => setApiKey((e.currentTarget as HTMLInputElement).value)}
         />
         <p className="text-xs opacity-50">{t("llm_settings.api_key_masked_hint")}</p>
-      </div>
-
-      {cfg.api_key_set && (
-        <label className="label cursor-pointer justify-start gap-2">
-          <input
-            type="checkbox"
-            className="checkbox checkbox-sm"
-            checked={clearKey}
-            onChange={(e) => setClearKey((e.currentTarget as HTMLInputElement).checked)}
-          />
-          <span className="label-text">{t("llm_settings.clear_key")}</span>
-        </label>
-      )}
+        {cfg.api_key_set && (
+          <span className="text-xs opacity-70">
+            {t("llm_settings.api_key_set")} · {cfg.api_key_masked}
+          </span>
+        )}
+        {cfg.api_key_set && (
+          <label className="mt-1 flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              className="checkbox checkbox-sm"
+              checked={clearKey}
+              onChange={(e) => setClearKey((e.currentTarget as HTMLInputElement).checked)}
+            />
+            <span className="text-sm">{t("llm_settings.clear_key")}</span>
+          </label>
+        )}
+      </SettingItem>
 
       <div className="flex items-center gap-2">
         <button className="btn btn-primary" disabled={saving} onClick={() => void onSave()}>

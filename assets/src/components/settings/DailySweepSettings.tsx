@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { getAPIClient } from "../../utils/apiClientSingleton";
 import type { DailySweepSettings as DailySweepSettingsDTO } from "../../types/aigtd";
+import { SettingItem } from "../SettingItem";
 import { t } from "../../utils/i18n";
 
 /**
@@ -9,6 +10,9 @@ import { t } from "../../utils/i18n";
  * 字段:enabled 开关 + HH:MM 时间(5 分钟步进)。非 5 分钟倍数在提交时被
  * 后端正则 `^(?:[01]\d|2[0-3]):[0-5]\d$` 接受(HH:MM 任意,非仅 5 分倍),
  * 但前端限制为 5 分步进以贴合用户预期。
+ *
+ * 布局沿用 BasicSettings/CountdownSettings 的 SettingItem 模式(左标签 + 右控件),
+ * 与其他设置子选项保持一致。
  */
 export function DailySweepSettings() {
   const client = getAPIClient();
@@ -46,32 +50,28 @@ export function DailySweepSettings() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="form-control">
-        <label className="label cursor-pointer justify-start gap-3">
-          <input
-            type="checkbox"
-            className="toggle toggle-primary"
-            data-testid="enabled-toggle"
-            checked={enabled}
-            onChange={(e) => setEnabled((e.currentTarget as HTMLInputElement).checked)}
-          />
-          <span className="label-text">{t("dailySweep.settings.enabled")}</span>
-        </label>
-      </div>
-      <div className="form-control">
-        <label className="label">
-          <span className="label-text">{t("dailySweep.settings.time")}</span>
-        </label>
+    <div className="space-y-4 sm:space-y-6">
+      <SettingItem label={t("dailySweep.settings.enabled")}>
+        <input
+          type="checkbox"
+          className="toggle toggle-primary"
+          data-testid="enabled-toggle"
+          checked={enabled}
+          onChange={(e) => setEnabled((e.currentTarget as HTMLInputElement).checked)}
+        />
+      </SettingItem>
+
+      <SettingItem label={t("dailySweep.settings.time")}>
         <input
           type="time"
-          className="input input-bordered"
+          className="input input-bordered w-full"
           step={300}
           data-testid="time-input"
           value={time}
           onInput={(e) => setTime((e.currentTarget as HTMLInputElement).value)}
         />
-      </div>
+      </SettingItem>
+
       <div className="flex items-center gap-2">
         <button
           className="btn btn-primary btn-sm"

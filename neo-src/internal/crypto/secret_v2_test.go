@@ -203,6 +203,28 @@ func TestV2FirstStoreWritesMagicAndPerms(t *testing.T) {
 	}
 }
 
+// TestV2StaleTmpIsRecovered —— 崩溃残留的 .tmp 会挡住 O_EXCL 独占创建,
+// persist 必须清理残留并重试一次,随后正常落盘且不留下 .tmp。
+func TestV2StaleTmpIsRecovered(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.db")
+	f := newFakeKeystore(t)
+	store := crypto.NewSecretStorage(path, f)
+	if err := os.WriteFile(path+".tmp", []byte("stale-crash-leftover"), 0o666); err != nil {
+		t.Fatalf("seed stale tmp: %v", err)
+	}
+	if err := store.Store([]byte("k"), []byte("v")); err != nil {
+		t.Fatalf("存在残留 .tmp 时 Store = %v, want 清理后重试成功", err)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("残留 .tmp 未清理: %v", err)
+	}
+	reloaded := crypto.NewSecretStorage(path, f)
+	if got, err := reloaded.Retrieve([]byte("k")); err != nil || string(got) != "v" {
+		t.Fatalf("重新加载 = %q, %v", got, err)
+	}
+}
+
 // TestV2InMemoryOnly 验证 filePath=="" 的纯内存模式:操作正常、无磁盘副作用。
 func TestV2InMemoryOnly(t *testing.T) {
 	f := newFakeKeystore(t)
@@ -275,6 +297,136 @@ func TestV2UnsealFailureSurfacesKeystoreUnavailable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestV2StoreRefusesWhenLoadFailed —— 载入失败(loadFailure)时写路径
+// 必须拒绝落盘:Seal 可能仍然成功,若放行,os.Rename 会用"内存子集"
+// 覆盖磁盘 blob,既有凭据永久丢失。断言 Store/Delete/Clear/Items 全部
+// 透出 loadFailure 且磁盘字节不变;拒绝后干净实例仍能读出原 secret。
+func TestV2StoreRefusesWhenLoadFailed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.db")
+	writer := newFakeKeystore(t)
+	store := crypto.NewSecretStorage(path, writer)
+	if err := store.Store([]byte("api_key"), []byte("sk-old")); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	broken := newFakeKeystore(t)
+	broken.unsealErr = fmt.Errorf("%w: 模拟 keyring 重置", keystore.ErrUnseal)
+	reloaded := crypto.NewSecretStorage(path, broken)
+
+	// 失败态必须可显式查询(启动门禁 Task 6/8 的信号源)。
+	if lf := reloaded.LoadFailure(); !errors.Is(lf, crypto.ErrKeystoreUnavailable) {
+		t.Fatalf("LoadFailure() = %v, want 可链到 ErrKeystoreUnavailable", lf)
+	}
+	if err := reloaded.Store([]byte("new_key"), []byte("v")); !errors.Is(err, crypto.ErrKeystoreUnavailable) {
+		t.Fatalf("载入失败时 Store = %v, want 透出 loadFailure 并拒绝落盘", err)
+	}
+	if err := reloaded.Delete([]byte("whatever")); !errors.Is(err, crypto.ErrKeystoreUnavailable) {
+		t.Fatalf("载入失败时 Delete = %v, want 透出 loadFailure", err)
+	}
+	if err := reloaded.Clear(); !errors.Is(err, crypto.ErrKeystoreUnavailable) {
+		t.Fatalf("载入失败时 Clear = %v, want 透出 loadFailure", err)
+	}
+	if _, err := reloaded.Items(); !errors.Is(err, crypto.ErrKeystoreUnavailable) {
+		t.Fatalf("载入失败时 Items = %v, want 透出 loadFailure", err)
+	}
+	if _, err := reloaded.Retrieve([]byte("api_key")); !errors.Is(err, crypto.ErrKeystoreUnavailable) {
+		t.Fatalf("载入失败时 Retrieve = %v, want ErrKeystoreUnavailable", err)
+	}
+	// 载入失败后查询不存在的 key 也不得谎报 not-found。
+	if _, err := reloaded.Retrieve([]byte("never_existed")); !errors.Is(err, crypto.ErrKeystoreUnavailable) {
+		t.Fatalf("载入失败后 Retrieve 缺失 key = %v, want 透出 loadFailure 而非 not-found", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("拒绝写入后 ReadFile: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("磁盘 blob 被拒绝的写入覆盖 —— 既有凭据被销毁")
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("拒绝写入不应残留 .tmp: %v", err)
+	}
+
+	clean := crypto.NewSecretStorage(path, writer)
+	if got, err := clean.Retrieve([]byte("api_key")); err != nil || string(got) != "sk-old" {
+		t.Fatalf("磁盘上的原 secret 应仍可读, got %q, err %v", got, err)
+	}
+	if lf := clean.LoadFailure(); lf != nil {
+		t.Fatalf("干净实例 LoadFailure() = %v, want nil", lf)
+	}
+}
+
+// TestV2ErrKeystoreUnavailableIsChainable —— keystore 底层原因错误必须
+// 以 %w 进入链(而非 %v),使调用方能同时 errors.Is 到 crypto 哨兵与
+// keystore 哨兵。覆盖三处:载入(Unseal)、构造(HasMasterKey 报错)、
+// 落盘(Seal)。
+func TestV2ErrKeystoreUnavailableIsChainable(t *testing.T) {
+	t.Run("UnsealFailureOnLoad", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "secret.db")
+		writer := newFakeKeystore(t)
+		store := crypto.NewSecretStorage(path, writer)
+		if err := store.Store([]byte("api_key"), []byte("sk-1")); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+
+		broken := newFakeKeystore(t)
+		broken.unsealErr = fmt.Errorf("%w: 模拟 keyring 重置", keystore.ErrUnseal)
+		reloaded := crypto.NewSecretStorage(path, broken)
+		_, err := reloaded.Retrieve([]byte("api_key"))
+		if !errors.Is(err, crypto.ErrKeystoreUnavailable) {
+			t.Fatalf("Retrieve = %v, want 可链到 ErrKeystoreUnavailable", err)
+		}
+		if !errors.Is(err, keystore.ErrUnseal) {
+			t.Fatalf("Retrieve = %v, want 可链到 keystore.ErrUnseal(原因错误未入链)", err)
+		}
+	})
+
+	t.Run("HasMasterKeyErrorOnLoad", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "secret.db")
+		writer := newFakeKeystore(t)
+		store := crypto.NewSecretStorage(path, writer)
+		if err := store.Store([]byte("api_key"), []byte("sk-1")); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+
+		broken := newFakeKeystore(t)
+		broken.hasErr = fmt.Errorf("%w: 模拟 daemon 不可达", keystore.ErrUnavailable)
+		reloaded := crypto.NewSecretStorage(path, broken)
+		_, err := reloaded.Retrieve([]byte("api_key"))
+		if !errors.Is(err, crypto.ErrKeystoreUnavailable) {
+			t.Fatalf("Retrieve = %v, want 可链到 ErrKeystoreUnavailable", err)
+		}
+		if !errors.Is(err, keystore.ErrUnavailable) {
+			t.Fatalf("Retrieve = %v, want 可链到 keystore.ErrUnavailable(原因错误未入链)", err)
+		}
+	})
+
+	t.Run("SealFailureOnStore", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "secret.db")
+		f := newFakeKeystore(t)
+		store := crypto.NewSecretStorage(path, f) // 文件不存在:loadFailure == nil
+		if err := f.DeleteMasterKey(); err != nil {
+			t.Fatalf("DeleteMasterKey: %v", err)
+		}
+		err := store.Store([]byte("k"), []byte("v"))
+		if !errors.Is(err, crypto.ErrKeystoreUnavailable) {
+			t.Fatalf("Store = %v, want 可链到 ErrKeystoreUnavailable", err)
+		}
+		if !errors.Is(err, keystore.ErrNotFound) {
+			t.Fatalf("Store = %v, want 可链到 keystore.ErrNotFound(原因错误未入链)", err)
+		}
+	})
 }
 
 // TestV2CorruptFileIsNotSilentlyEmpty 验证:magic 不匹配 / 垃圾文件不能

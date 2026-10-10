@@ -4,9 +4,11 @@
 // key 调 crypto.Encrypt/Decrypt(blob 布局同为 nonce(12)||ct||tag(16)),
 // 与 keystore_linux.go 的 Go 内 AES-GCM 完全一致。
 //
-// 两个测试开关用于构造故障:
+// 三个测试开关用于构造故障:
 //   - unsealErr:非 nil 时 Unseal 恒返回该错误(模拟 keyring 被重置,
 //     上层应透出 ErrKeystoreUnavailable)。
+//   - hasErr:非 nil 时 HasMasterKey 返回 (false, hasErr),模拟
+//     "密钥状态未知"(上层应透出 ErrKeystoreUnavailable 且可链到本错误)。
 //   - unsealNoVerify:true 时 Unseal 跳过认证、原样返回传入 blob,
 //     即"假装修不了密"。round-trip 测试在该开关打开时必须 fail ——
 //     用来铁证测试路径确实在解密(反同义反复)。
@@ -29,6 +31,10 @@ type fakeKeystore struct {
 
 	// unsealErr 非 nil 时 Unseal 直接返回它。
 	unsealErr error
+
+	// hasErr 非 nil 时 HasMasterKey 直接返回 (false, hasErr),
+	// 模拟"master key 状态未知"(如 keystore daemon 不可达)。
+	hasErr error
 
 	// unsealNoVerify 打开后 Unseal 不校验 tag,恒返回原 blob。
 	unsealNoVerify bool
@@ -70,6 +76,9 @@ func (f *fakeKeystore) EnsureMasterKey() error {
 }
 
 func (f *fakeKeystore) HasMasterKey() (bool, error) {
+	if f.hasErr != nil {
+		return false, f.hasErr
+	}
 	_, ok := f.items[fakeMasterKeyItem]
 	return ok, nil
 }

@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -87,9 +88,12 @@ type SecretStorage struct {
 	secrets map[string][]byte
 
 	// loadFailure 非 nil = 构造时磁盘 secret 加载失败(master key 缺失、
-	// Unseal 失败或文件损坏),记录透出原因。此时 cache 必为空,"查询
-	// 无结果"必须报告该原因而不是 not-found/空列表,防止调用方把
-	// keyring 被重置误读成"用户没设过凭据"。
+	// Unseal 失败或文件损坏),记录透出原因。此时 cache 必为空:
+	//   - 查询(Retrieve/Items)必须报告该原因而不是 not-found/空列表,
+	//     防止调用方把 keyring 被重置误读成"用户没设过凭据";
+	//   - 写操作(Store/Delete/Clear)必须拒绝 —— Seal 可能仍成功,放行
+	//     会让原子替换用"内存子集"覆盖磁盘 blob,既有凭据永久丢失;
+	//   - LoadFailure() 供启动流程(spec §9)显式查询。
 	loadFailure error
 }
 
@@ -116,9 +120,13 @@ func NewSecretStorage(filePath string, ks Keystore) *SecretStorage {
 
 	has, hasErr := ks.HasMasterKey()
 	if hasErr != nil {
-		s.loadFailure = fmt.Errorf("%w: 查询 master key 状态失败: %v",
+		// 双 %w:既能 errors.Is 到 ErrKeystoreUnavailable,也能透出
+		// keystore 侧的原因哨兵(如 ErrUnavailable)供调用方匹配。
+		s.loadFailure = fmt.Errorf("%w: 查询 master key 状态失败: %w",
 			ErrKeystoreUnavailable, hasErr)
-		log.Warn("crypto: keystore key missing, secrets unusable", "error", hasErr.Error())
+		// 注意:此分支是"状态未知",不是"key 缺失",日志措辞不得
+		// 冒用 spec 为 (false, nil) 场景规定的逐字串。
+		log.Warn("crypto: keystore unavailable, secrets unusable", "error", hasErr.Error())
 		return s
 	}
 	if !has {
@@ -140,10 +148,18 @@ func NewSecretStorage(filePath string, ks Keystore) *SecretStorage {
 // Secret 操作。
 
 // Store 插入或替换一对 key/value,随后原子落盘(纯内存模式跳过落盘)。
+// 载入失败态拒绝写入(见 loadFailure 注释);覆盖旧值时先擦除被替换的
+// 明文副本。
 func (s *SecretStorage) Store(key, value []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.refuseLoadFailedLocked("Store"); err != nil {
+		return err
+	}
+	if old, ok := s.secrets[string(key)]; ok {
+		zeroBytes(old)
+	}
 	s.secrets[string(key)] = append([]byte(nil), value...)
 	return s.persistLocked()
 }
@@ -164,10 +180,14 @@ func (s *SecretStorage) Retrieve(key []byte) ([]byte, error) {
 }
 
 // Delete 删除一个 key。删除不存在的 key 是 no-op(仍然落盘,保持幂等语义)。
+// 载入失败态拒绝执行。
 func (s *SecretStorage) Delete(key []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.refuseLoadFailedLocked("Delete"); err != nil {
+		return err
+	}
 	if v, ok := s.secrets[string(key)]; ok {
 		zeroBytes(v)
 		delete(s.secrets, string(key))
@@ -175,11 +195,14 @@ func (s *SecretStorage) Delete(key []byte) error {
 	return s.persistLocked()
 }
 
-// Clear 擦除所有 secret。适用于"重置凭据"流程。
+// Clear 擦除所有 secret。适用于"重置凭据"流程。载入失败态拒绝执行。
 func (s *SecretStorage) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.refuseLoadFailedLocked("Clear"); err != nil {
+		return err
+	}
 	for k, v := range s.secrets {
 		zeroBytes(v)
 		delete(s.secrets, k)
@@ -188,13 +211,13 @@ func (s *SecretStorage) Clear() error {
 }
 
 // Items 返回当前 cache 中的全部 key(按字典序升序),供迁移器与 settings
-// 反查 has_* 标记使用。cache 因加载失败为空时透出 loadFailure 而不是空
-// 列表。
+// 反查 has_* 标记使用。载入失败态一律透出 loadFailure 而不是空列表
+// (写路径已被拒绝,cache 在失败态下必为空)。
 func (s *SecretStorage) Items() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if len(s.secrets) == 0 && s.loadFailure != nil {
+	if s.loadFailure != nil {
 		return nil, s.loadFailure
 	}
 	names := make([]string, 0, len(s.secrets))
@@ -205,7 +228,28 @@ func (s *SecretStorage) Items() ([]string, error) {
 	return names, nil
 }
 
+// LoadFailure 返回构造时磁盘 secret 加载失败的原因,干净时为 nil。启动
+// 流程(spec §9,Task 6/8)以此区分"磁盘 store 读不出来(需重置/迁移)"
+// 与"新装(从未有过 secret)"。返回的错误链保留 crypto 与 keystore 两侧
+// 哨兵,可用 errors.Is 匹配。
+func (s *SecretStorage) LoadFailure() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.loadFailure
+}
+
 // 内部实现。
+
+// refuseLoadFailedLocked 在载入失败态下拒绝写操作 op,返回包装了
+// loadFailure 的错误(errors.Is 仍可匹配底层哨兵)。构造后 loadFailure
+// 只读,调用方需持有 s.mu 仅为与其他状态读取保持一致。
+func (s *SecretStorage) refuseLoadFailedLocked(op string) error {
+	if s.loadFailure == nil {
+		return nil
+	}
+	return fmt.Errorf("secret 载入失败,拒绝 %s 以免覆盖磁盘数据: %w", op, s.loadFailure)
+}
 
 // loadV2 读取磁盘 blob,Unseal + JSON 解析填充 s.secrets;任何一步失败
 // 都返回带哨兵错误的说明且保持 cache 为空(构造场景专用,无并发)。
@@ -224,7 +268,7 @@ func (s *SecretStorage) loadV2() error {
 
 	plaintext, err := s.ks.Unseal(data[len(secretMagic):])
 	if err != nil {
-		return fmt.Errorf("%w: keystore 解封失败: %v", ErrKeystoreUnavailable, err)
+		return fmt.Errorf("%w: keystore 解封失败: %w", ErrKeystoreUnavailable, err)
 	}
 	defer zeroBytes(plaintext)
 
@@ -246,9 +290,10 @@ func (s *SecretStorage) loadV2() error {
 }
 
 // persistLocked 把 s.secrets 序列化为 JSON(map[string]base64,与 v1 同
-// 格式),经 ks.Seal 加密后以 magic || sealed 布局写盘:先写
-// filePath+".tmp"(0o600)再 os.Rename 原子替换。未配置 filePath 时是
-// no-op;Seal 失败透出 ErrKeystoreUnavailable。
+// 格式),经 ks.Seal 加密后以 magic || sealed 布局写盘:先独占创建
+// filePath+".tmp"(O_EXCL, 0o600)写入并 Close,再 os.Rename 原子替换。
+// 未配置 filePath 时是 no-op;Seal 失败透出 ErrKeystoreUnavailable(并
+// 链入 keystore 侧原因错误)。
 func (s *SecretStorage) persistLocked() error {
 	if s.filePath == "" {
 		return nil
@@ -266,7 +311,7 @@ func (s *SecretStorage) persistLocked() error {
 
 	sealed, err := s.ks.Seal(plaintext)
 	if err != nil {
-		return fmt.Errorf("%w: keystore 密封失败: %v", ErrKeystoreUnavailable, err)
+		return fmt.Errorf("%w: keystore 密封失败: %w", ErrKeystoreUnavailable, err)
 	}
 
 	out := make([]byte, 0, len(secretMagic)+len(sealed))
@@ -274,14 +319,39 @@ func (s *SecretStorage) persistLocked() error {
 	out = append(out, sealed...)
 
 	tmpPath := s.filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
+	tmp, err := createExclusive(tmpPath)
+	if err != nil {
+		return fmt.Errorf("%w: 创建临时文件失败: %v", ErrSecretIO, err)
+	}
+	if _, err := tmp.Write(out); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("%w: 写入临时文件失败: %v", ErrSecretIO, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("%w: 关闭临时文件失败: %v", ErrSecretIO, err)
 	}
 	if err := os.Rename(tmpPath, s.filePath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("%w: 原子替换 secret 文件失败: %v", ErrSecretIO, err)
 	}
 	return nil
+}
+
+// createExclusive 独占创建原子写用的临时文件:O_EXCL 拒绝复用上一次的
+// 残留 .tmp(避免沿用其权限位)与借道 .tmp 的符号链接劫持,权限固定
+// 0o600。遇到残留文件时删除后重试一次 —— 本存储每进程单实例且锁内
+// 写盘,.tmp 只可能是崩溃残留,不存在并发竞争者。
+func createExclusive(tmpPath string) (*os.File, error) {
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		if rmErr := os.Remove(tmpPath); rmErr != nil {
+			return nil, rmErr
+		}
+		tmp, err = os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	}
+	return tmp, err
 }
 
 // zeroBytes 就地擦除一个 byte slice。针对 heap dump 的尽力防御;

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !android
 
 // secret_service.go —— XDG Secret Service 的 D-Bus 协议细节(godbus/v5 手写客户端,
 // 无 cgo)。Keystore 接口实现见 keystore_linux.go,包文档见 keystore.go。

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !android
 
 // keystore_linux_test.go —— Linux Secret Service 后端的纯逻辑单元测试。
 //

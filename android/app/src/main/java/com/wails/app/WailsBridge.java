@@ -92,6 +92,9 @@ public class WailsBridge {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private WebView webView;
     private volatile boolean initialized = false;
+    // Hardware keystore collaborator (Task 7): registered into the Go side
+    // once per init so internal/keystore can call it via JNI.
+    private KeystoreBridge keystoreBridge;
 
     // Phase D state: sensor listeners, speech engine and keyboard watcher are
     // retained so they can be registered and torn down on demand.
@@ -109,6 +112,7 @@ public class WailsBridge {
 
     // Native methods - implemented in Go
     private static native void nativeInit(WailsBridge bridge);
+    private static native void nativeKeystoreInit(KeystoreBridge bridge);
     private static native void nativeShutdown();
     private static native void nativeOnStart();
     private static native void nativeOnResume();
@@ -144,6 +148,19 @@ public class WailsBridge {
             Log.i(TAG, "Wails bridge initialized");
         } catch (Exception e) {
             Log.e(TAG, "Failed to initialize Wails bridge", e);
+        }
+        // Keystore bridge registration is best-effort and strictly additive:
+        // a failure here must never regress the existing Wails lifecycle.
+        // The Go side then reports ErrUnavailable with actionable guidance.
+        if (initialized) {
+            try {
+                keystoreBridge = new KeystoreBridge(activity);
+                nativeKeystoreInit(keystoreBridge);
+                Log.i(TAG, "Keystore bridge registered");
+            } catch (Throwable t) {
+                keystoreBridge = null;
+                Log.e(TAG, "Failed to register keystore bridge", t);
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-//go:build linux && integration_dbus
+//go:build linux && !android && integration_dbus
 
 // integration_dbus_test.go —— 真实 org.freedesktop.secrets daemon 的集成测试。
 //

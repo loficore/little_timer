@@ -1,6 +1,9 @@
-//go:build linux
+//go:build linux && !android
 
 // keystore_linux.go —— linux 平台的 Keystore 实现:master key(32B)托管在
+// (tag 带 `!android`:Go 把 GOOS=android 也视为满足 `linux`,而
+// GOOS=android 由 keystore_android.go 注册后端,此处必须显式排除,
+// 否则两个 init() 会先后覆盖 currentPlatform。)
 // XDG Secret Service(org.freedesktop.secrets,D-Bus),数据加解密在进程内
 // 用取回的 key 做 AES-256-GCM(blob = nonce(12)||ct||tag(16))。
 // D-Bus 协议细节见 secret_service.go,包文档见 keystore.go。

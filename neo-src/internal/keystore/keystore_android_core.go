@@ -23,14 +23,21 @@ import (
 // androidKeystoreName 是本后端标识,与 brief 约定逐字一致。
 const androidKeystoreName = "android-keystore"
 
-// Java 侧(KeystoreBridge.java)跨 JNI 约定的错误消息标记。
+// Java 侧(KeystoreBridge.java MARK_* 常量)跨 JNI 约定的错误消息标记。
 // Java 抛出的 GeneralSecurityException 消息以这些标记开头,
-// Go 端 mapAndroidError 据此映射为包内哨兵错误。
+// Go 端 mapAndroidError 据此映射为包内哨兵错误。标记逐字与 Java 侧
+// KeystoreBridge.java 的 MARK_KEY_NOT_FOUND / MARK_UNSEAL_FAILED /
+// MARK_KEY_UNRECOVERABLE 对齐(改一处需同步另一处)。
 const (
-	bridgeMarkKeyNotFound  = "KEY_NOT_FOUND"       // alias 不存在
-	bridgeMarkUnsealFailed = "UNSEAL_FAILED"       // GCM 认证/解密失败
-	bridgeMarkDisconnected = "BRIDGE_DISCONNECTED" // JNI 桥未注册/断连
+	bridgeMarkKeyNotFound      = "KEY_NOT_FOUND"       // alias 不存在 → ErrNotFound
+	bridgeMarkUnsealFailed     = "UNSEAL_FAILED"       // GCM 认证/解密失败 → ErrUnseal
+	bridgeMarkKeyUnrecoverable = "KEY_UNRECOVERABLE"   // alias 存在但密钥不可用(OTA/恢复出厂污染)→ ErrUnavailable,绝不 ErrNotFound,否则 hasKey 短路让 EnsureMasterKey 成功、Seal 永远 ErrNotFound 死锁
+	bridgeMarkDisconnected     = "BRIDGE_DISCONNECTED" // JNI 桥未注册/断连 → ErrUnavailable+指引
 )
+
+// 注:Java ensureKey() 生成失败消息以 "ENSURE_KEY_FAILED|" 开头(KeystoreBridge.java)。
+// 该标记无独立 Go 常量:生成失败即桥接不可信,刻意落入 mapAndroidError 的
+// default 分支 → ErrUnavailable + 中文指引尾,行为正确,故不单独映射。
 
 // errBridgeDisconnected 由传输层在 bridge 未注册(JNI 断连)时返回。
 var errBridgeDisconnected = errors.New("android keystore bridge 未注册(JNI 不可达)")
@@ -167,6 +174,15 @@ func bridgeUnreachable() error {
 	return fmt.Errorf("%w: %s; %s", ErrUnavailable, errBridgeDisconnected.Error(), keystoreBridgeGuidance)
 }
 
+// bridgeFailureUnavailable 把「桥接调用返回了不可归类的 Java 故障」(未知异常,
+// 或不可恢复别名 KEY_UNRECOVERABLE)统一包装为 ErrUnavailable,并保留原始
+// 错误文本 + 追加 keystoreBridgeGuidance 指引尾(卸载/清除数据不可恢复),
+// 让这类失败对用户可执行。断连走 bridgeUnreachable(带断连哨兵文案),此处
+// 面向「桥活着但这次调用失败」的场景。
+func bridgeFailureUnavailable(err error) error {
+	return fmt.Errorf("%w: 桥接调用失败: %v; %s", ErrUnavailable, err, keystoreBridgeGuidance)
+}
+
 // mapAndroidError 把传输层错误(Java 异常经 JNI 转成的带标记字符串)
 // 映射到包内哨兵错误。已包装哨兵的错误原样透传,不重复套壳。
 func mapAndroidError(err error) error {
@@ -184,9 +200,15 @@ func mapAndroidError(err error) error {
 		return fmt.Errorf("%w: %v", ErrNotFound, err)
 	case strings.Contains(msg, bridgeMarkUnsealFailed):
 		return fmt.Errorf("%w: %v", ErrUnseal, err)
+	case strings.Contains(msg, bridgeMarkKeyUnrecoverable):
+		// alias 存在但密钥不可用:通道本身已不可信且无恢复路径,按不可用上报,
+		// 附中文指引尾。绝不映射为 ErrNotFound —— 否则 hasKey()==true 让
+		// EnsureMasterKey 短路成功、Seal 却永远 ErrNotFound,形成死锁。
+		return bridgeFailureUnavailable(err)
 	default:
-		// 未知 Java 异常/JNI 故障:通道本身已不可信,按不可用上报。
-		return fmt.Errorf("%w: 桥接调用失败: %v", ErrUnavailable, err)
+		// 未知 Java 异常 / ENSURE_KEY_FAILED:通道不可信,统一 ErrUnavailable +
+		// 指引尾,避免返回不带指引的裸哨兵(minor #2)。
+		return bridgeFailureUnavailable(err)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,10 @@ func TestAndroidMapBridgeError(t *testing.T) {
 		{"unseal 标记", errors.New("android keystore bridge: javax.crypto.AEADBadTagException|UNSEAL_FAILED: tag mismatch"), ErrUnseal},
 		{"断连标记", errors.New("android keystore bridge: BRIDGE_DISCONNECTED|JVM unavailable"), ErrUnavailable},
 		{"断连哨兵", errBridgeDisconnected, ErrUnavailable},
+		// 不可恢复别名(alias 存在但密钥损坏)→ 独立标记,映射 ErrUnavailable
+		// 而非 ErrNotFound,否则 hasKey 短路让 EnsureMasterKey 成功、Seal 永远
+		// ErrNotFound 形成无恢复路径的死锁。
+		{"不可恢复别名标记", errors.New("android keystore bridge: java.security.UnrecoverableKeyException|KEY_UNRECOVERABLE: keystore corrupted"), ErrUnavailable},
 		{"未知异常 → 不可用", errors.New("android keystore bridge: java.lang.IllegalStateException|null"), ErrUnavailable},
 		// 已包装哨兵的错误原样透传,不重复套壳。
 		{"透传 ErrUnseal", fmtErrUnseal("blob 长度不足"), ErrUnseal},
@@ -140,6 +145,32 @@ func TestAndroidMapBridgeError(t *testing.T) {
 			}
 			if !errors.Is(got, tc.want) {
 				t.Fatalf("mapAndroidError(%v) = %v, want errors.Is(.., %v)", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAndroidMapErrorGuidanceTail 钉住两条 ErrUnavailable 路径都携带可执行的
+// 中文指引尾(卸载/清除数据不可恢复):KEY_UNRECOVERABLE(不可恢复别名)与
+// 未知 Java 异常(default 分支)。同时断言 KEY_UNRECOVERABLE 绝不映射为
+// ErrNotFound(否则恢复路径被封死)。
+func TestAndroidMapErrorGuidanceTail(t *testing.T) {
+	const guidanceSub = "卸载/清除数据将不可恢复地丢失已存凭据"
+	cases := map[string]error{
+		"不可恢复别名标记": errors.New("android keystore bridge: java.security.UnrecoverableKeyException|KEY_UNRECOVERABLE: keystore corrupted"),
+		"未知异常":     errors.New("android keystore bridge: java.lang.IllegalStateException|boom"),
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := mapAndroidError(in)
+			if !errors.Is(got, ErrUnavailable) {
+				t.Fatalf("mapAndroidError(%v) = %v, want errors.Is(ErrUnavailable)", in, got)
+			}
+			if errors.Is(got, ErrNotFound) {
+				t.Fatalf("不可恢复/未知异常绝不应映射为 ErrNotFound,got %v", got)
+			}
+			if !strings.Contains(got.Error(), guidanceSub) {
+				t.Fatalf("err text = %q, want 含指引子串 %q", got.Error(), guidanceSub)
 			}
 		})
 	}
@@ -185,6 +216,12 @@ func TestAndroidSealUnseal(t *testing.T) {
 	f.sealE = errors.New("android keystore bridge: java.security.KeyStoreException|KEY_NOT_FOUND: no alias")
 	if _, err := ks.Seal([]byte("x")); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Seal KEY_NOT_FOUND err = %v, want ErrNotFound", err)
+	}
+	f.sealE = nil
+	// KEY_UNRECOVERABLE(alias 存在但密钥损坏)→ ErrUnavailable 而非 ErrNotFound。
+	f.sealE = errors.New("android keystore bridge: java.security.UnrecoverableKeyException|KEY_UNRECOVERABLE: corrupted")
+	if _, err := ks.Seal([]byte("x")); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Seal KEY_UNRECOVERABLE err = %v, want ErrUnavailable", err)
 	}
 	f.sealE = nil
 	f.unslE = errors.New("android keystore bridge: javax.crypto.AEADBadTagException|UNSEAL_FAILED: bad tag")

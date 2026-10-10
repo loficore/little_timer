@@ -19,7 +19,10 @@ package com.wails.app;
 //     nonce(12)||ct||tag(16) 布局一致;
 //   - unseal 失败抛 GeneralSecurityException,消息以 "UNSEAL_FAILED|" 开头
 //     (Go mapAndroidError → ErrUnseal);alias 缺失消息以 "KEY_NOT_FOUND|"
-//     开头(Go → ErrNotFound)。异常消息只含类名与文本,不含密钥材料。
+//     开头(Go → ErrNotFound);alias 存在但密钥不可用(UnrecoverableKeyException)
+//     以 "KEY_UNRECOVERABLE|" 开头(Go → ErrUnavailable,不可误判为 ErrNotFound);
+//     ensureKey 生成失败以 "ENSURE_KEY_FAILED|" 开头(Go 侧无独立标记,落入
+//     default → ErrUnavailable)。异常消息只含类名与文本,不含密钥材料。
 
 import android.app.Activity;
 import android.os.Build;
@@ -54,10 +57,16 @@ public class KeystoreBridge {
     private static final int GCM_TAG_BITS = 128;
     private static final int IV_BYTES = 12;
 
-    // Error-message markers consumed by Go mapAndroidError. Keep in sync with
-    // bridgeMark* in neo-src/internal/keystore/keystore_android_core.go.
+    // Error-message markers consumed by Go mapAndroidError. Keep the literal
+    // marker strings in sync with bridgeMark* in
+    // neo-src/internal/keystore/keystore_android_core.go:
+    //   MARK_KEY_NOT_FOUND     ↔ bridgeMarkKeyNotFound     → ErrNotFound
+    //   MARK_UNSEAL_FAILED     ↔ bridgeMarkUnsealFailed    → ErrUnseal
+    //   MARK_KEY_UNRECOVERABLE ↔ bridgeMarkKeyUnrecoverable→ ErrUnavailable
+    // (改一处需同步另一处)。
     private static final String MARK_KEY_NOT_FOUND = "KEY_NOT_FOUND|";
     private static final String MARK_UNSEAL_FAILED = "UNSEAL_FAILED|";
+    private static final String MARK_KEY_UNRECOVERABLE = "KEY_UNRECOVERABLE|";
 
     private final Activity activity;
     private final SecureRandom random = new SecureRandom();
@@ -172,9 +181,11 @@ public class KeystoreBridge {
         try {
             key = (SecretKey) ks.getKey(ALIAS, null);
         } catch (UnrecoverableKeyException e) {
-            // Hardware key present but unusable (e.g. factory-reset drift):
-            // report as not-found so callers can distinguish from corruption.
-            throw new GeneralSecurityException(MARK_KEY_NOT_FOUND + describe(e), e);
+            // 别名存在但密钥不可用(OTA/恢复出厂后 Keystore 污染)。绝不复用
+            // KEY_NOT_FOUND:那会让 Go 侧 hasKey()==true 时 EnsureMasterKey 短路
+            // 成功、Seal 却永远 ErrNotFound 而无恢复路径(死锁)。改用独立标记
+            // KEY_UNRECOVERABLE,Go mapAndroidError 映射为 ErrUnavailable。
+            throw new GeneralSecurityException(MARK_KEY_UNRECOVERABLE + describe(e), e);
         }
         if (key == null) {
             throw new GeneralSecurityException(MARK_KEY_NOT_FOUND + " alias " + ALIAS + " missing");

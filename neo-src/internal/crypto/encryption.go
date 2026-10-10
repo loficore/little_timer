@@ -1,40 +1,32 @@
 // Package crypto 封装对称加密辅助函数，用于静态加密的 secret，
-// 基于标准库 `crypto/aes` + `crypto/cipher` GCM 和
-// `golang.org/x/crypto/pbkdf2`。
+// 基于标准库 `crypto/aes` + `crypto/cipher` GCM。
 //
-// Wire format（EncryptWithPassword 产出的加密 blob）：
-//
-//	salt (16) || nonce (12) || ciphertext (N) || gcm_tag (16)
-//
-// API：
+// 本文件只保留两组原语:
 //
 //   - Encrypt(plaintext, key, nonce) / Decrypt(blob, key) —— 裸 AES-GCM
 //     往返。Encrypt 的输出为 nonce(12) || ciphertext || tag(16)。
-//   - EncryptWithPassword(plaintext, password) / DecryptWithPassword —— 追加
-//     PBKDF2-HMAC-SHA256 密钥派生，使用 16 字节 salt。
-//   - DeriveKey(password, salt) → 32 字节密钥（为测试而暴露）。
 //   - GenerateKey / GenerateNonce / GenerateSalt —— 随机字节生成。
+//
+// v1 主口令时代的 PBKDF2 派生与口令加密组合
+// (DeriveKey / EncryptWithPassword / DecryptWithPassword)已标
+// Deprecated 并移入 legacy_v1.go;SecretStorage 的 v2 实现见 secret.go。
 package crypto
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"fmt"
 	"io"
-
-	"golang.org/x/crypto/pbkdf2"
 )
 
-// AES-GCM / PBKDF2 尺寸常量。
+// AES-GCM / salt 尺寸常量。
 
 const (
 	AES256GCMKeySize   = 32
 	AES256GCMNonceSize = 12
 	AES256GCMTagSize   = 16
 	SaltSize           = 16
-	PBKDF2Iterations   = 100_000
 )
 
 // CryptoError 是类型化哨兵错误，可通过 errors.Is / errors.As 进行匹配。
@@ -68,15 +60,6 @@ func randomBytes(n int) []byte {
 		panic(fmt.Errorf("crypto: read random bytes: %w", err))
 	}
 	return buf
-}
-
-// DeriveKey 使用 PBKDF2-HMAC-SHA256(password, salt, 100_000) 派生 32 字节密钥。
-func DeriveKey(password, salt []byte) ([]byte, error) {
-	if len(salt) != SaltSize {
-		return nil, fmt.Errorf("%w: salt must be %d bytes, got %d",
-			ErrInvalidKeyLength, SaltSize, len(salt))
-	}
-	return pbkdf2.Key(password, salt, PBKDF2Iterations, AES256GCMKeySize, sha256.New), nil
 }
 
 // 裸 AES-256-GCM（调用方提供 32 字节 key 和 12 字节 nonce）。
@@ -119,55 +102,6 @@ func Decrypt(blob, key []byte) ([]byte, error) {
 	}
 	nonce := blob[:AES256GCMNonceSize]
 	body := blob[AES256GCMNonceSize:]
-	gcm, err := newGCM(key)
-	if err != nil {
-		return nil, err
-	}
-	pt, err := gcm.Open(nil, nonce, body, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrAuthenticationFailed, err)
-	}
-	return pt, nil
-}
-
-// 基于口令的辅助函数 —— DeriveKey + Encrypt/Decrypt 打包组合。
-// Wire format：salt(16) || nonce(12) || ciphertext(N) || tag(16)。
-
-// EncryptWithPassword 从 password+salt 派生 32 字节密钥，再加密明文。
-// salt 在内部生成，调用方需持久化返回的 blob 以便后续恢复明文。
-func EncryptWithPassword(plaintext, password []byte) ([]byte, error) {
-	salt := GenerateSalt()
-	key, err := DeriveKey(password, salt)
-	if err != nil {
-		return nil, err
-	}
-	nonce := GenerateNonce()
-	gcm, err := newGCM(key)
-	if err != nil {
-		return nil, err
-	}
-	sealed := gcm.Seal(nil, nonce, plaintext, nil)
-	// Wire 布局：salt || nonce || sealed（sealed = ct || tag）
-	out := make([]byte, 0, SaltSize+AES256GCMNonceSize+len(sealed))
-	out = append(out, salt...)
-	out = append(out, nonce...)
-	out = append(out, sealed...)
-	return out, nil
-}
-
-// DecryptWithPassword 解密由 EncryptWithPassword 产生的二进制数据。
-func DecryptWithPassword(blob, password []byte) ([]byte, error) {
-	if len(blob) < SaltSize+AES256GCMNonceSize+AES256GCMTagSize {
-		return nil, fmt.Errorf("%w: blob too short (%d bytes)",
-			ErrAuthenticationFailed, len(blob))
-	}
-	salt := blob[:SaltSize]
-	nonce := blob[SaltSize : SaltSize+AES256GCMNonceSize]
-	body := blob[SaltSize+AES256GCMNonceSize:]
-	key, err := DeriveKey(password, salt)
-	if err != nil {
-		return nil, err
-	}
 	gcm, err := newGCM(key)
 	if err != nil {
 		return nil, err

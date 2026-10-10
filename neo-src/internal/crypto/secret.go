@@ -1,17 +1,22 @@
-// Package crypto —— 带主口令保护的 secret 存储。
+// Package crypto —— 由平台 keystore 托管的 secret 存储(v2 薄壳)。
 //
-// 不集成系统 keychain：secret 放在内存 map 中（用主口令派生的密钥做
-// 静态加密），并持久化到磁盘上的单个加密文件。文件路径由调用方提供，
-// 由调用方决定 secret blob 存放位置（通常是
-// `os.UserConfigDir()/little_timer/secrets.enc`）。
+// SecretStorage 不再管理主口令:加解密委托给注入的 master key 托管
+// (消费侧最小接口 Keystore,由 internal/keystore 的平台实现以结构类型
+// 满足),本包只负责"内存明文 cache + JSON 序列化 + 带 magic 前缀的
+// envelope 落盘"。明文只在 Seal/Unseal 前后短暂存在,口令 → 密钥派生
+// 路径已整体删除(见 legacy_v1.go 的 Deprecated 说明)。
 //
-// 磁盘 blob 的 wire format：
+// 磁盘 blob 的 wire format:
 //
-//	magic (8 字节："LTMSECv1") || salt (16) || nonce (12) ||
-//	  gcm_sealed( JSON(map[string][]byte) )
+//	magic (8 字节:"LTMSEKv2") || Keystore.Seal( JSON(map[string]string) )
 //
-// GCM 密封内的 JSON 为 `{"key": base64(value), …}`。这是规范要求的
-// OS keychain 不可用时的加密文件回退方案。
+// Seal 的明文载荷为 `{"key": base64(value), …}`(与 v1 相同);Seal 产物
+// 的布局由平台实现决定(Linux 后端为 nonce(12) || ciphertext || tag(16))。
+// v1 文件("LTMSECv1")由 keystore 迁移器一次性处理,本薄壳不读取。
+//
+// 依赖边界:本包不 import internal/keystore —— keystore 的平台实现文件
+// 反向使用本包的 AES-GCM 原语,直接 import 会构成编译环;因此这里声明
+// 消费侧接口,任何 keystore.Keystore 值均可直接传入 NewSecretStorage。
 package crypto
 
 import (
@@ -20,8 +25,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"sync"
-	"time"
 
 	"little-timer/internal/log"
 )
@@ -35,171 +40,134 @@ const (
 	ErrSecretInvalidValue     SecretError = "invalid value"
 	ErrSecretNoAccess         SecretError = "no access"
 	ErrSecretOutOfMemory      SecretError = "out of memory"
-	ErrSecretLocked           SecretError = "secret store locked"
-	ErrSecretMasterPwdNotSet  SecretError = "master password not set"
 	ErrSecretDecryptionFailed SecretError = "decryption failed"
 	ErrSecretIO               SecretError = "secret store i/o failed"
+
+	// ErrKeystoreUnavailable —— master key 托管不可用:key 缺失、
+	// Seal/Unseal 失败(如 keyring 被重置)时透出。语义 =「现有凭据
+	// 读不出来,需要走重置/迁移流程」,调用方不得当成"用户没设置过
+	// secret"静默处理(spec §10;Review Focus #2)。
+	ErrKeystoreUnavailable SecretError = "keystore unavailable"
 )
 
 func (e SecretError) Error() string { return string(e) }
 
-// 加密 blob 文件的 magic 前缀。用来把自己的文件和磁盘上的意外垃圾
-// 区分开，并预留清晰的升级路径（升到 v2，在 `loadFromFile` 里迁移 v1）。
-var secretMagic = []byte("LTMSECv1")
+// Keystore —— SecretStorage 对 master key 托管的最小依赖面(消费侧接口)。
+// 取 internal/keystore.Keystore 方法集的子集,语义与那边逐字一致:
+//   - HasMasterKey 报告 master key 是否已托管(区分"新装"与"老数据");
+//   - Seal 用 master key 加密明文;
+//   - Unseal 解密 Seal 产物,认证/取 key 失败返回 keystore 哨兵错误。
+//
+// 在消费侧声明(而非 import keystore 包)是为了消除 crypto ↔ keystore
+// 编译环:keystore 的 Linux 实现用本包原语做加解密。
+type Keystore interface {
+	HasMasterKey() (bool, error)
+	Seal(plaintext []byte) ([]byte, error)
+	Unseal(blob []byte) ([]byte, error)
+}
 
-// 锁定：5 次失败尝试 → 锁定 300 秒。
-const (
-	MaxUnlockAttempts      = 5
-	LockoutDurationSeconds = 300
-)
+// v2 磁盘 blob 的 magic 前缀。用来把自己的文件和磁盘上的意外垃圾
+// (含 v1 遗留 "LTMSECv1")区分开。
+var secretMagic = []byte("LTMSEKv2")
 
-// SecretStorage 是凭据存储的加密文件回退方案。
-// 每进程一个实例；所有方法都是 goroutine 安全的。
+// SecretStorage 是 keystore envelope 保护的凭据存储薄壳。
+// 每进程一个实例;所有方法都是 goroutine 安全的。
 type SecretStorage struct {
 	mu sync.Mutex
 
 	// filePath 是加密 blob 在磁盘上的位置。为空表示
-	// “不持久化 —— 进程退出后 secret 即消失”。
+	// "不持久化 —— 进程退出后 secret 即消失"。
 	filePath string
 
-	// masterPassword 是 SetMasterPassword / Unlock 之后保留在内存中的
-	// 用户口令。保留它是因为磁盘 blob 走的是 password → PBKDF2 →
-	// AES-GCM；若无口令重新派生 AES 密钥就得把密钥存盘（这会摧毁加密的
-	// 意义）。Lock() 时清零。
-	masterPassword []byte
+	// ks 是注入的 master key 托管,构造后只读。不得为 nil。
+	ks Keystore
 
-	// secrets 是内存 cache。key 是用户提供的任意字节切片；在 JSON map
-	// 内按原样序列化。
+	// secrets 是内存明文 cache。key 是用户提供的任意字节切片;在 JSON
+	// map 内按 string(key) 序列化。
 	secrets map[string][]byte
 
-	// 锁定计数。
-	failedAttempts  uint32
-	lockedUntilUnix int64
+	// loadFailure 非 nil = 构造时磁盘 secret 加载失败(master key 缺失、
+	// Unseal 失败或文件损坏),记录透出原因。此时 cache 必为空,"查询
+	// 无结果"必须报告该原因而不是 not-found/空列表,防止调用方把
+	// keyring 被重置误读成"用户没设过凭据"。
+	loadFailure error
 }
 
-// New 返回一个空的、处于锁定状态的 SecretStorage，持久化到 filePath。
-// filePath 为 "" 时存储只在内存中。
-func New(filePath string) *SecretStorage {
-	return &SecretStorage{
+// NewSecretStorage 返回由 ks 托管 master key、持久化到 filePath 的存储。
+// filePath 为 "" 时只在内存中工作。
+//
+// 构造永不失败(返回的指针总是可用):
+//   - master key 就绪(HasMasterKey==true)且文件存在 → loadV2 填充 cache;
+//   - master key 缺失而文件存在 → 空 cache,打一行 warn,并把不可用原因
+//     记入 loadFailure —— 退出/重置策略由启动流程(spec §9)决定;
+//   - 文件不存在 → 空 cache,首次 Store 落盘。
+func NewSecretStorage(filePath string, ks Keystore) *SecretStorage {
+	s := &SecretStorage{
 		filePath: filePath,
+		ks:       ks,
 		secrets:  make(map[string][]byte),
 	}
-}
-
-// 主口令生命周期。
-
-// SetMasterPassword 设置（或替换）主口令。对已有存储调用时，会用新口令
-// 重新加密磁盘 blob。
-func (s *SecretStorage) SetMasterPassword(password []byte) error {
-	log.Info("SetMasterPassword: success")
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	zeroBytes(s.masterPassword)
-	s.masterPassword = append([]byte(nil), password...)
-	s.secrets = make(map[string][]byte)
-	s.failedAttempts = 0
-	s.lockedUntilUnix = 0
-	return s.persistLocked()
-}
-
-// Unlock 用 password 校验磁盘 blob（若存在）并填充内存 cache。
-// 失败尝试会触发锁定（见常量）。
-func (s *SecretStorage) Unlock(password []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	log.Info("Unlock: attempt", "failed_attempts", s.failedAttempts)
-
-	if s.lockedUntilUnix > time.Now().Unix() {
-		return fmt.Errorf("%w: locked until %d", ErrSecretLocked, s.lockedUntilUnix)
+	if filePath == "" {
+		return s // 纯内存模式:无盘可载。
+	}
+	if _, err := os.Stat(filePath); err != nil {
+		return s // 文件不存在(或不可 stat):按新装处理,Store 时再暴露读写错误。
 	}
 
-	if err := s.loadFromFileLocked(password); err != nil {
-		s.failedAttempts++
-		if s.failedAttempts >= MaxUnlockAttempts {
-			s.lockedUntilUnix = time.Now().Unix() + LockoutDurationSeconds
-		}
-		log.Error("Unlock: failed", "error", err.Error())
-		return err
+	has, hasErr := ks.HasMasterKey()
+	if hasErr != nil {
+		s.loadFailure = fmt.Errorf("%w: 查询 master key 状态失败: %v",
+			ErrKeystoreUnavailable, hasErr)
+		log.Warn("crypto: keystore key missing, secrets unusable", "error", hasErr.Error())
+		return s
+	}
+	if !has {
+		s.loadFailure = fmt.Errorf("%w: master key 不在托管中,既有 secret 不可读",
+			ErrKeystoreUnavailable)
+		// 不 fail 构造:让启动流程/迁移器(Task 8)决定退出还是重建。
+		log.Warn("crypto: keystore key missing, secrets unusable")
+		return s
 	}
 
-	s.failedAttempts = 0
-	s.lockedUntilUnix = 0
-
-	return nil
-}
-
-// HasMasterPassword 报告磁盘 blob 是否存在。不触碰内存状态。
-func (s *SecretStorage) HasMasterPassword() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.filePath == "" {
-		return false
+	if err := s.loadV2(); err != nil {
+		s.loadFailure = err
+		log.Warn("crypto: secret file load failed, existing secrets unusable",
+			"error", err.Error())
 	}
-	_, err := os.Stat(s.filePath)
-	return err == nil
+	return s
 }
 
-// IsLocked 报告存储当前是否锁定（未调用过 Unlock，或处于锁定期）。
-func (s *SecretStorage) IsLocked() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.masterPassword == nil
-}
+// Secret 操作。
 
-// Lock 丢弃主口令 + 解密后的 cache。磁盘 blob 不动 —— 下次 Unlock 会
-// 重新加载。
-func (s *SecretStorage) Lock() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	zeroBytes(s.masterPassword)
-	s.masterPassword = nil
-	// 清空 plaintext cache，避免解密后的 secret 留在内存里。
-	for k := range s.secrets {
-		zeroBytes(s.secrets[k])
-		delete(s.secrets, k)
-	}
-}
-
-// Secret 操作（要求处于解锁状态）。
-
-// Store 插入或替换一对 key/value。加密完成后明文字节会从内存中抹掉。
+// Store 插入或替换一对 key/value,随后原子落盘(纯内存模式跳过落盘)。
 func (s *SecretStorage) Store(key, value []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.requireUnlocked(); err != nil {
-		return err
-	}
-	stored := append([]byte(nil), value...)
-	s.secrets[string(key)] = stored
+	s.secrets[string(key)] = append([]byte(nil), value...)
 	return s.persistLocked()
 }
 
-// Retrieve 返回 key 对应的明文值。返回的是副本；调用方用完可自行擦除。
+// Retrieve 返回 key 对应的明文值。返回的是副本;调用方用完可自行擦除。
+// cache 未命中且构造时加载失败过 → 透出 loadFailure(不谎报 not-found)。
 func (s *SecretStorage) Retrieve(key []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.requireUnlocked(); err != nil {
-		return nil, err
+	if v, ok := s.secrets[string(key)]; ok {
+		return append([]byte(nil), v...), nil
 	}
-	v, ok := s.secrets[string(key)]
-	if !ok {
-		return nil, ErrSecretNotFound
+	if s.loadFailure != nil {
+		return nil, s.loadFailure
 	}
-	return append([]byte(nil), v...), nil
+	return nil, ErrSecretNotFound
 }
 
-// Delete 删除一个 key。删除不存在的 key 是 no-op。
+// Delete 删除一个 key。删除不存在的 key 是 no-op(仍然落盘,保持幂等语义)。
 func (s *SecretStorage) Delete(key []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.requireUnlocked(); err != nil {
-		return err
-	}
 	if v, ok := s.secrets[string(key)]; ok {
 		zeroBytes(v)
 		delete(s.secrets, string(key))
@@ -207,14 +175,11 @@ func (s *SecretStorage) Delete(key []byte) error {
 	return s.persistLocked()
 }
 
-// Clear 擦除所有 secret。适用于“重置凭据”流程。
+// Clear 擦除所有 secret。适用于"重置凭据"流程。
 func (s *SecretStorage) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.requireUnlocked(); err != nil {
-		return err
-	}
 	for k, v := range s.secrets {
 		zeroBytes(v)
 		delete(s.secrets, k)
@@ -222,40 +187,71 @@ func (s *SecretStorage) Clear() error {
 	return s.persistLocked()
 }
 
-// LockoutUntil 返回当前锁定结束的 unix 时间戳；未锁定时返回 0。
-func (s *SecretStorage) LockoutUntil() int64 {
+// Items 返回当前 cache 中的全部 key(按字典序升序),供迁移器与 settings
+// 反查 has_* 标记使用。cache 因加载失败为空时透出 loadFailure 而不是空
+// 列表。
+func (s *SecretStorage) Items() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.lockedUntilUnix
+
+	if len(s.secrets) == 0 && s.loadFailure != nil {
+		return nil, s.loadFailure
+	}
+	names := make([]string, 0, len(s.secrets))
+	for k := range s.secrets {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
-// 内部实现 —— 调用方必须持有 s.mu。
+// 内部实现。
 
-func (s *SecretStorage) requireUnlocked() error {
-	if s.masterPassword == nil {
-		return ErrSecretLocked
+// loadV2 读取磁盘 blob,Unseal + JSON 解析填充 s.secrets;任何一步失败
+// 都返回带哨兵错误的说明且保持 cache 为空(构造场景专用,无并发)。
+func (s *SecretStorage) loadV2() error {
+	data, err := os.ReadFile(s.filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // 与 Store 前被外部删除竞态:空 cache 即可。
+		}
+		return fmt.Errorf("%w: 读取 secret 文件失败: %v", ErrSecretIO, err)
 	}
-	if s.lockedUntilUnix > time.Now().Unix() {
-		return fmt.Errorf("%w: locked until %d", ErrSecretLocked, s.lockedUntilUnix)
+	if !bytes.HasPrefix(data, secretMagic) {
+		return fmt.Errorf("%w: 文件前缀不是 %q(未加密或 v1 遗留文件,需迁移)",
+			ErrSecretDecryptionFailed, secretMagic)
 	}
+
+	plaintext, err := s.ks.Unseal(data[len(secretMagic):])
+	if err != nil {
+		return fmt.Errorf("%w: keystore 解封失败: %v", ErrKeystoreUnavailable, err)
+	}
+	defer zeroBytes(plaintext)
+
+	decoded := make(map[string]string)
+	if err := json.Unmarshal(plaintext, &decoded); err != nil {
+		return fmt.Errorf("%w: 解封内容不是合法 JSON: %v", ErrSecretDecryptionFailed, err)
+	}
+	secrets := make(map[string][]byte, len(decoded))
+	for k, v := range decoded {
+		raw, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			return fmt.Errorf("%w: secret 值 base64 解码失败: %v", ErrSecretDecryptionFailed, err)
+		}
+		secrets[k] = raw
+	}
+	// 全部解析成功后才提升为活动 cache。
+	s.secrets = secrets
 	return nil
 }
 
-// persistLocked 把 s.secrets 序列化为 JSON，用 masterKey 通过
-// EncryptWithPassword 加密（直接把 masterKey 的字节当作 password 输入），
-// 再把带 magic 前缀的 blob 写盘。未配置 filePath 时是 no-op。
-//
-// 每次写入都重新派生一个新 salt，而不是持久化一个；salt 只是 PBKDF2
-// 需要，这样密码格式能与 DecryptWithPassword 保持一致。等价做法是直接用
-// masterKey 调 Encrypt/Decrypt，但绕道 EncryptWithPassword 意味着磁盘
-// blob 也能被 DecryptWithPassword 打开 —— 只要有人恢复了主口令就行，
-// 对手工恢复工具有用。
+// persistLocked 把 s.secrets 序列化为 JSON(map[string]base64,与 v1 同
+// 格式),经 ks.Seal 加密后以 magic || sealed 布局写盘:先写
+// filePath+".tmp"(0o600)再 os.Rename 原子替换。未配置 filePath 时是
+// no-op;Seal 失败透出 ErrKeystoreUnavailable。
 func (s *SecretStorage) persistLocked() error {
 	if s.filePath == "" {
 		return nil
-	}
-	if s.masterPassword == nil {
-		return ErrSecretLocked
 	}
 
 	encoded := make(map[string]string, len(s.secrets))
@@ -264,69 +260,32 @@ func (s *SecretStorage) persistLocked() error {
 	}
 	plaintext, err := json.Marshal(encoded)
 	if err != nil {
-		return fmt.Errorf("%w: marshal: %v", ErrSecretIO, err)
+		return fmt.Errorf("%w: JSON 序列化失败: %v", ErrSecretIO, err)
 	}
 	defer zeroBytes(plaintext)
 
-	sealed, err := EncryptWithPassword(plaintext, s.masterPassword)
+	sealed, err := s.ks.Seal(plaintext)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: keystore 密封失败: %v", ErrKeystoreUnavailable, err)
 	}
 
 	out := make([]byte, 0, len(secretMagic)+len(sealed))
 	out = append(out, secretMagic...)
 	out = append(out, sealed...)
 
-	if err := os.WriteFile(s.filePath, out, 0o600); err != nil {
-		return fmt.Errorf("%w: write: %v", ErrSecretIO, err)
+	tmpPath := s.filePath + ".tmp"
+	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
+		return fmt.Errorf("%w: 写入临时文件失败: %v", ErrSecretIO, err)
+	}
+	if err := os.Rename(tmpPath, s.filePath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("%w: 原子替换 secret 文件失败: %v", ErrSecretIO, err)
 	}
 	return nil
 }
 
-// loadFromFileLocked 读取磁盘 blob，从 password 派生密钥，填充 s.secrets。
-// 失败时保持内存状态不变。
-func (s *SecretStorage) loadFromFileLocked(password []byte) error {
-	if s.filePath == "" {
-		return ErrSecretNotFound
-	}
-	data, err := os.ReadFile(s.filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return ErrSecretNotFound
-		}
-		return fmt.Errorf("%w: read: %v", ErrSecretIO, err)
-	}
-	if !bytes.HasPrefix(data, secretMagic) {
-		return ErrSecretDecryptionFailed
-	}
-	sealed := data[len(secretMagic):]
-
-	plaintext, err := DecryptWithPassword(sealed, password)
-	if err != nil {
-		return err
-	}
-	defer zeroBytes(plaintext)
-
-	decoded := make(map[string]string)
-	if err := json.Unmarshal(plaintext, &decoded); err != nil {
-		return fmt.Errorf("%w: unmarshal: %v", ErrSecretDecryptionFailed, err)
-	}
-	secrets := make(map[string][]byte, len(decoded))
-	for k, v := range decoded {
-		raw, err := base64.StdEncoding.DecodeString(v)
-		if err != nil {
-			return fmt.Errorf("%w: base64: %v", ErrSecretDecryptionFailed, err)
-		}
-		secrets[k] = raw
-	}
-	// 全部解析成功后才提升为活动状态。
-	s.masterPassword = append([]byte(nil), password...)
-	s.secrets = secrets
-	return nil
-}
-
-// zeroBytes 就地擦除一个 byte slice。针对 heap dump 的尽力防御；
-// Go 的 GC 可能已复制过数据，所以这是卫生习惯，不是保证。
+// zeroBytes 就地擦除一个 byte slice。针对 heap dump 的尽力防御;
+// Go 的 GC 可能已复制过数据,所以这是卫生习惯,不是保证。
 func zeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0

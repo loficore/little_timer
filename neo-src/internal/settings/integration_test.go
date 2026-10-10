@@ -25,7 +25,8 @@ import (
 // 不参与下面的比较。BackupConfig 经由独立的 saveBackupConfigToDB 路径
 // 持久化，那条路径确实覆盖完整字段集。
 func TestSettings_FullRoundTrip(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "roundtrip.db")
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "roundtrip.db")
 
 	want := domain.SettingsConfig{
 		Basic: domain.SettingsBasic{
@@ -72,11 +73,15 @@ func TestSettings_FullRoundTrip(t *testing.T) {
 		HasMasterPassword: true,
 	}
 
+	var h *secretHarness
 	{
 		mgr, err := New(dbPath)
 		if err != nil {
 			t.Fatalf("New #1: %v", err)
 		}
+		// Task 4:凭据走 SecretStorage,Save 前必须接线。
+		h = newSecretHarness(t, dir)
+		mgr.SetSecretStore(h.store)
 		if err := mgr.UpdateBasic(BasicConfig{
 			Timezone:    want.Basic.Timezone,
 			Language:    want.Basic.Language,
@@ -100,12 +105,18 @@ func TestSettings_FullRoundTrip(t *testing.T) {
 		}
 	}
 
-	// 重开 + 读取。
+	// 重开 + 读取。构造时机上 SecretStorage 尚未接线(setter 注入在构造
+	// 之后),所以接回 store 后再 Load 一次,凭据才会回填进 BackupConfig
+	// —— 与生产启动序列(构造 → SetSecretStore → Load)一致。
 	mgr2, err := New(dbPath)
 	if err != nil {
 		t.Fatalf("New #2: %v", err)
 	}
 	defer mgr2.Close()
+	mgr2.SetSecretStore(h.reloadStore())
+	if err := mgr2.Load(); err != nil {
+		t.Fatalf("Load #2: %v", err)
+	}
 
 	got := mgr2.Config()
 	if got.Basic.Timezone != want.Basic.Timezone {

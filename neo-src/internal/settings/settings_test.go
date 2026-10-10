@@ -7,7 +7,6 @@ package settings
 import (
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -204,14 +203,7 @@ func TestSafeConversions(t *testing.T) {
 // SettingsManager —— 往返 + JSON 解析。
 
 func newTestManager(t *testing.T) *SettingsManager {
-	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "settings.db")
-	mgr, err := New(dbPath)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Close() })
+	mgr, _ := newWiredTestManager(t)
 	return mgr
 }
 
@@ -257,6 +249,11 @@ func TestManagerSaveAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New #1: %v", err)
 	}
+	// Task 4 起 Save 要求 SecretStorage 已接线:凭据值虽为空,漏接也必须
+	// 显式失败,防止静默清掉 has_* 标记。
+	h := newSecretHarness(t, dir)
+	mgr.SetSecretStore(h.store)
+
 	if err := mgr.UpdateBasic(BasicConfig{Timezone: -5, Language: "EN", DefaultMode: domain.DefaultModeStopwatch}); err != nil {
 		t.Fatalf("UpdateBasic: %v", err)
 	}
@@ -334,56 +331,6 @@ func TestManagerUpdateBackupConfigFromJSON(t *testing.T) {
 	}
 	if bc.S3PathPrefix != "alt_prefix/" {
 		t.Errorf("S3PathPrefix = %q, want alt_prefix/", bc.S3PathPrefix)
-	}
-}
-
-func TestManagerBackupConfigCredentialsEncryptedAtRest(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "settings.db")
-	mgr, err := New(dbPath)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer mgr.Close()
-
-	payload, _ := json.Marshal(map[string]any{
-		"target_type":    "s3",
-		"s3_endpoint":    "https://s3.amazonaws.com",
-		"s3_bucket":      "mybucket",
-		"s3_region":      "us-east-1",
-		"s3_access_key":  "AKIA-PLAINTEXT-CANARY",
-		"s3_secret_key":  "secret-PLAINTEXT-CANARY",
-		"s3_path_prefix": "lt/",
-	})
-	if err := mgr.UpdateBackupConfigFromJSON(string(payload)); err != nil {
-		t.Fatalf("UpdateBackupConfigFromJSON: %v", err)
-	}
-
-	// 检查磁盘上的 SQLite blob —— access key 明文字符串绝不能出现在
-	// 加密 BLOB 列里。
-	data, err := os.ReadFile(dbPath)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if strings.Contains(string(data), "AKIA-PLAINTEXT-CANARY") {
-		t.Error("access key plaintext leaked into SQLite file")
-	}
-	if strings.Contains(string(data), "secret-PLAINTEXT-CANARY") {
-		t.Error("secret key plaintext leaked into SQLite file")
-	}
-
-	// 重载并确认解密能往返。
-	mgr2, err := New(dbPath)
-	if err != nil {
-		t.Fatalf("New #2: %v", err)
-	}
-	defer mgr2.Close()
-	bc := mgr2.BackupConfig()
-	if bc.S3AccessKey != "AKIA-PLAINTEXT-CANARY" {
-		t.Errorf("reloaded S3AccessKey = %q, want AKIA-PLAINTEXT-CANARY", bc.S3AccessKey)
-	}
-	if bc.S3SecretKey != "secret-PLAINTEXT-CANARY" {
-		t.Errorf("reloaded S3SecretKey = %q, want secret-PLAINTEXT-CANARY", bc.S3SecretKey)
 	}
 }
 

@@ -28,14 +28,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"little-timer/internal/aigtd"
 	"little-timer/internal/cli"
@@ -45,6 +50,8 @@ import (
 	httpx "little-timer/internal/http"
 	httpapp "little-timer/internal/http/app"
 	"little-timer/internal/http/handlers"
+	"little-timer/internal/http/middleware"
+	"little-timer/internal/keystore"
 	"little-timer/internal/log"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
@@ -68,6 +75,31 @@ func main() {
 // 返回 error 而非调用 os.Exit，让 Cobra 的 Execute() 能格式化并上报错误
 // （与 CLI / settings 包其余部分使用的分层错误约定一致）。
 func runServer(opts *cli.ServeOptions) error {
+	// spec §9:打开 DB 之前完成 keystore fail-fast。SecretStorage 惰性构造、
+	// Settings 凭据分流、备份重建全都依赖托管 master key 就绪,晚检会让
+	// 半接线的 App 带病启动。
+	ks := keystore.Current()
+	switch err := bootstrapKeystore(ks, secretStorePath(opts.DBPath)); {
+	case err == nil:
+		// 正常模式:keystore 就绪,继续既有引导序列。
+	case errors.Is(err, errMigrationPending):
+		// 迁移等待模式:不碰 DB、不起 worker/cron,只暴露 credentials
+		// 端点的 501 占位(见 newMigrationWaitRouter 的 Task 9 面包屑)。
+		log.Warn("server: keystore 不可用且检测到 v1 凭据文件,进入迁移等待模式",
+			"error", err.Error())
+		fmt.Fprintln(os.Stderr,
+			"migration-wait mode: 检测到 v1 凭据文件但密钥服务不可用;"+
+				"修复/启动系统密钥服务后重启即可完成迁移,"+
+				"当前仅 /api/credentials/* 占位路由可用(501)。")
+		return runMigrationWaitServer(opts)
+	default:
+		// err 已带 §9 指引文案(linux 后端 unavailable() 内嵌,%w 透传),
+		// 由 Cobra Execute 打到 stderr,退出码非 0。日志只记错误文本,
+		// 绝不含任何密钥材料。
+		log.Error("server: keystore fail-fast", "error", err.Error())
+		return err
+	}
+
 	app, cleanup, err := bootstrapApp(opts.DBPath)
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
@@ -218,6 +250,136 @@ func (s appSettingsAdapter) LLMSettings() aigtd.LLMConfig {
 		log.Warn("LLMSettings: 读取 API Key 失败", "error", err.Error())
 	}
 	return cfg
+}
+
+// ---------------------------------------------------------------------------
+// spec §9 —— 启动期 keystore fail-fast 与迁移等待模式(Task 6)。
+// ---------------------------------------------------------------------------
+
+// errMigrationPending 是 bootstrapKeystore 的决策哨兵:密钥服务不可用且磁盘
+// 上存在 v1 主口令时代的 secret 文件 —— 数据仍可救回,main 不退出而是进入
+// "迁移等待"模式,由 Task 8 的迁移器 + Task 9 的 credentials/migrate 端点
+// 接管。错误链同时保留 keystore 侧原因(%w 双链)。
+var errMigrationPending = errors.New("server: 检测到 v1 凭据文件而密钥服务不可用,进入迁移等待模式")
+
+// legacySecretMagicV1 —— v1 主口令时代 secret 文件的 8 字节 magic(与
+// internal/crypto 磁盘格式文档及迁移器 Task 8 逐字一致;crypto 未导出该
+// 常量,cmd/server 侧只做前缀嗅探,不解码内容,故在此镜像而非 import 弱化
+// 封装)。v2 magic "LTMSEKv2" 是本程序自己的文件,不构成迁移等待理由。
+var legacySecretMagicV1 = []byte("LTMSECv1")
+
+// secretStorePath 与 httpapp 内部约定一致:secret blob 与 DB 同目录。
+// app 层的同名函数未导出,这里独立推导,避免跨包耦合私有符号。
+func secretStorePath(dbPath string) string {
+	return filepath.Join(filepath.Dir(dbPath), "secret.db")
+}
+
+// isV1SecretFile 报告给定路径文件是否以 v1 magic 开头。读不到、太短或前缀
+// 不符都返回 false —— "状态未知"按 fail-fast 处理:迁移等待只对确证的 v1
+// 遗留数据开放,绝不为垃圾文件保留半死不活的进程。
+func isV1SecretFile(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	head := make([]byte, len(legacySecretMagicV1))
+	if _, err := io.ReadFull(f, head); err != nil {
+		return false
+	}
+	return bytes.Equal(head, legacySecretMagicV1)
+}
+
+// bootstrapKeystore 是 spec §9 启动序列的纯决策函数(不打日志、不退出),
+// 便于表驱动单测:
+//   - Available() 通过 → EnsureMasterKey();失败同样 fail-fast(指引文案由
+//     后端错误自带,%w 透传,绝不重写)。
+//   - Available() 失败 + v1 文件存在 → errMigrationPending(迁移等待)。
+//   - Available() 失败 + 无 v1 文件 → 返回保留 ErrUnavailable 链与 §9 指引
+//     文案的错误(Review Focus #5:sway/headless 机器要看到可操作命令)。
+//   - ks == nil(平台实现未注册)按 ErrUnavailable fail-fast。
+//
+// 日志与模式分派留给调用方 runServer;错误文本只含原因,不含密钥材料。
+func bootstrapKeystore(ks keystore.Keystore, secretDBPath string) error {
+	if ks == nil {
+		return fmt.Errorf("%w: 平台 keystore 未注册(当前构建目标没有可用的密钥托管实现)",
+			keystore.ErrUnavailable)
+	}
+	if err := ks.Available(); err != nil {
+		if isV1SecretFile(secretDBPath) {
+			return fmt.Errorf("%w: %w", errMigrationPending, err)
+		}
+		return fmt.Errorf("keystore 不可用: %w", err)
+	}
+	if err := ks.EnsureMasterKey(); err != nil {
+		return fmt.Errorf("keystore 就绪但建立 master key 失败: %w", err)
+	}
+	return nil
+}
+
+// newMigrationWaitRouter 构造迁移等待模式的最小路由:只挂载三条
+// /api/credentials/* 端点(status/reset/migrate)的 501 占位。
+//
+// 面包屑(Task 6 → Task 9):Task 9 会把这些 stub 替换成真实 handler
+// (GET status 报 CredentialStatus、POST reset 重置凭据、POST migrate 输入
+// 最后一次主口令触发 Task 8 的迁移器)。在那之前本进程刻意不开 DB、不接
+// Auth/ConflictGuard 中间件 —— 密钥服务不可用时任何凭据读写都无法 Seal,
+// 统一 501 是最诚实的语义。
+func newMigrationWaitRouter(corsOrigin string) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(middleware.CORS(corsOrigin))
+	stub := func(c *gin.Context) {
+		c.JSON(http.StatusNotImplemented, gin.H{
+			"error": "迁移等待模式:系统密钥服务不可用,credentials 端点尚未启用",
+		})
+	}
+	g := r.Group("/api/credentials")
+	g.GET("/status", stub)
+	g.POST("/reset", stub)
+	g.POST("/migrate", stub)
+	return r
+}
+
+// runMigrationWaitServer 以迁移等待模式服务:HTTP 只暴露 501 占位路由,
+// 等待运维修复密钥服务后重启(迁移逻辑见 Task 8)。webview/cron/worker
+// 一概不启动。SIGINT/SIGTERM 走与正常模式相同的优雅关闭。
+func runMigrationWaitServer(opts *cli.ServeOptions) error {
+	srv := &http.Server{
+		Addr:              fmt.Sprintf(":%d", opts.Port),
+		Handler:           newMigrationWaitRouter(opts.CORSOrigin),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	serverErr := make(chan error, 1)
+	go func() {
+		fmt.Fprintf(os.Stdout,
+			"HTTP server listening on :%d (migration-wait mode, db=%s, cors-origin=%s)\n",
+			opts.Port, opts.DBPath, opts.CORSOrigin)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	var srvErr error
+	select {
+	case sig := <-sigCh:
+		fmt.Fprintf(os.Stdout, "\nreceived %s, shutting down...\n", sig)
+	case srvErr = <-serverErr:
+		fmt.Fprintf(os.Stderr, "HTTP server error: %v\n", srvErr)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "HTTP shutdown error: %v\n", err)
+	}
+	return srvErr
 }
 
 // bootstrapApp 接线 SQLite → Settings → Clock → Backup → App 链。

@@ -1,6 +1,6 @@
 # Little Timer
 
-Little Timer is a cross-platform timer application built with Go, Gin, SQLite, and WebView. It supports countdown, stopwatch, and world clock features. The frontend uses Preact, TypeScript, Vite, and Tailwind CSS.
+Little Timer is a cross-platform timer application built with Go, Gin, SQLite, and WebView. It supports countdown and stopwatch features. The frontend uses Preact, TypeScript, Vite, and Tailwind CSS.
 
 ## Features
 

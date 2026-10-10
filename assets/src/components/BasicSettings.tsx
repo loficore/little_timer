@@ -87,7 +87,6 @@ export const BasicSettings = ({ config, onChange, isAnimated = true, onWallpaper
   const modes = [
     { value: "countdown", label: t("settings.basic.mode_countdown") },
     { value: "stopwatch", label: t("settings.basic.mode_stopwatch") },
-    { value: "world_clock", label: t("settings.basic.mode_world_clock") },
   ];
 
   const themeOptions = [

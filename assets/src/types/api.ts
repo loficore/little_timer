@@ -82,8 +82,6 @@ export interface Settings {
   countdown?: CountdownDefaults;
   /** 正计时设置 */
   stopwatch?: StopwatchDefaults;
-  /** 世界时钟设置 */
-  world_clock?: object;
 }
 
 /**

@@ -12,7 +12,6 @@ vi.mock("../../utils/i18n", () => ({
       "settings.basic.lang_jp": "日本語",
       "settings.basic.mode_countdown": "Countdown",
       "settings.basic.mode_stopwatch": "Stopwatch",
-      "settings.basic.mode_world_clock": "World Clock",
       "settings.basic.theme_auto": "Auto",
       "settings.basic.theme_light": "Light",
       "settings.basic.theme_dark": "Dark",

@@ -5,7 +5,6 @@ import {
   ArrowPathIcon,
   Cog6ToothIcon,
   ClockIcon,
-  GlobeAltIcon,
   StarIcon,
   TrashIcon,
   PlusIcon,
@@ -13,6 +12,8 @@ import {
   XMarkIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   ArrowLeftIcon,
   ChartBarIcon,
   ArchiveBoxIcon,
@@ -49,10 +50,6 @@ export const TimerIconComponent: FunctionalComponent<{ className?: string }> = (
   <ClockIcon className={className} />
 );
 
-export const GlobeIcon: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
-  <GlobeAltIcon className={className} />
-);
-
 export const StarIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
   <StarIcon className={className} />
 );
@@ -79,6 +76,14 @@ export const ChevronDownIconComponent: FunctionalComponent<{ className?: string 
 
 export const ChevronUpIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
   <ChevronUpIcon className={className} />
+);
+
+export const ChevronLeftIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
+  <ChevronLeftIcon className={className} />
+);
+
+export const ChevronRightIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (
+  <ChevronRightIcon className={className} />
 );
 
 export const ArrowLeftIconComponent: FunctionalComponent<{ className?: string }> = ({ className = "w-5 h-5" }) => (

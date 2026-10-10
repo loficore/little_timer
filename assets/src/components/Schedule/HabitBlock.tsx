@@ -11,7 +11,7 @@ import { t } from "../../utils/i18n";
 export function HabitBlock() {
   return (
     <div
-      className="timeline-habit-block mt-2 flex h-8 items-center justify-center rounded border border-dashed border-base-content/30 bg-base-200/50 text-xs opacity-70"
+      className="timeline-habit-block mt-2 flex h-8 items-center justify-center rounded-lg border border-dashed border-base-content/30 bg-base-200/50 text-xs opacity-70"
       data-testid="habit-lane"
     >
       <span>{t("schedule.habit_placeholder")}</span>

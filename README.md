@@ -1,6 +1,6 @@
 # Little Timer
 
-Little Timer 是一个基于 Go、Gin、SQLite 和 WebView 开发的跨平台定时器应用，支持倒计时、正计时和世界时钟功能。前端使用 Preact、TypeScript、Vite 和 Tailwind CSS。
+Little Timer 是一个基于 Go、Gin、SQLite 和 WebView 开发的跨平台定时器应用，支持倒计时和正计时功能。前端使用 Preact、TypeScript、Vite 和 Tailwind CSS。
 
 ## 项目特点
 

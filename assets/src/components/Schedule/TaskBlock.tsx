@@ -87,7 +87,7 @@ export function TaskBlock({ task, windowStartMin, windowEndMin }: TaskBlockProps
 
   return (
     <div
-      className={`timeline-task-block priority-${priority} ${tint} ${priorityClasses} absolute top-1 bottom-1 rounded px-2 py-1 border text-xs overflow-hidden flex items-center gap-1`}
+      className={`timeline-task-block priority-${priority} ${tint} ${priorityClasses} absolute top-1 bottom-1 rounded-lg px-2 py-1 border text-xs overflow-hidden flex items-center gap-1`}
       data-task-id={task.id}
       data-testid={`task-block-${task.id}`}
       data-context={task.context_tag ?? ""}

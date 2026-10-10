@@ -30,7 +30,6 @@ reset = "Reset"
 switch_mode = "Switch mode"
 mode_countdown = "Countdown"
 mode_stopwatch = "Stopwatch"
-mode_world_clock = "World clock"
 rest_status = "Resting... {seconds} sec remaining"
 loop_status = "Round {remaining}/{total}"
 finished_notification = "⏰ Timer complete!"
@@ -228,7 +227,6 @@ reconnecting = "Reconnecting..."
 basic = "Basic Settings"
 countdown = "Countdown"
 stopwatch = "Stopwatch"
-world_clock = "World Clock"
 presets = "Presets"
 backup = "Backup"
 
@@ -242,7 +240,6 @@ lang_en = "English"
 lang_jp = "日本語"
 mode_countdown = "Countdown"
 mode_stopwatch = "Stopwatch"
-mode_world_clock = "World clock"
 theme_auto = "Auto"
 theme_light = "Light"
 theme_dark = "Dark"
@@ -282,10 +279,6 @@ loop_interval_hint = "Rest time between loops"
 [settings.stopwatch]
 max_hours = "Max duration (hours)"
 max_hours_hint = "{hours} hours"
-
-[settings.world_clock]
-timezone = "World clock timezone"
-desc = "Shows current time in the selected timezone; other modes are not affected."
 
 [settings.presets]
 title = "Saved presets"
@@ -390,7 +383,7 @@ parse_failed_retry = "Click to reparse"
 task_count = "{count} tasks"
 
 [llm_settings]
-title = "AI / LLM"
+title = "AI"
 provider = "Provider"
 provider_openai_compat = "OpenAI compatible"
 provider_anthropic = "Anthropic"

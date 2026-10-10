@@ -203,7 +203,7 @@ const settingsTableSQL = `CREATE TABLE IF NOT EXISTS settings (
  id INTEGER PRIMARY KEY CHECK (id = 1),
  timezone INTEGER NOT NULL CHECK(timezone >= -12 AND timezone <= 14),
  language TEXT NOT NULL CHECK(length(language) >= 1 AND length(language) <= 10),
- default_mode TEXT NOT NULL CHECK(default_mode IN ('countdown', 'stopwatch', 'world_clock')),
+ default_mode TEXT NOT NULL CHECK(default_mode IN ('countdown', 'stopwatch')),
  theme_mode TEXT NOT NULL CHECK(length(theme_mode) <= 20),
  wallpaper TEXT DEFAULT '',
  duration_seconds INTEGER NOT NULL CHECK(duration_seconds >= 1 AND duration_seconds <= 86400),

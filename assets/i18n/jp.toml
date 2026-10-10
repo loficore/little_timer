@@ -30,7 +30,6 @@ reset = "リセット"
 switch_mode = "モード切替"
 mode_countdown = "カウントダウン"
 mode_stopwatch = "ストップウォッチ"
-mode_world_clock = "ワールドクロック"
 rest_status = "休憩中... 残り {seconds} 秒"
 loop_status = "ラウンド {remaining}/{total}"
 finished_notification = "⏰ 計時完了！"
@@ -216,7 +215,6 @@ unbound_note = "参照は自動的に解除されます。"
 basic = "基本設定"
 countdown = "カウントダウン"
 stopwatch = "ストップウォッチ"
-world_clock = "世界時計"
 presets = "プリセット"
 backup = "バックアップ"
 
@@ -230,7 +228,6 @@ lang_en = "English"
 lang_jp = "日本語"
 mode_countdown = "カウントダウン"
 mode_stopwatch = "ストップウォッチ"
-mode_world_clock = "ワールドクロック"
 theme_auto = "自動"
 theme_light = "ライト"
 theme_dark = "ダーク"
@@ -270,10 +267,6 @@ loop_interval_hint = "各ループ間の休憩時間"
 [settings.stopwatch]
 max_hours = "最大時間（時間）"
 max_hours_hint = "{hours} 時間"
-
-[settings.world_clock]
-timezone = "ワールドクロックのタイムゾーン"
-desc = "選択したタイムゾーンの現在時刻を表示します。他のモードには影響しません。"
 
 [settings.presets]
 title = "保存済みプリセット"
@@ -391,7 +384,7 @@ parse_failed_retry = "クリックで再解析"
 task_count = "{count} 件のタスク"
 
 [llm_settings]
-title = "AI / LLM"
+title = "AI"
 provider = "プロバイダー"
 provider_openai_compat = "OpenAI 互換"
 provider_anthropic = "Anthropic"

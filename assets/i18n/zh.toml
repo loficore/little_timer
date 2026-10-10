@@ -127,7 +127,6 @@ reset = "重置"
 switch_mode = "切换模式"
 mode_countdown = "倒计时"
 mode_stopwatch = "正计时"
-mode_world_clock = "时钟"
 rest_status = "休息中... 剩余 {seconds} 秒"
 loop_status = "第 {remaining}/{total} 轮"
 finished_notification = "⏰ 计时完成！"
@@ -228,7 +227,6 @@ delete_habit_confirm = "确定要删除\"{name}\"吗？"
 basic = "基本设置"
 countdown = "倒计时"
 stopwatch = "正计时"
-world_clock = "世界时钟"
 presets = "预设"
 backup = "备份"
 
@@ -242,7 +240,6 @@ lang_en = "English"
 lang_jp = "日本語"
 mode_countdown = "倒计时模式"
 mode_stopwatch = "正计时模式"
-mode_world_clock = "世界时钟模式"
 theme_auto = "自动（跟随系统）"
 theme_light = "浅色"
 theme_dark = "深色"
@@ -282,10 +279,6 @@ loop_interval_hint = "每轮之间的休息时间"
 [settings.stopwatch]
 max_hours = "最大时长（小时）"
 max_hours_hint = "{hours} 小时"
-
-[settings.world_clock]
-timezone = "世界时钟时区"
-desc = "世界时钟模式会根据所选时区显示当前时间；其他模式不受影响。"
 
 [settings.presets]
 title = "已保存的预设"
@@ -390,7 +383,7 @@ parse_failed_retry = "点击重新解析"
 task_count = "{count} 个任务"
 
 [llm_settings]
-title = "AI / LLM"
+title = "AI"
 provider = "提供商"
 provider_openai_compat = "OpenAI 兼容"
 provider_anthropic = "Anthropic"

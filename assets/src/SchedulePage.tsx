@@ -17,6 +17,7 @@ import { useMemo, useState } from "preact/hooks";
 import { Timeline } from "./components/Schedule/Timeline";
 import type { TimelineTask } from "./components/Schedule/types";
 import { ScoreEditPanel } from "./components/settings/ScoreEditPanel";
+import { ChevronLeftIconComponent, ChevronRightIconComponent } from "./utils/icons";
 import { useScheduler } from "./hooks/useScheduler";
 import { t } from "./utils/i18n";
 
@@ -73,12 +74,12 @@ export function SchedulePage() {
       <div className="flex flex-wrap items-center gap-2" data-testid="schedule-toolbar">
         <button
           type="button"
-          className="btn btn-sm btn-ghost"
+          className="btn btn-ghost btn-square"
           data-testid="prev-day"
           aria-label={t("schedule.prev_day")}
           onClick={() => setDate((d) => shiftDate(d, -1))}
         >
-          ‹
+          <ChevronLeftIconComponent className="h-6 w-6" />
         </button>
         <input
           type="date"
@@ -89,12 +90,12 @@ export function SchedulePage() {
         />
         <button
           type="button"
-          className="btn btn-sm btn-ghost"
+          className="btn btn-ghost btn-square"
           data-testid="next-day"
           aria-label={t("schedule.next_day")}
           onClick={() => setDate((d) => shiftDate(d, 1))}
         >
-          ›
+          <ChevronRightIconComponent className="h-6 w-6" />
         </button>
         <button
           type="button"
@@ -150,7 +151,7 @@ export function SchedulePage() {
         <Timeline tasks={timelineTasks} />
 
         <section
-          className="rounded border border-base-300 bg-base-100 p-3"
+          className="rounded-lg border border-base-300 bg-base-100 p-3"
           data-testid="schedule-tasks"
         >
           <h2 className="mb-2 font-semibold">{t("schedule.tasks")}</h2>

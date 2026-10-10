@@ -44,7 +44,7 @@ export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23 }: TimelineP
 
   return (
     <div
-      className="schedule-timeline relative w-full rounded border border-base-300 bg-base-100 p-3"
+      className="schedule-timeline relative w-full rounded-lg border border-base-300 bg-base-100 px-8 py-3"
       data-testid="timeline"
     >
       {/* 小时轴 */}
@@ -62,7 +62,7 @@ export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23 }: TimelineP
 
       {/* Task 轨 */}
       <div
-        className="timeline-track relative h-16 rounded bg-base-200/40"
+        className="timeline-track relative h-16 rounded-lg bg-base-200/40"
         data-testid="timeline-track"
       >
         {/* 网格线 */}

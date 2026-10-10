@@ -140,8 +140,6 @@
 
   html {
     background: linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 50%, #0d0d0d 100%);
-    background-size: 140% 140%;
-    animation: ambientFlowDark 9s ease-in-out infinite;
     background-attachment: fixed;
     color: var(--text-primary);
     transition: background-color 0.3s, color 0.3s;
@@ -177,7 +175,6 @@
       radial-gradient(42% 38% at 18% 22%, rgba(74, 158, 255, 0.18) 0%, rgba(74, 158, 255, 0.02) 70%),
       radial-gradient(35% 32% at 80% 76%, rgba(255, 179, 71, 0.14) 0%, rgba(255, 179, 71, 0.02) 72%);
     background-color: rgba(10, 12, 18, 0.18);
-    animation: ambientPulse 7.5s ease-in-out infinite;
   }
 
   html.light-mode body::before {
@@ -299,11 +296,6 @@
   html.light-mode .text-secondary {
     color: color-mix(in oklab, var(--my-on-surface-variant) 90%, var(--my-on-surface) 10%) !important;
   }
-}
-
-@keyframes ambientFlowDark {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
 }
 
 @keyframes ambientPulse {

@@ -105,3 +105,37 @@ func TestSystemPrompt_MentionsScoring(t *testing.T) {
 		t.Errorf("system prompt 应指明 energy_required 范围 1-3")
 	}
 }
+
+// TestRefineReviewPrompt_IncludesAllInputs 验证 RefineReviewPrompt 把
+// currentDate / task 摘要 / 原始 proposal / chip_hint / user_message /
+// priorRefined 全部喂进 prompt,LLM 拿得到精化所需的所有上下文。
+func TestRefineReviewPrompt_IncludesAllInputs(t *testing.T) {
+	ts := TaskSummary{
+		ID: 42, Title: "周报", Status: "active",
+		SubtaskTitles:   []string{"草稿", "送审"},
+		SubtaskStatuses: []string{"active", "done"},
+	}
+	end := int64(1735689600)
+	prop := domain.ReviewProposal{
+		ChangeID: "prop-1", TaskID: 42, Action: "reschedule",
+		SuggestedEnd: &end, Reason: "AI 原建议",
+	}
+	prior := []string{"prev-1", "prev-2"}
+	out := RefineReviewPrompt("2026-10-15", ts, prop, "改期", "推迟到下周五", prior)
+
+	for _, kw := range []string{
+		"2026-10-15", // currentDate
+		"周报",         // task title
+		"草稿", "送审",   // subtask titles
+		"prop-1",                                         // original change_id
+		"改期",                                             // chip_hint
+		"推迟到下周五",                                         // user_message
+		"reschedule", "drop", "modify_subtasks", "no_op", // action 枚举
+		"delete", "modify_title", "add", "mark_done", // op 枚举
+		"prev-1", "prev-2", // priorRefined
+	} {
+		if !strings.Contains(out, kw) {
+			t.Errorf("RefineReviewPrompt 缺 %q\n--- 输出 ---\n%s", kw, out)
+		}
+	}
+}

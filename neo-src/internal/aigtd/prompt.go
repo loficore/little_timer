@@ -1,6 +1,7 @@
 package aigtd
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -148,4 +149,117 @@ func BuildUserPrompt(rawText string, existing []SubtaskHint, mode domain.AIJobMo
 	}
 	b.WriteString("这些子任务已经存在,请不要在新输出中重复它们,也不要修改或删除;只输出尚未覆盖的新增子任务。")
 	return b.String()
+}
+
+// refineReviewPromptTemplate 是 review_refine 模式的提示词模板。worker 把
+// 这段走 UserPrompt 字段;SystemPrompt 留空(system 段已在模板里)。
+//
+// 规则要点(参 review 模板 + 精化语义):
+//   - chip_hint 可空("" = 零 chip 模式,LLM 自行从 NL 抽意图)
+//   - 用户输入优先于 chip:NL 与 chip 矛盾时以 NL 为准
+//   - 输出仍是 ReviewProposal schema,action ∈ {reschedule, drop, modify_subtasks, no_op}
+//   - change_id 必须全局唯一,且不与 priorRefined 重复
+//   - 实在无法理解 → action="no_op", reason="无法理解用户意图"
+const refineReviewPromptTemplate = `你是 GTD 智能助理(Weekly Review 精化模式)。当前日期 %s。
+
+任务:用户对一条 review 提议不满意,点了「%s」chip 并补充了自然语言。你需要把用户意图翻译回一条新的 ReviewProposal(JSON)。
+
+## 原始 task
+- id: %d
+- title: %s
+- status: %s
+- 子任务: %s
+
+## 原始 proposal
+%s
+
+## 用户输入
+- chip: %s
+- 自然语言: %s
+
+## 本会话已采纳过的精化(避免重复 change_id)
+%s
+
+## 规则
+- action ∈ {reschedule, drop, modify_subtasks, no_op}
+- suggested_subtask_changes[].op ∈ {delete, modify_title, add, mark_done}
+- mark_done 只针对 status='active' 的子任务
+- delete / modify_title 也只针对 active 子任务
+- status='done' 或 'archived' 的子任务不要提议任何改动
+- change_id 必须全局唯一(优先 UUID v4),且不与本会话已采纳过的精化重复
+- 用户输入优先于 chip:NL 与 chip 矛盾时以 NL 为准
+- 实在无法理解 → action="no_op", reason="无法理解用户意图"
+
+输出契约(严格 JSON,不要附加任何解释 / markdown 代码块 / 前后缀文字):
+{
+  "change_id": "...",
+  "task_id": %d,
+  "action": "reschedule|drop|modify_subtasks|no_op",
+  "suggested_scheduled_start": <unix>, "suggested_scheduled_end": <unix>,
+  "suggested_subtask_changes": [
+    {"subtask_id": M, "op": "delete|modify_title|mark_done", "new_title": "...", "reason": "..."},
+    {"op": "add", "new_title": "...", "reason": "..."}
+  ],
+  "reason": "..."
+}
+`
+
+// RefineReviewPrompt 拼装 review_refine 模式提示词。
+//   - currentDate: 本地 YYYY-MM-DD
+//   - task: 被精化其 proposal 的 task 摘要
+//   - originalProposal: 原始 ReviewProposal(已经过 LLM 解析)
+//   - chipHint: 用户点的 chip 名("改期"/"拆分"/"重写"/"完成"/"放弃");"" = 零 chip 模式
+//   - userMessage: 用户自然语言原文
+//   - priorRefined: 本会话已采纳过的精化 change_id 列表(去重用)
+//
+// 返回:整段提示词(可作 UserPrompt 字段,SystemPrompt 留空)。
+func RefineReviewPrompt(
+	currentDate string,
+	task TaskSummary,
+	originalProposal domain.ReviewProposal,
+	chipHint string,
+	userMessage string,
+	priorRefined []string,
+) string {
+	var subs strings.Builder
+	for j, st := range task.SubtaskTitles {
+		status := ""
+		if j < len(task.SubtaskStatuses) {
+			status = task.SubtaskStatuses[j]
+		}
+		fmt.Fprintf(&subs, "\n  - %q [%s]", st, status)
+	}
+	subsStr := subs.String()
+	if subsStr == "" {
+		subsStr = "(无)"
+	}
+
+	origJSON, _ := json.Marshal(originalProposal)
+
+	prior := strings.Join(priorRefined, ", ")
+	if prior == "" {
+		prior = "(无)"
+	}
+	chip := chipHint
+	if chip == "" {
+		chip = "(无 chip 提示,纯自然语言模式)"
+	}
+	userMsg := userMessage
+	if userMsg == "" {
+		userMsg = "(无)"
+	}
+
+	return fmt.Sprintf(refineReviewPromptTemplate,
+		currentDate,
+		chip, // 任务段 chip
+		task.ID,
+		task.Title,
+		task.Status,
+		subsStr,
+		string(origJSON),
+		chip,    // 用户输入段 chip
+		userMsg, // 用户输入段 user_message
+		prior,   // 避免重复段
+		task.ID, // 输出契约 task_id
+	)
 }

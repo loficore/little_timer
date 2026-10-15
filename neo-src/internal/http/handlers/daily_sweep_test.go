@@ -4,6 +4,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ func setupDailySweepRouter(t *testing.T, a *app.App) *gin.Engine {
 	r.GET("/api/daily-sweep/today", DailySweepToday)
 	r.POST("/api/daily-sweep/adopt", DailySweepAdopt)
 	r.POST("/api/daily-sweep/reject", DailySweepReject)
+	r.POST("/api/daily-sweep/refine", DailySweepRefine)
 	return r
 }
 
@@ -381,6 +383,152 @@ func TestAdopt_SkipSubtaskFromOtherTask(t *testing.T) {
 // adopt 成功 → 重复 adopt 幂等 → 换一个 change 走 mark_done → 子任务变 done。
 //
 // 覆盖:Tasks 5 + 6 + 2 (幂等 + 写 adoptions + bump + mark_done) 的链式契约。
+// ---- refine 通道(issue #32 task 6) ----
+
+// seedReviewSuccess 在 ai_jobs 插一条 status=success mode=review 行,response_payload
+// 是给定的 proposals 包装,供 refine handler 验证 + worker 查找原始 proposal 用。
+func seedReviewSuccess(t *testing.T, a *app.App, taskID, jobID int64, proposals []domain.ReviewProposal) {
+	t.Helper()
+	wrap := struct {
+		Proposals []domain.ReviewProposal `json:"proposals"`
+	}{Proposals: proposals}
+	payload, _ := json.Marshal(wrap)
+	if _, err := a.SQLite.DB().Exec(
+		`UPDATE ai_jobs SET status='success', response_payload=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`,
+		string(payload), jobID,
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDailySweepRefine_NLPATH(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	c := a.SQLite.AITasks()
+	taskID, _ := c.CreateTask("待办", "manual")
+	reviewJobID, _ := c.EnqueueJob(taskID, "p", "m", `{}`, domain.AIJobModeReview)
+	seedReviewSuccess(t, a, taskID, reviewJobID, []domain.ReviewProposal{{
+		ChangeID: "orig-1", TaskID: taskID, Action: "reschedule",
+	}})
+
+	body := map[string]any{
+		"ai_job_id":          reviewJobID,
+		"original_change_id": "orig-1",
+		"chip_hint":          "改期",
+		"user_message":       "推迟到下周五",
+	}
+	w := doJSON(t, r, "POST", "/api/daily-sweep/refine", body)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("code=%d body=%s, want 202", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["mode"] != "refine" {
+		t.Errorf("mode=%v, want refine", resp["mode"])
+	}
+	if _, ok := resp["job_id"].(float64); !ok {
+		t.Errorf("missing/typed job_id: %v", resp["job_id"])
+	}
+
+	// 断言:ai_jobs 新行 mode=review_refine
+	j, err := c.LatestJobForTask(taskID)
+	if err != nil || j == nil {
+		t.Fatal(err)
+	}
+	if j.Mode != domain.AIJobModeReviewRefine {
+		t.Errorf("latest job mode=%s, want review_refine", j.Mode)
+	}
+	if j.Status != domain.AIJobStatusQueued {
+		t.Errorf("latest job status=%s, want queued", j.Status)
+	}
+}
+
+func TestDailySweepRefine_RewriteRoutedToReparse(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	c := a.SQLite.AITasks()
+	taskID, _ := c.CreateTask("待办", "manual")
+	reviewJobID, _ := c.EnqueueJob(taskID, "p", "m", `{}`, domain.AIJobModeReview)
+	seedReviewSuccess(t, a, taskID, reviewJobID, []domain.ReviewProposal{{
+		ChangeID: "orig-1", TaskID: taskID, Action: "no_op",
+	}})
+
+	body := map[string]any{
+		"ai_job_id":          reviewJobID,
+		"original_change_id": "orig-1",
+		"chip_hint":          "重写",
+		"user_message":       "重新拆解一下",
+	}
+	ver := mustVersion(t, a, taskID)
+	w := doJSONVersion(t, r, "POST", "/api/daily-sweep/refine", body, strconv.FormatInt(ver, 10))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("code=%d body=%s, want 202", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["mode"] != "rewrite" {
+		t.Errorf("mode=%v, want rewrite", resp["mode"])
+	}
+	if _, ok := resp["reparse_job_id"].(float64); !ok {
+		t.Errorf("missing/typed reparse_job_id: %v", resp["reparse_job_id"])
+	}
+
+	// 断言:没有 review_refine 行,但有 replace 行被入队
+	j, err := c.LatestJobForTask(taskID)
+	if err != nil || j == nil {
+		t.Fatal(err)
+	}
+	if j.Mode != domain.AIJobModeReplace {
+		t.Errorf("latest job mode=%s, want replace(rewrite 不入 review_refine)", j.Mode)
+	}
+}
+
+func TestDailySweepRefine_BadChipHint_400(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	c := a.SQLite.AITasks()
+	taskID, _ := c.CreateTask("待办", "manual")
+	reviewJobID, _ := c.EnqueueJob(taskID, "p", "m", `{}`, domain.AIJobModeReview)
+	seedReviewSuccess(t, a, taskID, reviewJobID, nil)
+
+	body := map[string]any{
+		"ai_job_id":          reviewJobID,
+		"original_change_id": "orig-1",
+		"chip_hint":          "不存在的 chip",
+		"user_message":       "x",
+	}
+	w := doJSON(t, r, "POST", "/api/daily-sweep/refine", body)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("code=%d body=%s, want 400", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "refine.bad_chip") {
+		t.Errorf("body 缺 refine.bad_chip: %s", w.Body.String())
+	}
+}
+
+func TestDailySweepRefine_EmptyMessage_400(t *testing.T) {
+	a := newTestApp(t)
+	r := setupDailySweepRouter(t, a)
+	c := a.SQLite.AITasks()
+	taskID, _ := c.CreateTask("待办", "manual")
+	reviewJobID, _ := c.EnqueueJob(taskID, "p", "m", `{}`, domain.AIJobModeReview)
+	seedReviewSuccess(t, a, taskID, reviewJobID, nil)
+
+	body := map[string]any{
+		"ai_job_id":          reviewJobID,
+		"original_change_id": "orig-1",
+		"chip_hint":          "改期",
+		"user_message":       "   ",
+	}
+	w := doJSON(t, r, "POST", "/api/daily-sweep/refine", body)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("code=%d body=%s, want 400", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "refine.empty_message") {
+		t.Errorf("body 缺 refine.empty_message: %s", w.Body.String())
+	}
+}
+
 func TestDailySweep_FullFlow(t *testing.T) {
 	a := newTestApp(t)
 	r := setupDailySweepRouter(t, a)

@@ -82,6 +82,7 @@ func registerDailySweep(g *gin.RouterGroup) {
 	g.GET("/daily-sweep/today", handlers.DailySweepToday)
 	g.POST("/daily-sweep/adopt", handlers.DailySweepAdopt)
 	g.POST("/daily-sweep/reject", handlers.DailySweepReject)
+	g.POST("/daily-sweep/refine", handlers.DailySweepRefine)
 }
 
 // GET /（SPA 兜底页）。

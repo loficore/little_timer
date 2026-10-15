@@ -11,6 +11,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -21,31 +22,57 @@ import (
 	"little-timer/internal/aigtd"
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/http/middleware"
 	"little-timer/internal/storage"
 )
 
 // adoptRequest 是 POST /api/daily-sweep/adopt 的入参。
 type adoptRequest struct {
-	ChangeID string                 `json:"change_id"`
-	AIJobID  int64                  `json:"ai_job_id"`
-	Version  int64                  `json:"version"`
-	Proposal domain.ReviewProposal  `json:"proposal"`
+	ChangeID string                `json:"change_id"`
+	AIJobID  int64                 `json:"ai_job_id"`
+	Version  int64                 `json:"version"`
+	Proposal domain.ReviewProposal `json:"proposal"`
+}
+
+// validRefineChipHints 是 refine chip_hint 的白名单(空 = 零 chip 模式)。
+// 与 plan §5.2 5 chip 对齐。chip_hint=重写 走 reparse 直通,不入 refine 队列。
+var validRefineChipHints = map[string]bool{
+	"":   true,
+	"改期": true,
+	"拆分": true,
+	"重写": true,
+	"完成": true,
+	"放弃": true,
+}
+
+// refineRequest 是 POST /api/daily-sweep/refine 的入参。
+//
+//   - AIJobID 必填,定位原始 review job(必须 mode='review' status='success')
+//   - OriginalChangeID 必填,在原始 review job 的 response_payload 里找
+//     change_id 对应的原始 proposal
+//   - ChipHint 可空("" = 零 chip 模式,LLM 自行从 UserMessage 抽意图)
+//   - UserMessage 必填,用户自然语言原文(≤ 2000 rune,同 aigtd 限制)
+type refineRequest struct {
+	AIJobID          int64  `json:"ai_job_id"`
+	OriginalChangeID string `json:"original_change_id"`
+	ChipHint         string `json:"chip_hint,omitempty"`
+	UserMessage      string `json:"user_message"`
 }
 
 // DailySweepAdopt POST /api/daily-sweep/adopt
 //
 // 流程(Δ2 + Δ3 + Δ5.4):
-//   0. bind body; proposal.TaskID != 0 且 Action ∈ validActions,否则 400;
-//   1. 幂等前置命中 — FindAdoption(aiJobID, changeID) → 200 {idempotent:true} 不重复改;
-//   2. 开 tx;defer rollback;
-//   3. 版本闸门(恰好一次):
-//        reschedule/drop → UpdateTaskTx(tx, ..., body.Version)(自带 CAS + bump);
-//        modify_subtasks → applySubChangesTx + BumpTaskVersionTx;
-//        no_op → BumpTaskVersionTx(只闸门 + bump);
-//   4. RecordAdoptionTx(…version_after=body.Version+1);
-//   5. commit → 200 {task_id, version_after};ErrVersionConflict → 409;
-//      RecordAdoptionTx 命中 UNIQUE(idx_adoptions_idempotent) 并发兜底
-//      → 重查 FindAdoption 返 200 idempotent。
+//  0. bind body; proposal.TaskID != 0 且 Action ∈ validActions,否则 400;
+//  1. 幂等前置命中 — FindAdoption(aiJobID, changeID) → 200 {idempotent:true} 不重复改;
+//  2. 开 tx;defer rollback;
+//  3. 版本闸门(恰好一次):
+//     reschedule/drop → UpdateTaskTx(tx, ..., body.Version)(自带 CAS + bump);
+//     modify_subtasks → applySubChangesTx + BumpTaskVersionTx;
+//     no_op → BumpTaskVersionTx(只闸门 + bump);
+//  4. RecordAdoptionTx(…version_after=body.Version+1);
+//  5. commit → 200 {task_id, version_after};ErrVersionConflict → 409;
+//     RecordAdoptionTx 命中 UNIQUE(idx_adoptions_idempotent) 并发兜底
+//     → 重查 FindAdoption 返 200 idempotent。
 //
 // 重要:不双 bump。reschedule/drop 走 UpdateTaskTx 已 bump 版本,不能再调
 // BumpTaskVersionTx,否则 version_after = +2 破坏后续 adopt 的 409 语义。
@@ -409,4 +436,125 @@ func DailySweepToday(c *gin.Context) {
 		resp["source"] = log.Source
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// DailySweepRefine POST /api/daily-sweep/refine —— 把用户对某条 review 提议的
+// 自然语言精化意图入队,worker 翻译回新 ReviewProposal。
+//
+// 入参(refineRequest):
+//   - ai_job_id:        原始 review ai_job 的 id(必须 mode='review' status='success')
+//   - original_change_id: 在该 review job 的 response_payload 中要精化的 proposal 的 change_id
+//   - chip_hint:        5 chip 之一或空(""=纯 NL 模式)
+//   - user_message:     用户自然语言原文
+//
+// 返 202:
+//   - chip_hint="重写": { reparse_job_id, mode: "rewrite" } — 不调 LLM,
+//     内部调 AIGtdReparse 的存储层 EnqueueReparse(mode=replace),前端订阅 reparse
+//   - 其他:           { job_id, mode: "refine" }   — 入队 mode=review_refine,
+//     worker 调 LLM 翻译为新 ReviewProposal 写 ai_jobs.response_payload
+//
+// 错误:
+//   - 400 bad_request / bad_chip / empty_message / too_long / unknown_ai_job / not_review
+//   - 409 task 正在被另一端处理(同 reparse 行为)
+//   - 500 DB / 入队错误
+func DailySweepRefine(c *gin.Context) {
+	a := appFromCtx(c)
+	var body refineRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false, "code": "refine.bad_request", "error": "invalid json",
+		})
+		return
+	}
+	if !validRefineChipHints[body.ChipHint] {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false, "code": "refine.bad_chip",
+			"error": "chip_hint must be one of: 改期 / 拆分 / 重写 / 完成 / 放弃 (or empty)",
+		})
+		return
+	}
+	userMsg := strings.TrimSpace(body.UserMessage)
+	if userMsg == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false, "code": "refine.empty_message", "error": "user_message is empty",
+		})
+		return
+	}
+	if len([]rune(userMsg)) > maxRawTextLen {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false, "code": "refine.too_long", "error": "user_message too long (>2000 rune)",
+		})
+		return
+	}
+
+	// 验证原始 review job:必须存在 + mode='review' + status='success'。
+	origJob, err := a.SQLite.AITasks().GetJobByID(body.AIJobID)
+	if err != nil || origJob == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false, "code": "refine.unknown_ai_job", "error": "unknown ai_job_id",
+		})
+		return
+	}
+	if origJob.Mode != domain.AIJobModeReview || origJob.Status != domain.AIJobStatusSuccess {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false, "code": "refine.not_review",
+			"error": "ai_job must be a successful review",
+		})
+		return
+	}
+
+	// rewrite chip:不调 LLM,直接入队 reparse(mode=replace)
+	if body.ChipHint == "重写" {
+		cfg := aiConfigFromApp(a)
+		version := middleware.GetVersion(c)
+		jobID, err := a.SQLite.AITasks().EnqueueReparse(
+			origJob.TaskID, nil, version, cfg.Provider, cfg.Model, domain.AIJobModeReplace,
+		)
+		if err != nil {
+			if errors.Is(err, storage.ErrJobInFlight) || errors.Is(err, storage.ErrVersionConflict) {
+				c.JSON(http.StatusConflict, gin.H{
+					"success": false, "code": "refine.processing",
+					"error": "task is being processed",
+				})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false, "error": "reparse enqueue failed",
+			})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"reparse_job_id": jobID, "mode": "rewrite",
+		})
+		return
+	}
+
+	// 其他 chip + 零 chip 模式:入队 review_refine,worker 调 LLM。
+	reqPayload, _ := json.Marshal(domain.RefineJobRequestPayload{
+		Kind:             "review_refine",
+		OriginalAIJobID:  origJob.ID,
+		OriginalChangeID: body.OriginalChangeID,
+		ChipHint:         body.ChipHint,
+		UserMessage:      userMsg,
+	})
+	cfg := aiConfigFromApp(a)
+	jobID, err := a.SQLite.AITasks().EnqueueJob(
+		origJob.TaskID, cfg.Provider, cfg.Model, string(reqPayload), domain.AIJobModeReviewRefine,
+	)
+	if err != nil {
+		if errors.Is(err, storage.ErrJobInFlight) {
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false, "code": "refine.processing",
+				"error": "task is being processed",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false, "error": "refine enqueue failed",
+		})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id": jobID, "mode": "refine",
+	})
 }

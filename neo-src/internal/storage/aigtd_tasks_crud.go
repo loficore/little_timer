@@ -875,6 +875,16 @@ func (c *AITasksCrud) LatestSuccessfulReviewJob(taskID int64) (*domain.AIJobRow,
 	return scanAIJobRow(row)
 }
 
+// GetJobByID 按 id 取一条 ai_job(供 refine handler 验证原始 review job 存在
+// 且 mode='review' status='success')。不存在返 (nil, sql.ErrNoRows)。
+func (c *AITasksCrud) GetJobByID(jobID int64) (*domain.AIJobRow, error) {
+	row := c.db.QueryRow(
+		`SELECT `+aiJobCols+` FROM ai_jobs WHERE id = ?;`,
+		jobID,
+	)
+	return scanAIJobRow(row)
+}
+
 // ----- 内部辅助 -----
 
 const taskCols = `id, parent_id, raw_text, title, notes, status, due_date,

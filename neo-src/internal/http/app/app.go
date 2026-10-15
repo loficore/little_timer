@@ -16,10 +16,12 @@ import (
 
 	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
+	"little-timer/internal/habits"
 	"little-timer/internal/log"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
+	"little-timer/internal/vault"
 )
 
 // App 汇集 HTTP 处理器所需的应用依赖与运行时状态。
@@ -49,6 +51,13 @@ type App struct {
 	// CurrentTimerSessionID 是当前计时会话 ID。
 	CurrentTimerSessionID *int64
 
+	// Habits 是 habit 域的用例层；Phase 1 转发到 storage，Phase 2 起
+	// 接管 name 校验、唯一性、默认值、日期默认、进度计算。
+	Habits *habits.Operations
+	// Vault 是凭据 + 备份域的用例层；Phase 1 转发到 *App 既有逻辑，
+	// Phase 3a/3b 接管主密码与云端凭据闸门。
+	Vault *vault.Operations
+
 	// secrets 是进程内主密码存储，由辅助方法惰性创建，
 	// 因此调用方构造时可以省略它。
 	secrets *crypto.SecretStorage
@@ -64,13 +73,24 @@ func NewApp(
 	bm *backup.BackupManager,
 	dbPath string,
 ) *App {
-	return &App{
+	a := &App{
 		Clock:    clk,
 		Settings: sm,
 		SQLite:   sqlite,
 		Backup:   bm,
 		DBPath:   dbPath,
 	}
+	// Phase 1 scaffold（见 .omo/plans/habit-vault-extraction.md）：
+	// 构造 habits / vault 用例层。Adapter 当前不调用它们——仅 wire 好，
+	// 让 Phase 2/3 迁移时只动规则、不动接线。
+	if sqlite != nil {
+		a.Habits = habits.New(sqlite, sm)
+	}
+	if sm != nil {
+		secretPath := filepath.Join(filepath.Dir(dbPath), "secret.db")
+		a.Vault = vault.New(secretPath, sm, appRuntime{a})
+	}
+	return a
 }
 
 // mutex 便捷访问器——以 Lock/Unlock 形式暴露而非藏进辅助方法，
@@ -335,7 +355,7 @@ func (a *App) UnlockCredentials(password string) domain.UnlockResult {
 	cfg := a.Settings.BackupConfig()
 	if !a.HasMasterPassword() {
 		log.Info("UnlockCredentials: no master password")
-		// 无主密码:总是成功。
+		// 无主密码：总是成功。
 		cfg.CredentialLockedUntil = 0
 		cfg.CredentialsUnlockTime = time.Now().Unix()
 		_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))

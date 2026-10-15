@@ -14,11 +14,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"little-timer/internal/domain"
+	"little-timer/internal/habits"
 	"little-timer/internal/log"
-	"little-timer/internal/storage"
 )
 
 // modeKey 把当前 clock 模式渲染成 JS 客户端期望的稳定字符串。
@@ -286,7 +287,7 @@ func NewHabitService(app *App) *HabitService { return &HabitService{app: app} }
 
 func (s *HabitService) ListHabitSets() (any, error) {
 	log.Debug("habit.list_sets", "method", "HabitService.ListHabitSets")
-	rows, err := s.app.SQLite.HabitSets().List(100, 0)
+	rows, err := s.app.Habits.ListHabitSets(100, 0)
 	if err != nil {
 		log.Error("habit.list_sets failed", "method", "HabitService.ListHabitSets", "error", err.Error())
 		return nil, err
@@ -296,51 +297,54 @@ func (s *HabitService) ListHabitSets() (any, error) {
 
 func (s *HabitService) CreateHabitSet(name string, description string, color string) (any, error) {
 	log.Debug("habit.create_set", "method", "HabitService.CreateHabitSet", "name", truncStr(name), "color", color)
-	if name == "" {
-		return nil, errEmptyName
-	}
-	if color == "" {
-		color = domain.DefaultColor
-	}
-	id, err := s.app.SQLite.HabitSets().Create(name, description, color)
+	res, err := s.app.Habits.CreateHabitSet(habits.CreateHabitSetInput{
+		Name: name, Description: description, Color: color,
+	})
 	if err != nil {
+		var he *habits.Error
+		if errors.As(err, &he) {
+			log.Warn("habit.create_set rejected", "method", "HabitService.CreateHabitSet", "code", he.Code, "error", he.Message)
+			return map[string]any{"success": false, "code": he.Code, "error": he.Message}, nil
+		}
 		log.Error("habit.create_set failed", "method", "HabitService.CreateHabitSet", "name", truncStr(name), "error", err.Error())
 		return nil, err
 	}
-	log.Info("habit.create_set ok", "method", "HabitService.CreateHabitSet", "id", id)
+	log.Info("habit.create_set ok", "method", "HabitService.CreateHabitSet", "id", res.ID)
 	return map[string]any{
-		"id":          id,
-		"name":        name,
-		"description": description,
-		"color":       color,
+		"id":          res.ID,
+		"name":        res.Name,
+		"description": res.Description,
+		"color":       res.Color,
 	}, nil
 }
 
 func (s *HabitService) UpdateHabitSet(id int64, name string, description string, color string, wallpaper string) (any, error) {
 	log.Debug("habit.update_set", "method", "HabitService.UpdateHabitSet", "id", id, "name", truncStr(name), "color", color)
-	if name == "" {
-		return nil, errEmptyName
-	}
-	if color == "" {
-		color = domain.DefaultColor
-	}
-	if err := s.app.SQLite.HabitSets().Update(id, name, description, color, wallpaper); err != nil {
+	res, err := s.app.Habits.UpdateHabitSet(id, habits.UpdateHabitSetInput{
+		Name: name, Description: description, Color: color, Wallpaper: wallpaper,
+	})
+	if err != nil {
+		var he *habits.Error
+		if errors.As(err, &he) {
+			log.Warn("habit.update_set rejected", "method", "HabitService.UpdateHabitSet", "id", id, "code", he.Code, "error", he.Message)
+			return map[string]any{"success": false, "code": he.Code, "error": he.Message}, nil
+		}
 		log.Error("habit.update_set failed", "method", "HabitService.UpdateHabitSet", "id", id, "error", err.Error())
 		return nil, err
 	}
 	log.Info("habit.update_set ok", "method", "HabitService.UpdateHabitSet", "id", id)
 	return map[string]any{
-		"id":          id,
-		"name":        name,
-		"description": description,
-		"color":       color,
-		"wallpaper":   wallpaper,
+		"id":          res.ID,
+		"name":        res.Name,
+		"description": res.Description,
+		"color":       res.Color,
+		"wallpaper":   res.Wallpaper,
 	}, nil
 }
 
 func (s *HabitService) DeleteHabitSet(id int64) (any, error) {
 	log.Debug("habit.delete_set", "method", "HabitService.DeleteHabitSet", "id", id)
-	if err := s.app.SQLite.HabitSets().Delete(id); err != nil {
+	if err := s.app.Habits.DeleteHabitSet(id); err != nil {
 		log.Error("habit.delete_set failed", "method", "HabitService.DeleteHabitSet", "id", id, "error", err.Error())
 		return nil, err
 	}
@@ -351,16 +355,8 @@ func (s *HabitService) DeleteHabitSet(id int64) (any, error) {
 // ListHabits 在 setID 为 nil 时返回所有 habit，否则限定在请求的 set 内。
 func (s *HabitService) ListHabits(setID *int64) (any, error) {
 	log.Debug("habit.list", "method", "HabitService.ListHabits", "set_id", setID)
-	var (
-		rows []storage.HabitRow
-		err  error
-	)
 	const limit, offset = 100, 0
-	if setID != nil {
-		rows, err = s.app.SQLite.Habits().ListBySet(*setID, limit, offset)
-	} else {
-		rows, err = s.app.SQLite.Habits().List(limit, offset)
-	}
+	rows, err := s.app.Habits.ListHabits(setID, limit, offset)
 	if err != nil {
 		log.Error("habit.list failed", "method", "HabitService.ListHabits", "error", err.Error())
 		return nil, err
@@ -369,59 +365,58 @@ func (s *HabitService) ListHabits(setID *int64) (any, error) {
 }
 
 func (s *HabitService) CreateHabit(setID int64, name string, goalSeconds int64, color string) (any, error) {
+	a := s.app
 	log.Debug("habit.create", "method", "HabitService.CreateHabit", "set_id", setID, "name", truncStr(name), "goal_seconds", goalSeconds)
-	if name == "" {
-		return nil, errEmptyName
-	}
-	if goalSeconds == 0 {
-		goalSeconds = domain.DefaultGoalSeconds
-	}
-	if color == "" {
-		color = domain.DefaultColor
-	}
-	id, err := s.app.SQLite.Habits().Create(setID, name, goalSeconds, color)
+	res, err := a.Habits.CreateHabit(habits.CreateHabitInput{
+		SetID: setID, Name: name, GoalSeconds: goalSeconds, Color: color,
+	})
 	if err != nil {
+		var he *habits.Error
+		if errors.As(err, &he) {
+			log.Warn("habit.create rejected", "method", "HabitService.CreateHabit", "code", he.Code, "error", he.Message)
+			return map[string]any{"success": false, "code": he.Code, "error": he.Message}, nil
+		}
 		log.Error("habit.create failed", "method", "HabitService.CreateHabit", "name", truncStr(name), "error", err.Error())
 		return nil, err
 	}
-	log.Info("habit.create ok", "method", "HabitService.CreateHabit", "id", id)
+	log.Info("habit.create ok", "method", "HabitService.CreateHabit", "id", res.ID)
 	return map[string]any{
-		"id":           id,
-		"set_id":       setID,
-		"name":         name,
-		"goal_seconds": goalSeconds,
-		"color":        color,
+		"id":           res.ID,
+		"set_id":       res.SetID,
+		"name":         res.Name,
+		"goal_seconds": res.GoalSeconds,
+		"color":        res.Color,
 	}, nil
 }
 
 func (s *HabitService) UpdateHabit(id int64, name string, goalSeconds int64, color string, wallpaper string) (any, error) {
+	a := s.app
 	log.Debug("habit.update", "method", "HabitService.UpdateHabit", "id", id, "name", truncStr(name), "goal_seconds", goalSeconds, "color", color)
-	if name == "" {
-		return nil, errEmptyName
-	}
-	if goalSeconds == 0 {
-		goalSeconds = domain.DefaultGoalSeconds
-	}
-	if color == "" {
-		color = domain.DefaultColor
-	}
-	if err := s.app.SQLite.Habits().Update(id, name, goalSeconds, color, wallpaper); err != nil {
+	res, err := a.Habits.UpdateHabit(id, habits.UpdateHabitInput{
+		Name: name, GoalSeconds: goalSeconds, Color: color, Wallpaper: wallpaper,
+	})
+	if err != nil {
+		var he *habits.Error
+		if errors.As(err, &he) {
+			log.Warn("habit.update rejected", "method", "HabitService.UpdateHabit", "id", id, "code", he.Code, "error", he.Message)
+			return map[string]any{"success": false, "code": he.Code, "error": he.Message}, nil
+		}
 		log.Error("habit.update failed", "method", "HabitService.UpdateHabit", "id", id, "error", err.Error())
 		return nil, err
 	}
 	log.Info("habit.update ok", "method", "HabitService.UpdateHabit", "id", id)
 	return map[string]any{
-		"id":           id,
-		"name":         name,
-		"goal_seconds": goalSeconds,
-		"color":        color,
-		"wallpaper":    wallpaper,
+		"id":           res.ID,
+		"name":         res.Name,
+		"goal_seconds": res.GoalSeconds,
+		"color":        res.Color,
+		"wallpaper":    res.Wallpaper,
 	}, nil
 }
 
 func (s *HabitService) DeleteHabit(id int64) (any, error) {
 	log.Debug("habit.delete", "method", "HabitService.DeleteHabit", "id", id)
-	if err := s.app.SQLite.Habits().Delete(id); err != nil {
+	if err := s.app.Habits.DeleteHabit(id); err != nil {
 		log.Error("habit.delete failed", "method", "HabitService.DeleteHabit", "id", id, "error", err.Error())
 		return nil, err
 	}
@@ -431,14 +426,11 @@ func (s *HabitService) DeleteHabit(id int64) (any, error) {
 
 // CreateSession 把空 `date` 视为今天。
 func (s *HabitService) CreateSession(habitID int64, durationSeconds int64, count int64, date string) (any, error) {
+	a := s.app
 	log.Debug("habit.create_session", "method", "HabitService.CreateSession", "habit_id", habitID, "duration_seconds", durationSeconds, "count", count)
-	if date == "" {
-		date = domain.TodayString(s.app.Settings.Config().Basic.Timezone)
-	}
-	if count == 0 {
-		count = 1
-	}
-	id, err := s.app.SQLite.Timers().CreateSession(habitID, durationSeconds, count, date)
+	id, err := a.Habits.CreateSession(habits.CreateSessionInput{
+		HabitID: habitID, DurationSeconds: durationSeconds, Count: count, Date: date,
+	})
 	if err != nil {
 		log.Error("habit.create_session failed", "method", "HabitService.CreateSession", "habit_id", habitID, "error", err.Error())
 		return nil, err
@@ -448,26 +440,15 @@ func (s *HabitService) CreateSession(habitID int64, durationSeconds int64, count
 		"id":               id,
 		"habit_id":         habitID,
 		"duration_seconds": durationSeconds,
-		"date":             date,
+		"date":             domain.TodayString(a.Settings.Config().Basic.Timezone),
 	}, nil
 }
 
 // ListSessions 支持三种查询形态：单日、日期区间、或不带过滤（= 今天）。
 func (s *HabitService) ListSessions(date string, startDate string, endDate string) (any, error) {
 	log.Debug("habit.list_sessions", "method", "HabitService.ListSessions", "date", date, "start_date", startDate, "end_date", endDate)
-	var (
-		rows []storage.SessionRow
-		err  error
-	)
 	const limit, offset = 100, 0
-	switch {
-	case startDate != "" && endDate != "":
-		rows, err = s.app.SQLite.Timers().ListSessionsByDateRange(startDate, endDate, limit, offset)
-	case date != "":
-		rows, err = s.app.SQLite.Timers().ListSessionsByDate(date, limit, offset)
-	default:
-		rows, err = s.app.SQLite.Timers().ListSessionsByDate(domain.TodayString(s.app.Settings.Config().Basic.Timezone), limit, offset)
-	}
+	rows, err := s.app.Habits.ListSessions(date, startDate, endDate, limit, offset)
 	if err != nil {
 		log.Error("habit.list_sessions failed", "method", "HabitService.ListSessions", "error", err.Error())
 		return nil, err
@@ -479,26 +460,18 @@ func (s *HabitService) ListSessions(date string, startDate string, endDate strin
 func (s *HabitService) GetHabitDetail(id int64, date string) (any, error) {
 	log.Debug("habit.detail", "method", "HabitService.GetHabitDetail", "id", id, "date", date)
 	a := s.app
-	if date == "" {
-		date = domain.TodayString(a.Settings.Config().Basic.Timezone)
-	}
-	row, err := a.SQLite.Habits().GetByID(id)
+	detail, err := a.Habits.GetHabitDetail(id, date)
 	if err != nil {
 		log.Error("habit.detail failed", "method", "HabitService.GetHabitDetail", "id", id, "error", err.Error())
 		return nil, err
 	}
-	todaySeconds, _ := a.SQLite.Timers().TodaySecondsForHabit(id, date)
-	var progressPercent int64
-	if row.GoalSeconds > 0 {
-		progressPercent = (todaySeconds * 100) / row.GoalSeconds
-	}
 	return map[string]any{
-		"id":               row.ID,
-		"name":             row.Name,
-		"goal_seconds":     row.GoalSeconds,
-		"color":            row.Color,
-		"today_seconds":    todaySeconds,
-		"progress_percent": progressPercent,
+		"id":               detail.ID,
+		"name":             detail.Name,
+		"goal_seconds":     detail.GoalSeconds,
+		"color":            detail.Color,
+		"today_seconds":    detail.TodaySeconds,
+		"progress_percent": detail.ProgressPercent,
 	}, nil
 }
 
@@ -711,15 +684,3 @@ func maskSecret(s string) string {
 	}
 	return "******"
 }
-
-// errEmptyName 由 CreateHabitSet / CreateHabit / Update* 在调用方漏传
-// name 字段时返回。
-var errEmptyName = &wailsError{code: "missing_name", message: "missing name"}
-
-// wailsError 是 Wails service 层使用的小型错误类型。与 httpError
-// （app.go 中）保持独立，让两层解耦。
-type wailsError struct {
-	code, message string
-}
-
-func (e *wailsError) Error() string { return e.message }

@@ -636,7 +636,7 @@ func TestMigrateV11ToV12_TablesAndColumns(t *testing.T) {
         if err := m.DB().QueryRow(`SELECT MAX(version) FROM schema_version;`).Scan(&v); err != nil {
             t.Fatal(err)
         }
-        if v != 12 { t.Errorf("schema_version.max = %d, want 12", v) }
+        if v != CurrentSchemaVersion { t.Errorf("schema_version.max = %d, want %d", v, CurrentSchemaVersion) }
     }
 
     t.Run("fresh", func(t *testing.T) { run(t, nil) })

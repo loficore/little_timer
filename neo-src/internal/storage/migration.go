@@ -10,10 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // CurrentSchemaVersion 是本构建目标针对的 schema 版本。
-const CurrentSchemaVersion = 12
+const CurrentSchemaVersion = 13
 
 // reconcileStuckThresholdSeconds 是 reconcileStuckInFlightJobs 判定 in-flight
 // 行"陈旧"的阈值。running 行看 started_at、queued 行看 created_at,均需
@@ -136,7 +137,7 @@ const aiJobsTableSQL = `CREATE TABLE IF NOT EXISTS ai_jobs (
     input_tokens INTEGER,
     output_tokens INTEGER,
     attempts INTEGER NOT NULL DEFAULT 1,
-    mode TEXT NOT NULL DEFAULT 'append' CHECK(mode IN ('append','replace','review')),
+    mode TEXT NOT NULL DEFAULT 'append',
     started_at TIMESTAMP,
     finished_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -371,12 +372,83 @@ func (m *MigrationManager) CheckAndMigrate() error {
 	if err := m.migrateV11ToV12(); err != nil {
 		return err
 	}
+	// 幂等的 v12 → v13 升级:去掉 ai_jobs.mode 列上的 CHECK 约束(如果还在)。
+	// 原因:mode 枚举是开放的(append / replace / review / review_refine,未来还会加),
+	// 用 DB CHECK 锁住枚举需要每次加 mode 都做表重建,不划算。
+	// domain.AIJobMode 类型 + handler 校验是唯一执法点。upgrade DB 若表上
+	// 还有旧 CHECK 则重建表;若本就没有(从 <v9 升级来的)则 no-op。fresh DB
+	// 走 aiJobsTableSQL 已无 CHECK,本步骤 no-op。
+	if err := m.migrateV12ToV13(); err != nil {
+		return err
+	}
 
 	// 旧 DB 升级后必须把 schema_version 推进到 CurrentSchemaVersion,
 	// 否则它永远停留在旧版本号,下次启动重复走升级分支(当前幂等所以安全,
 	// 但未来按版本分派的迁移会误分类)。fresh DB 已在上面写过,不重复写。
 	if currentVersion != 0 && currentVersion < CurrentSchemaVersion {
 		return m.setSchemaVersion(CurrentSchemaVersion)
+	}
+	return nil
+}
+
+// migrateV12ToV13 去掉 ai_jobs.mode 列上的 CHECK 约束(若存在)。
+//
+// 触发条件:ai_jobs 的 sqlite_master.sql 含 "CHECK(mode IN ('append','replace','review'))"。
+// 行为:PRAGMA foreign_keys=OFF + 事务内 CREATE ai_jobs_v13 (用 aiJobsTableSQL,
+//  无 CHECK) + INSERT SELECT + DROP + RENAME + 重建全部 ai_jobs 索引。
+//
+// 幂等:无旧 CHECK 时直接 return(覆盖 <v9 升级过来的 DB 和已迁移过的 DB)。
+// 重建索引:drop table 时索引自动消失,迁完后调 createIndexes() 重建,
+//  含 partial UNIQUE idx_ai_jobs_in_flight(TOCTOU 兜底)和 idx_ai_jobs_task_id。
+func (m *MigrationManager) migrateV12ToV13() error {
+	var tableSQL string
+	err := m.db.QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='ai_jobs';`,
+	).Scan(&tableSQL)
+	if err == sql.ErrNoRows {
+		return nil // 表不存在(其他迁移环节会处理)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: read ai_jobs schema: %w", ErrMigrationFailed, err)
+	}
+	if !strings.Contains(tableSQL, "CHECK(mode IN ('append','replace','review'))") {
+		return nil // 本就没有旧 CHECK(<v9 升级 / 已是新 schema)
+	}
+
+	// 重建 ai_jobs:去掉 mode CHECK。用 aiJobsTableSQL(新 schema,无 CHECK)建临时表。
+	if _, err := m.db.Exec(`PRAGMA foreign_keys=OFF;`); err != nil {
+		return fmt.Errorf("%w: disable FK: %w", ErrMigrationFailed, err)
+	}
+	tx, err := m.db.Begin()
+	if err != nil {
+		return fmt.Errorf("%w: begin tx: %w", ErrMigrationFailed, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	newTableSQL := strings.Replace(aiJobsTableSQL, "ai_jobs", "ai_jobs_v13", 1)
+	if _, err := tx.Exec(newTableSQL); err != nil {
+		return fmt.Errorf("%w: create ai_jobs_v13: %w", ErrMigrationFailed, err)
+	}
+	if _, err := tx.Exec(`INSERT INTO ai_jobs_v13 SELECT * FROM ai_jobs;`); err != nil {
+		return fmt.Errorf("%w: copy ai_jobs: %w", ErrMigrationFailed, err)
+	}
+	if _, err := tx.Exec(`DROP TABLE ai_jobs;`); err != nil {
+		return fmt.Errorf("%w: drop ai_jobs: %w", ErrMigrationFailed, err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE ai_jobs_v13 RENAME TO ai_jobs;`); err != nil {
+		return fmt.Errorf("%w: rename ai_jobs_v13: %w", ErrMigrationFailed, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("%w: commit rebuild: %w", ErrMigrationFailed, err)
+	}
+	if _, err := m.db.Exec(`PRAGMA foreign_keys=ON;`); err != nil {
+		return fmt.Errorf("%w: re-enable FK: %w", ErrMigrationFailed, err)
+	}
+
+	// 重建索引(全表 DROP 后索引也丢了)。createIndexes() 含 partial UNIQUE
+	// idx_ai_jobs_in_flight 的 reconcile 兑底,重建后 TOCTOU 防护恢复。
+	if err := m.createIndexes(); err != nil {
+		return err
 	}
 	return nil
 }

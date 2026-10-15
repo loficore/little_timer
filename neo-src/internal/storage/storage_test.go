@@ -153,6 +153,89 @@ func TestIndexesAreCreated(t *testing.T) {
 	}
 }
 
+// TestMigrateV12ToV13DropsStaleModeCheck 验证 v13 迁移能识别 v12 留下的
+// `ai_jobs.mode` CHECK 约束并重建表(去 CHECK),让 review_refine 入队。
+// 涉及:drops ai_jobs + 复制数据 + 重建 + 重建 partial UNIQUE 索引。
+func TestMigrateV12ToV13DropsStaleModeCheck(t *testing.T) {
+	m := openTempSqlite(t) // v13 fresh(无 CHECK)
+
+	// 模拟 v12:重建 ai_jobs 带旧 CHECK,塞一条 review 行。
+	if _, err := m.DB().Exec(`PRAGMA foreign_keys=OFF;`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(`DROP TABLE ai_jobs;`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(`
+		CREATE TABLE ai_jobs (
+		    id INTEGER PRIMARY KEY AUTOINCREMENT,
+		    task_id INTEGER NOT NULL,
+		    provider TEXT NOT NULL,
+		    model TEXT NOT NULL,
+		    status TEXT NOT NULL CHECK(status IN ('queued','running','success','failed')),
+		    request_payload TEXT NOT NULL,
+		    response_payload TEXT,
+		    error_message TEXT,
+		    input_tokens INTEGER,
+		    output_tokens INTEGER,
+		    attempts INTEGER NOT NULL DEFAULT 1,
+		    mode TEXT NOT NULL DEFAULT 'append' CHECK(mode IN ('append','replace','review')),
+		    started_at TIMESTAMP,
+		    finished_at TIMESTAMP,
+		    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);`); err != nil {
+		t.Fatal(err)
+	}
+	taskID, err := m.AITasks().CreateTask("sim-v12", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(
+		`INSERT INTO ai_jobs (task_id, provider, model, status, request_payload, mode) VALUES (?, 'p', 'm', 'success', '{}', 'review');`,
+		taskID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(`PRAGMA foreign_keys=ON;`); err != nil {
+		t.Fatal(err)
+	}
+
+	// 跑迁移:migrateV12ToV13 应识别旧 CHECK 并重建。
+	if err := m.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// 断言 1:review_refine 能入队了。
+	if _, err := m.AITasks().EnqueueJob(
+		taskID, "p", "m", `{"kind":"review_refine"}`, domain.AIJobModeReviewRefine,
+	); err != nil {
+		t.Errorf("expected review_refine EnqueueJob OK after migration, got: %v", err)
+	}
+
+	// 断言 2:旧 review 行被保留。
+	var reviewCount int
+	if err := m.DB().QueryRow(
+		`SELECT COUNT(*) FROM ai_jobs WHERE mode = 'review' AND task_id = ?`, taskID,
+	).Scan(&reviewCount); err != nil {
+		t.Fatal(err)
+	}
+	if reviewCount != 1 {
+		t.Errorf("expected 1 old 'review' row preserved, got %d", reviewCount)
+	}
+
+	// 断言 3:ai_jobs 上的索引被重建(至少 1 条,含 partial UNIQUE)。
+	var idxCount int
+	if err := m.DB().QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name='ai_jobs' AND name NOT LIKE 'sqlite_%'`,
+	).Scan(&idxCount); err != nil {
+		t.Fatal(err)
+	}
+	if idxCount < 1 {
+		t.Errorf("expected ai_jobs indexes recreated after migration, got %d", idxCount)
+	}
+}
+
 func TestFilePermissionIs0600(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "perm.db")
 	m := NewSqliteManager().Init(path)

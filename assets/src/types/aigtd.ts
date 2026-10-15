@@ -49,6 +49,10 @@ export interface JobStatusDTO {
   ai_error?: string;
   latest_job_id?: number;
   attempts?: number;
+  latest_job_status?: "queued" | "running" | "success" | "failed";
+  latest_job_mode?: "append" | "replace" | "review" | "review_refine";
+  /** review_refine worker 写新 proposal;append/replace/review 写原始 LLM 输出 */
+  response_payload?: string;
 }
 
 export interface LLMSettingsDTO {

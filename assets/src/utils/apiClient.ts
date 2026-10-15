@@ -802,6 +802,30 @@ export class APIClient {
         });
     }
 
+    /**
+     * 精化一条 review 提议:POST /api/daily-sweep/refine。
+     * - chip_hint="重写" → 返 { reparse_job_id, mode: "rewrite" },前端订阅 reparse
+     * - 其他(含 "")→ 返 { job_id, mode: "refine" },前端轮询 /api/aigtd/jobs
+     */
+    async refineDailySweep(body: {
+        ai_job_id: number;
+        original_change_id: string;
+        chip_hint?: string;
+        user_message: string;
+    }): Promise<
+        | { job_id: number; mode: "refine" }
+        | { reparse_job_id: number; mode: "rewrite" }
+    > {
+        return this.fetchJson<
+            | { job_id: number; mode: "refine" }
+            | { reparse_job_id: number; mode: "rewrite" }
+        >(`${this.baseUrl}/api/daily-sweep/refine`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+    }
+
     /** 读 Daily Sweep 设置。 */
     async getDailySweepSettings(): Promise<DailySweepSettings> {
         return this.fetchJson<DailySweepSettings>(`${this.baseUrl}/api/settings/daily-sweep`);

@@ -166,6 +166,14 @@ func AIGtdJobs(c *gin.Context) {
 	if job, _ := a.SQLite.AITasks().LatestJobForTask(taskID); job != nil {
 		resp["latest_job_id"] = job.ID
 		resp["attempts"] = job.Attempts
+		resp["latest_job_status"] = string(job.Status)
+		resp["latest_job_mode"] = string(job.Mode)
+		// review_refine worker 把新 proposal 写进 ai_jobs.response_payload,前端
+		// 轮询本端点读到该字段后解析为 ReviewProposal[]。append/replace/review
+		// 路径也写 response_payload(原始 LLM 输出),按需用。
+		if job.ResponsePayload != "" {
+			resp["response_payload"] = job.ResponsePayload
+		}
 	}
 	c.JSON(http.StatusOK, resp)
 }

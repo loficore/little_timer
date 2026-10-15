@@ -177,4 +177,107 @@ test.describe("Daily Sweep E2E", () => {
 
     await apiCtx.dispose();
   });
+
+  // 验证 review refine 通道(issue #32 task 11):点 "精化" 展开面板 + 5 chip,
+  // 点 chip 触发 review_refine(走与 review 同一 _test/prompt override)。
+  test("精化面板展开 + 5 chip 可见 + 点 chip 触发 refine E2E", async ({ page }) => {
+    const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const taskTitle = `E2E-REFINE-${runId}`;
+
+    const apiCtx = await request.newContext({ baseURL: apiURL });
+
+    // 清场
+    const listResp = await apiCtx.get("/api/tasks", { headers: { "If-Match": '"0"' } });
+    const existing = (await listResp.json()) as Array<{ id: number; version: number }>;
+    for (const t of existing) {
+      await apiCtx.patch(`/api/tasks/${t.id}`, {
+        headers: { "Content-Type": "application/json", "If-Match": `"${t.version}"` },
+        data: { status: "archived" },
+      });
+    }
+
+    // 建任务
+    const create = await apiCtx.post("/api/tasks", {
+      headers: { "Content-Type": "application/json", "If-Match": '"0"' },
+      data: { title: taskTitle },
+    });
+    const created = await create.json();
+    const taskID = created.id as number;
+
+    // 注入 review LLM fixture
+    const originalChangeID = `e2e-refine-orig-${runId}`;
+    const refinedChangeID = `e2e-refine-new-${runId}`;
+    await apiCtx.post("/api/aigtd/_test/prompt", {
+      headers: { "If-Match": '"0"' },
+      data: {
+        text: JSON.stringify({
+          proposals: [{
+            change_id: originalChangeID,
+            task_id: taskID,
+            action: "reschedule",
+            suggested_scheduled_end: 1735689600,
+            reason: `e2e REFINE original ${runId}`,
+          }],
+        }),
+      },
+    });
+
+    // 跑 review,等 proposal card
+    await page.goto(baseURL);
+    await page.waitForLoadState("networkidle");
+    await clickNav(page, "nav-dailySweep");
+    await expect(page.locator('[data-testid="start-btn"]')).toBeVisible({ timeout: 10000 });
+    await page.locator('[data-testid="start-btn"]').click();
+
+    const card = page
+      .locator('[data-testid="proposal-card"]')
+      .filter({ hasText: `e2e REFINE original ${runId}` })
+      .first();
+    await expect
+      .poll(
+        async () => {
+          const r = await apiCtx.get("/api/daily-sweep/today", { headers: { "If-Match": '"0"' } });
+          const b = await r.json();
+          return (b.proposals as Array<{ proposal: { change_id: string } }>).some(
+            (x) => x.proposal.change_id === originalChangeID,
+          );
+        },
+        { timeout: 60000, intervals: [500] },
+      )
+      .toBe(true);
+    await page.locator('[data-testid="refresh-btn"]').click();
+    await expect(card).toBeVisible({ timeout: 10000 });
+
+    // 点 "精化" → 面板展开 + 5 chip 可见
+    await card.locator('[data-testid="refine-btn"]').click();
+    const panel = page.locator('[data-testid="review-panel"]');
+    await expect(panel).toBeVisible({ timeout: 5000 });
+    const chipKinds = ["reschedule", "split", "rewrite", "mark_done", "drop"];
+    for (const kind of chipKinds) {
+      await expect(panel.locator(`[data-testid="review-chip-${kind}"]`)).toBeVisible();
+    }
+
+    // 注入 refine LLM fixture(覆盖上面的 review LLM),点 reschedule chip
+    // 触发 review_refine worker,等面板出现精化标记
+    await apiCtx.post("/api/aigtd/_test/prompt", {
+      headers: { "If-Match": '"0"' },
+      data: {
+        text: JSON.stringify({
+          proposals: [{
+            change_id: refinedChangeID,
+            task_id: taskID,
+            action: "reschedule",
+            suggested_scheduled_end: 1736659200,
+            reason: `e2e REFINE refined ${runId}`,
+          }],
+        }),
+      },
+    });
+    await panel.locator('[data-testid="review-chip-reschedule"]').click();
+
+    // 精化完成:面板显示 "已从 #X 精化" 标记
+    await expect(panel.locator('[data-testid="refined-marker"]')).toBeVisible({ timeout: 30000 });
+
+    await apiCtx.dispose();
+  });
 });

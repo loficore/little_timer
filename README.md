@@ -1,4 +1,4 @@
-# Little Timer
+# 小番茄·AI 智能事务管理
 
 Little Timer 是一个基于 Go、Gin、SQLite 和 WebView 开发的跨平台定时器应用，支持倒计时和正计时功能。前端使用 Preact、TypeScript、Vite 和 Tailwind CSS。
 

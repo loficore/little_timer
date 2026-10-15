@@ -14,7 +14,7 @@ import (
 
 // Version 是人可读的发布 tag。每次发布递增；与 cliff.toml 的 `version`
 // 字段保持一致。
-var Version = "1.1.0"
+var Version = "1.2.0"
 
 // BuildTime 在包初始化时捕获。它实际是二进制被加载的时间 —— 对于
 // “这个二进制是什么时候组装的”这一目的，足够接近构建时间了。

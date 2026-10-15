@@ -76,7 +76,7 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
             <div className="p-4 shadow-[inset_0_-1px_0_color-mix(in_oklab,var(--my-outline)_22%,transparent)]">
                 <h1 className="text-xl font-bold flex items-center gap-2 text-[var(--my-on-surface)] opacity-90">
                     <StarIconComponent />
-                    <span className="text-[var(--my-on-surface)]">Little Timer</span>
+                    <span className="text-[var(--my-on-surface)]">小番茄·AI 智能事务管理</span>
                 </h1>
             </div>
 

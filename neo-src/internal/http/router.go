@@ -89,7 +89,7 @@ func registerDailySweep(g *gin.RouterGroup) {
 func registerRoot(r *gin.Engine) {
 	r.GET("/", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, "<html><body><h1>Little Timer</h1><p>Build the frontend (cd assets && pnpm run build) or open the dev server.</p></body></html>")
+		c.String(http.StatusOK, "<html><body><h1>小番茄·AI 智能事务管理</h1><p>Build the frontend (cd assets && pnpm run build) or open the dev server.</p></body></html>")
 	})
 }
 

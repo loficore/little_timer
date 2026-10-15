@@ -1,5 +1,5 @@
 /**
- * Little Timer 的平台感知 API 客户端。
+ * 小番茄·AI 智能事务管理的平台感知 API 客户端。
  *
  * 在 Android（通过 window.wails 检测）：使用 Wails v3 的 JS↔Go 绑定，
  * 经由 JNI —— 无需 HTTP fetch。

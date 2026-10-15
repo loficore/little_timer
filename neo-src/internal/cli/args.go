@@ -81,8 +81,8 @@ func NewRootCmd(serveFn ServeFunc) *cobra.Command {
 
 	root := &cobra.Command{
 		Use:     "little-timer",
-		Short:   "Little Timer — countdown/stopwatch with web UI",
-		Long:    "Cross-platform timer app.  Boots a Gin HTTP server (and, on Windows, a webview window) backed by SQLite.",
+		Short:   "小番茄·AI 智能事务管理 — countdown/stopwatch with web UI",
+		Long:    "Cross-platform timer + AI GTD app.  Boots a Gin HTTP server (and, on Windows, a webview window) backed by SQLite.",
 		Version: app.Version,
 	}
 
@@ -170,7 +170,7 @@ func newServeCmd(opts *ServeOptions, fn ServeFunc) *cobra.Command {
 		Use:   "serve",
 		Short: "Start the HTTP server (and, on Windows, the webview window)",
 		Long: fmt.Sprintf(
-			"Start the Little Timer HTTP server on --port (default %d) backed by SQLite at --db-path.\n\n"+
+			"Start the 小番茄·AI 智能事务管理 HTTP server on --port (default %d) backed by SQLite at --db-path.\n\n"+
 				"On Windows, also opens a native webview window unless --http-only is passed.\n"+
 				"On Linux/macOS the default is --http-only; pass --webview to opt in to a window.",
 			DefaultPort,

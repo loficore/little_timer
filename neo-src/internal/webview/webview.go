@@ -1,5 +1,5 @@
 // Package webview 封装 github.com/webview/webview_go，把
-// Little Timer UI 承载在原生窗口中。
+// 小番茄·AI 智能事务管理 UI 承载在原生窗口中。
 //
 // 架构：
 //
@@ -35,7 +35,7 @@ import (
 )
 
 // Title 是操作系统窗口栏显示的标题。
-const Title = "Little Timer"
+const Title = "小番茄·AI 智能事务管理"
 
 // DefaultSize 是初始窗口尺寸（CSS 像素）—— 特意设得紧凑
 // （800x600），保证在 13 寸笔记本上可用。

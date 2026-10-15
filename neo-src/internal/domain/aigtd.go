@@ -98,14 +98,33 @@ const (
 )
 
 // AIJobMode 是 ai_jobs 的处理模式。append=只增不改;replace=重建(保留 done);
-// review=后续 GTD 回顾(见 issue #7,本期不实现)。
+// review=产出 ReviewProposal 供用户逐条采纳;review_refine=把用户的自然语言
+// 精化意图翻译为新 ReviewProposal(issue #32)。所有 mode 在 worker 都不动
+// tasks 本身——落库只发生在用户 adopt / patch / 手动编辑路径。
 type AIJobMode string
 
 const (
-	AIJobModeAppend  AIJobMode = "append"
-	AIJobModeReplace AIJobMode = "replace"
-	AIJobModeReview  AIJobMode = "review"
+	AIJobModeAppend        AIJobMode = "append"
+	AIJobModeReplace       AIJobMode = "replace"
+	AIJobModeReview        AIJobMode = "review"
+	AIJobModeReviewRefine  AIJobMode = "review_refine"
 )
+
+// RefineJobRequestPayload 是 ai_jobs.request_payload 在 review_refine 模式
+// 下的 JSON 结构。
+//
+//   - Kind 固定 "review_refine",用于 ai_jobs.mode 之外的类型防御
+//   - OriginalAIJobID + OriginalChangeID 定位历史 review job 的 response_payload
+//     中对应的原始 ReviewProposal
+//   - ChipHint 可空(LLM 自行从 NL 抽意图,见 design §10 #10)
+//   - UserMessage 是用户自然语言原文
+type RefineJobRequestPayload struct {
+	Kind             string `json:"kind"`
+	OriginalAIJobID  int64  `json:"original_ai_job_id"`
+	OriginalChangeID string `json:"original_change_id"`
+	ChipHint         string `json:"chip_hint,omitempty"`
+	UserMessage      string `json:"user_message"`
+}
 
 // AIJobRow 是一行 `ai_jobs`。
 type AIJobRow struct {

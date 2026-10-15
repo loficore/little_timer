@@ -7,6 +7,7 @@ interface ProposalCardProps {
   proposal: DailySweepProposal;
   onAdopt: () => void;
   onReject: () => void;
+  onRefine?: () => void;
 }
 
 const ACTION_BADGES: Record<string, string> = {
@@ -24,6 +25,7 @@ export const ProposalCard: FunctionalComponent<ProposalCardProps> = ({
   proposal,
   onAdopt,
   onReject,
+  onRefine,
 }) => {
   const p = proposal.proposal;
   const cls = ACTION_BADGES[p.action] ?? "badge-ghost";
@@ -61,6 +63,15 @@ export const ProposalCard: FunctionalComponent<ProposalCardProps> = ({
           </p>
         )}
         <div className="card-actions justify-end mt-2">
+          {onRefine && (
+            <button
+              className="btn btn-sm btn-ghost"
+              data-testid="refine-btn"
+              onClick={onRefine}
+            >
+              {t("dailySweep.refine")}
+            </button>
+          )}
           <button
             className="btn btn-sm btn-ghost"
             data-testid="reject-btn"

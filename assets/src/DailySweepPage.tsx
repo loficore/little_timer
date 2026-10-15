@@ -1,19 +1,23 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { useDailySweep } from "./hooks/useDailySweep";
 import { t } from "./utils/i18n";
 import { ProposalCard } from "./components/DailySweep/ProposalCard";
 import { ResetIcon } from "./utils/icons";
+import { ReviewProposalPanel } from "./components/AIGtd/Review";
+import type { DailySweepProposal, ReviewProposal } from "./types/aigtd";
 
 /**
  * DailySweepPage —— GTD Daily Sweep / Review 提议页面。
  *
  * 顶部 "立即扫一遍" 按钮(POST /daily-sweep/start → refresh);
  * 下方按时间倒序列出当日(近 1 天)成功的 review job proposals,
- * 每条 ProposalCard 支持 adopt / reject。
+ * 每条 ProposalCard 支持 adopt / reject / 精化(refine)。
+ * 点 "精化" → 下方就地展开 ReviewProposalPanel(issue #32 task 9)。
  */
 export function DailySweepPage() {
   const { sweptAt, source, proposals, loading, error, start, adopt, reject, refresh } =
     useDailySweep();
+  const [refining, setRefining] = useState<DailySweepProposal | null>(null);
 
   useEffect(() => {
     // 页面挂载时拉一次(hook 本身不自动刷新,集中在这里做,避免多源)。
@@ -72,12 +76,29 @@ export function DailySweepPage() {
         </div>
       ) : (
         actionable.map((p) => (
-          <ProposalCard
-            key={`${p.ai_job_id}:${p.proposal.change_id}`}
-            proposal={p}
-            onAdopt={() => void adopt(p)}
-            onReject={() => void reject(p)}
-          />
+          <div key={`${p.ai_job_id}:${p.proposal.change_id}`} className="space-y-2">
+            <ProposalCard
+              proposal={p}
+              onAdopt={() => void adopt(p)}
+              onReject={() => void reject(p)}
+              onRefine={() => setRefining(p)}
+            />
+            {refining &&
+              refining.ai_job_id === p.ai_job_id &&
+              refining.proposal.change_id === p.proposal.change_id && (
+                <ReviewProposalPanel
+                  proposal={p}
+                  onAdopt={(newProp: ReviewProposal) => {
+                    void adopt({ ...p, proposal: newProp }).then(() => setRefining(null));
+                  }}
+                  onReject={() => {
+                    void reject(p);
+                    setRefining(null);
+                  }}
+                  onClose={() => setRefining(null)}
+                />
+              )}
+          </div>
         ))
       )}
     </div>

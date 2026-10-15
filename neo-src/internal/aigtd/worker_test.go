@@ -3,8 +3,10 @@ package aigtd_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -528,6 +530,226 @@ func TestWorkerPool_PersistsScores(t *testing.T) {
 		}
 	})
 }
+
+// TestWorker_RefineMode_WritesResponsePayload 验证 review_refine 模式:worker
+// 调 LLM 翻译用户 NL 为新 ReviewProposal 写 ai_jobs.response_payload,**绝不
+// 动 task / 子任务**(version / title / subtasks 全部保留)。
+func TestWorker_RefineMode_WritesResponsePayload(t *testing.T) {
+	m := newTestDB(t)
+	c := m.AITasks()
+	taskID, _ := c.CreateTask("待办", "manual")
+	title := "用户标题"
+	ver0, _ := c.GetTaskVersion(taskID)
+	_ = c.UpdateTask(taskID, storage.TaskUpdateFields{Title: &title}, ver0)
+	subID, _ := c.CreateSubtask(taskID, "子1", 15, nil, 0)
+
+	// Seed 一个 success review job(含原始 proposal,change_id=orig-1)
+	originalProposal := domain.ReviewProposal{
+		ChangeID: "orig-1", TaskID: taskID, Action: "reschedule",
+		SuggestedEnd: int64Ptr(1735689600), Reason: "AI 原建议",
+	}
+	payloadStruct := struct{ Proposals []domain.ReviewProposal }{Proposals: []domain.ReviewProposal{originalProposal}}
+	originalJSON, _ := json.Marshal(payloadStruct)
+	reviewJobID, err := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DB().Exec(
+		`UPDATE ai_jobs SET status='success', response_payload=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`,
+		string(originalJSON), reviewJobID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// 入队 refine job(指向上面那条 review 的 orig-1)
+	refinePayload, _ := json.Marshal(domain.RefineJobRequestPayload{
+		Kind:             "review_refine",
+		OriginalAIJobID:  reviewJobID,
+		OriginalChangeID: "orig-1",
+		ChipHint:         "改期",
+		UserMessage:      "推迟到下周五",
+	})
+	refineJobID, err := c.EnqueueJob(taskID, "openai_compat", "m", string(refinePayload), domain.AIJobModeReviewRefine)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock LLM 返回精化后的 proposal
+	aigtd.SetTestOverride(fmt.Sprintf(
+		`{"proposals":[{"change_id":"refined-1","task_id":%d,"action":"reschedule","suggested_scheduled_end":1736659200,"reason":"user pushed to next Friday"}]}`,
+		taskID,
+	), 0)
+	defer aigtd.ClearTestOverride()
+
+	beforeVer, _ := c.GetTaskVersion(taskID)
+	s := &fakeSettings{date: "2026-10-15", provider: "openai_compat", model: "m", apiKey: "k"}
+	wp := aigtd.NewWorkerPool(c, s, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wp.Start(ctx)
+	defer func() { wp.Stop(); wp.Wait() }()
+
+	waitJobSuccess(t, c, taskID, refineJobID, 5*time.Second)
+
+	// 断言 1:refine job 的 response_payload 含精化后的 proposal
+	job, err := c.LatestJobForTask(taskID)
+	if err != nil || job == nil {
+		t.Fatalf("LatestJobForTask: %v %v", job, err)
+	}
+	if job.ID != refineJobID {
+		t.Fatalf("LatestJob ID=%d, want %d", job.ID, refineJobID)
+	}
+	if !strings.Contains(job.ResponsePayload, "refined-1") {
+		t.Errorf("response_payload 应含 refined-1, got: %s", job.ResponsePayload)
+	}
+	if !strings.Contains(job.ResponsePayload, "user pushed") {
+		t.Errorf("response_payload 应含 reason, got: %s", job.ResponsePayload)
+	}
+
+	// 断言 2:task 状态 = done,但 version 未变(refine 不动 tasks)
+	after, afterSubs, err := c.GetTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Version != beforeVer {
+		t.Errorf("refine 改了 task.version: before=%d after=%d", beforeVer, after.Version)
+	}
+	if after.AIStatus != domain.AIStatusDone {
+		t.Errorf("ai_status=%s, want done", after.AIStatus)
+	}
+	if after.Title != "用户标题" {
+		t.Errorf("refine 覆盖了 task.title: %q", after.Title)
+	}
+	if len(afterSubs) != 1 || afterSubs[0].ID != subID {
+		t.Errorf("refine 改了子任务: subs=%v", afterSubs)
+	}
+}
+
+// TestWorker_RefineMode_ParseFailDoesNotOverwriteResponse 验证 refine 解析
+// 失败:job 标 failed, task.ai_status=error, 错误信息保留(便于排查)。
+func TestWorker_RefineMode_ParseFailDoesNotOverwriteResponse(t *testing.T) {
+	m := newTestDB(t)
+	c := m.AITasks()
+	taskID, _ := c.CreateTask("待办", "manual")
+
+	// Seed success review job
+	originalProposal := domain.ReviewProposal{
+		ChangeID: "orig-1", TaskID: taskID, Action: "no_op", Reason: "原建议",
+	}
+	payloadStruct := struct{ Proposals []domain.ReviewProposal }{Proposals: []domain.ReviewProposal{originalProposal}}
+	originalJSON, _ := json.Marshal(payloadStruct)
+	reviewJobID, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+	if _, err := m.DB().Exec(
+		`UPDATE ai_jobs SET status='success', response_payload=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`,
+		string(originalJSON), reviewJobID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// 入队 refine
+	refinePayload, _ := json.Marshal(domain.RefineJobRequestPayload{
+		Kind: "review_refine", OriginalAIJobID: reviewJobID, OriginalChangeID: "orig-1",
+		ChipHint: "改期", UserMessage: "推迟",
+	})
+	refineJobID, err := c.EnqueueJob(taskID, "openai_compat", "m", string(refinePayload), domain.AIJobModeReviewRefine)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock LLM 返 invalid JSON —— 解析重试 2 次都失败
+	aigtd.SetTestOverride("not valid json at all", 0)
+	defer aigtd.ClearTestOverride()
+
+	beforeVer, _ := c.GetTaskVersion(taskID)
+	s := &fakeSettings{date: "2026-10-15", provider: "openai_compat", model: "m", apiKey: "k"}
+	wp := aigtd.NewWorkerPool(c, s, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wp.Start(ctx)
+	defer func() { wp.Stop(); wp.Wait() }()
+
+	// 等任务变 error(aqi_status=error)
+	waitTaskStatus(t, c, taskID, domain.AIStatusError, 5*time.Second)
+
+	// 断言:refine job 标 failed, error_message 非空
+	job, _ := c.LatestJobForTask(taskID)
+	if job.ID != refineJobID {
+		t.Fatalf("LatestJob ID=%d, want %d", job.ID, refineJobID)
+	}
+	if job.Status != domain.AIJobStatusFailed {
+		t.Errorf("job.status=%s, want failed", job.Status)
+	}
+	if job.ErrorMessage == "" {
+		t.Error("error_message 应非空,便于排查")
+	}
+
+	// 断言:task.version 未变(解析失败不进 refine 落库路径)
+	after, _, _ := c.GetTask(taskID)
+	if after.Version != beforeVer {
+		t.Errorf("refine 解析失败却改了 task.version: %d -> %d", beforeVer, after.Version)
+	}
+}
+
+// TestWorker_RefineMode_ProviderUnconfigured_FailsJob 验证 Review Focus #1:
+// provider 不可用时,refine job 标 failed, task.ai_error 含"provider 不可用",
+// task.version 不变。
+func TestWorker_RefineMode_ProviderUnconfigured_FailsJob(t *testing.T) {
+	m := newTestDB(t)
+	c := m.AITasks()
+	taskID, _ := c.CreateTask("待办", "manual")
+
+	// Seed success review job
+	payloadStruct := struct{ Proposals []domain.ReviewProposal }{Proposals: []domain.ReviewProposal{{
+		ChangeID: "orig-1", TaskID: taskID, Action: "no_op", Reason: "原建议",
+	}}}
+	originalJSON, _ := json.Marshal(payloadStruct)
+	reviewJobID, _ := c.EnqueueJob(taskID, "openai_compat", "m", `{}`, domain.AIJobModeReview)
+	if _, err := m.DB().Exec(
+		`UPDATE ai_jobs SET status='success', response_payload=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`,
+		string(originalJSON), reviewJobID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// 入队 refine
+	refinePayload, _ := json.Marshal(domain.RefineJobRequestPayload{
+		Kind: "review_refine", OriginalAIJobID: reviewJobID, OriginalChangeID: "orig-1",
+		ChipHint: "改期", UserMessage: "推迟",
+	})
+	refineJobID, enqErr := c.EnqueueJob(taskID, "openai_compat", "m", string(refinePayload), domain.AIJobModeReviewRefine)
+	if enqErr != nil {
+		t.Fatal(enqErr)
+	}
+
+	// apiKey="" → 默认工厂返 ErrProviderUnconfigured
+	beforeVer, _ := c.GetTaskVersion(taskID)
+	s := &fakeSettings{date: "2026-10-15", provider: "openai_compat", model: "m", apiKey: ""}
+	wp := aigtd.NewWorkerPool(c, s, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wp.Start(ctx)
+	defer func() { wp.Stop(); wp.Wait() }()
+
+	waitTaskStatus(t, c, taskID, domain.AIStatusError, 5*time.Second)
+
+	job, _ := c.LatestJobForTask(taskID)
+	if job.ID != refineJobID {
+		t.Fatalf("LatestJob ID=%d, want %d", job.ID, refineJobID)
+	}
+	if job.Status != domain.AIJobStatusFailed {
+		t.Errorf("job.status=%s, want failed", job.Status)
+	}
+	if !strings.Contains(job.ErrorMessage, "provider 不可用") {
+		t.Errorf("error_message 应含 'provider 不可用', got: %q", job.ErrorMessage)
+	}
+
+	after, _, _ := c.GetTask(taskID)
+	if after.Version != beforeVer {
+		t.Errorf("refine 在 provider 不可用时改了 task.version: %d -> %d", beforeVer, after.Version)
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
 
 // TestWorkerPool_ReviewProducesProposalsNoMutation 验证 review 模式只产出
 // proposals 存 response_payload,绝不改 tasks(不改 title、不删子任务)。

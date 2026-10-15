@@ -218,6 +218,71 @@ func (w *WorkerPool) process(ctx context.Context, job domain.AIJobRow) {
 		return
 	}
 
+	// review_refine 模式:把用户的自然语言精化意图翻译为新 ReviewProposal。
+	// 与 review 同样**不动 tasks** —— 只写 ai_jobs.response_payload + 置
+	// ai_status='done',落库由用户逐条 adopt 触发。
+	if mode == domain.AIJobModeReviewRefine {
+		refineReq, perr := ParseRefineRequestPayload(job.RequestPayload)
+		if perr != nil {
+			_ = w.aiTasks.MarkJobFailed(job.ID, "parse refine request:"+perr.Error(), "", 0, 0)
+			_ = w.aiTasks.SetAIStatus(task.ID, domain.AIStatusError, "refine request invalid")
+			return
+		}
+		orig, ferr := FindOriginalReviewProposal(w.aiTasks, task.ID, refineReq.OriginalChangeID)
+		if ferr != nil {
+			w.fail(job, task.ID, "find original proposal:"+ferr.Error())
+			return
+		}
+		if orig == nil {
+			w.fail(job, task.ID, "original review proposal not found for change_id="+refineReq.OriginalChangeID)
+			return
+		}
+
+		ts := TaskSummary{
+			ID:              task.ID,
+			Title:           task.Title,
+			Status:          string(task.Status),
+			SubtaskTitles:   make([]string, 0, len(existingSubs)),
+			SubtaskStatuses: make([]string, 0, len(existingSubs)),
+			DueDate:         task.DueDate,
+		}
+		for _, x := range existingSubs {
+			ts.SubtaskTitles = append(ts.SubtaskTitles, x.Title)
+			ts.SubtaskStatuses = append(ts.SubtaskStatuses, string(x.Status))
+		}
+		// priorRefined 暂传 nil —— MVP 无跨请求会话概念;真正的重复采纳
+		// 防护在 adoptions 表 UNIQUE(ai_job_id, change_id)。
+		refinePrompt := RefineReviewPrompt(
+			w.settings.CurrentDate(), ts, *orig, refineReq.ChipHint, refineReq.UserMessage, nil,
+		)
+		refineLLMReq := CompletionRequest{
+			SystemPrompt: "", // RefineReviewPrompt 自带 system 段
+			UserPrompt:   refinePrompt,
+			Model:        cfg.Model,
+			MaxTokens:    cfg.MaxTokens,
+		}
+		refineOut, rerr := ParseReviewWithRetryDetailed(ctx, provider, refineLLMReq, task.ID, job.ID, 2)
+		if rerr != nil {
+			var raw string
+			var inTok, outTok int
+			if refineOut != nil {
+				raw = refineOut.RawText
+				inTok = refineOut.InputTokens
+				outTok = refineOut.OutputTokens
+			}
+			_ = w.aiTasks.MarkJobFailed(job.ID, rerr.Error(), raw, inTok, outTok)
+			_ = w.aiTasks.SetAIStatus(task.ID, domain.AIStatusError, rerr.Error())
+			return
+		}
+		if err := w.aiTasks.MarkJobSuccess(job.ID, refineOut.RawText, refineOut.InputTokens, refineOut.OutputTokens); err != nil {
+			log.Warn("worker.mark refine success failed", "job_id", job.ID, "error", err.Error())
+		}
+		if err := w.aiTasks.SetAIStatus(task.ID, domain.AIStatusDone, ""); err != nil {
+			log.Warn("worker.mark refine done failed", "task_id", task.ID, "error", err.Error())
+		}
+		return
+	}
+
 	var hints []SubtaskHint
 	if mode != domain.AIJobModeReplace {
 		// 复用 process() 起手 GetTask 拿到的 existingSubs(issue #11)。

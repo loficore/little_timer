@@ -862,6 +862,19 @@ func (c *AITasksCrud) LatestJobForTask(taskID int64) (*domain.AIJobRow, error) {
 	return scanAIJobRow(row)
 }
 
+// LatestSuccessfulReviewJob 返回某 task 最近一条 status=success 且 mode=review
+// 的 ai_job(按 created_at DESC)。review_refine worker 用它在原始 review job 的
+// response_payload 里找 changeID 对应的原始 proposal。
+func (c *AITasksCrud) LatestSuccessfulReviewJob(taskID int64) (*domain.AIJobRow, error) {
+	row := c.db.QueryRow(
+		`SELECT `+aiJobCols+` FROM ai_jobs
+		 WHERE task_id = ? AND mode = 'review' AND status = 'success'
+		 ORDER BY created_at DESC LIMIT 1;`,
+		taskID,
+	)
+	return scanAIJobRow(row)
+}
+
 // ----- 内部辅助 -----
 
 const taskCols = `id, parent_id, raw_text, title, notes, status, due_date,

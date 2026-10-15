@@ -434,8 +434,33 @@ start = "立即扫一遍"
 adopt = "采纳"
 reject = "拒绝"
 adopted = "已采纳"
+refine = "精化"
 empty = "今天没有待处理提议。点上方按钮开始一次回顾。"
 sweptAt = "上次扫一遍：{at}"
+
+[review]
+
+[review.list]
+label = "回顾提案"
+
+[review.empty]
+title = "积压为空"
+last = "最近一次 review: {ts}"
+retrigger = "再触发一次"
+
+[review.refine]
+placeholder = "用自然语言描述你想怎么处理..."
+send = "发送"
+refining = "精化中..."
+reparsing = "重新拆解中..."
+refinedFrom = "已从 #{from} 精化"
+
+[review.chip]
+reschedule = "改期"
+split = "拆分"
+rewrite = "重写"
+mark_done = "完成"
+drop = "放弃"
 
 [dailySweep.settings]
 title = "每日回顾"

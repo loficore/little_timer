@@ -435,8 +435,33 @@ start = "今すぐ実行"
 adopt = "採用"
 reject = "拒否"
 adopted = "採用済み"
+refine = "精緻化"
 empty = "本日の提案はありません。上のボタンを見直しの実行してください。"
 sweptAt = "最終実行: {at}"
+
+[review]
+
+[review.list]
+label = "見直し提案"
+
+[review.empty]
+title = "未処理なし"
+last = "前回の見直し: {ts}"
+retrigger = "もう一度実行"
+
+[review.refine]
+placeholder = "自然言語で希望を記述..."
+send = "送信"
+refining = "精緻化中..."
+reparsing = "再解析中..."
+refinedFrom = "#{from} から精緻化済"
+
+[review.chip]
+reschedule = "延期"
+split = "分割"
+rewrite = "再解析"
+mark_done = "完了"
+drop = "破棄"
 
 [dailySweep.settings]
 title = "毎日の見直し"

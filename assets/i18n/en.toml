@@ -434,8 +434,33 @@ start = "Run Review Now"
 adopt = "Adopt"
 reject = "Reject"
 adopted = "Adopted"
+refine = "Refine"
 empty = "No proposals to handle today. Tap the button above to start a review."
 sweptAt = "Last swept: {at}"
+
+[review]
+
+[review.list]
+label = "Review proposals"
+
+[review.empty]
+title = "No backlog"
+last = "Last review: {ts}"
+retrigger = "Run again"
+
+[review.refine]
+placeholder = "Describe what you want in natural language..."
+send = "Send"
+refining = "Refining..."
+reparsing = "Re-parsing..."
+refinedFrom = "Refined from #{from}"
+
+[review.chip]
+reschedule = "Reschedule"
+split = "Split"
+rewrite = "Rewrite"
+mark_done = "Mark done"
+drop = "Drop"
 
 [dailySweep.settings]
 title = "Daily Review"

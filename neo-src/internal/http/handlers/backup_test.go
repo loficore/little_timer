@@ -137,8 +137,8 @@ func TestHandleBackupConfigUpdate_CloudWithoutMasterPassword(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response not JSON: %v", err)
 	}
-	if got["error"] != "master_password_required" {
-		t.Errorf("error = %v, want master_password_required", got["error"])
+	if got["error"] != "credentials_not_available" {
+		t.Errorf("error = %v, want credentials_not_available", got["error"])
 	}
 }
 
@@ -217,8 +217,8 @@ func TestHandleBackupConfigUpdate_S3WithoutMasterPassword(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response not JSON: %v", err)
 	}
-	if got["error"] != "master_password_required" {
-		t.Errorf("error = %v, want master_password_required", got["error"])
+	if got["error"] != "credentials_not_available" {
+		t.Errorf("error = %v, want credentials_not_available", got["error"])
 	}
 }
 

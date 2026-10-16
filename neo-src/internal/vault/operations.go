@@ -5,14 +5,18 @@
 //   - 备份的所有变更都过 Operations 这一道闸门；
 //   - 云端凭据闸门是单一私有的 requireCloudCredentials()，Phase 3b 实现。
 //
-// Phase 1（scaffold）：方法全部转发到既有 *App 逻辑，不含规则、不含凭据
-// 闸门。规则在 Phase 3 迁移进来；本包当前不被任何 adapter 调用。
+// Phase 3a：主密码 6 个方法从 *App 搬进 vault，vault 持有 SecretStorage。
+// *App 通过 Secrets() / 6 个 master password 方法薄委托；3c 删 *App 转发。
 package vault
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
+	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
+	"little-timer/internal/log"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage/backup"
 )
@@ -31,78 +35,127 @@ func (e *Error) Error() string { return e.Message }
 
 // 哨兵错误。
 var (
-	ErrBackupNotConfigured = &Error{Code: "backup.not_configured", Message: "backup not configured"}
-	ErrBackupNotEnabled    = &Error{Code: "backup.not_enabled", Message: "backup not enabled"}
-	ErrPasswordTooShort    = &Error{Code: "password_too_short", Message: "password too short (minimum 4 characters)"}
+	ErrBackupNotConfigured   = &Error{Code: "backup.not_configured", Message: "backup not configured"}
+	ErrBackupNotEnabled      = &Error{Code: "backup.not_enabled", Message: "backup not enabled"}
+	ErrPasswordTooShort      = &Error{Code: "password_too_short", Message: "password too short (minimum 4 characters)"}
+	ErrCredentialsLocked     = &Error{Code: "master_password_not_unlocked", Message: "凭证已过期，请重新解锁", Mode: "unlock"}
+	ErrCredentialsUnavailable = &Error{Code: "credentials_not_available", Message: "凭证不可用，请先设置主密码", Mode: ""} // Mode 动态
 )
 
 // BackupRuntime 是备份用例需要的运行时依赖。*App 通过 vault_adapter.go
 // 里的 appRuntime 满足它。
 type BackupRuntime interface {
-	// Manager 返回当前 BackupManager 快照；未配置时为 nil。
 	Manager() *backup.BackupManager
-	// Rebuild 从持久化 BackupConfig 重建 BackupManager。
 	Rebuild(ctx context.Context) error
-}
-
-// MasterPasswordRuntime 是 Phase 1 的主密码依赖，由 *App 现有方法满足。
-// Phase 3a 会把主密码逻辑搬进本包，此接口随之删除。
-type MasterPasswordRuntime interface {
-	HasMasterPassword() bool
-	IsUnlocked() bool
-	UnlockCredentials(password string) domain.UnlockResult
-	SetMasterPassword(password string) error
-	LockCredentials()
-	GetMasterPasswordStatus() domain.MasterPasswordStatus
-}
-
-// Runtime 是 Operations 的运行时依赖并集。
-type Runtime interface {
-	BackupRuntime
-	MasterPasswordRuntime
 }
 
 // Operations 是 vault 域的用例层。
 type Operations struct {
-	// secretPath 是加密 blob 在磁盘上的路径。Phase 3a 用它构造
-	// crypto.SecretStorage；Phase 1 未使用。
-	secretPath string
-	settings   *settings.SettingsManager
-	runtime    Runtime
+	// secret 是进程内主密码存储 + 加密 blob；构造期由 New 一次性创建。
+	secret *crypto.SecretStorage
+	// settings 用来同步 BackupConfig 里的 HasMasterPassword / CredentialLockedUntil 等字段。
+	settings *settings.SettingsManager
+	// runtime 给备份用例使用；master password 方法不依赖它。
+	runtime BackupRuntime
 }
 
 // New 构造 Operations。secretPath 为空表示内存-only。
-func New(secretPath string, settings *settings.SettingsManager, runtime Runtime) *Operations {
-	return &Operations{secretPath: secretPath, settings: settings, runtime: runtime}
+func New(secretPath string, settings *settings.SettingsManager, runtime BackupRuntime) *Operations {
+	return &Operations{
+		secret:   crypto.New(secretPath),
+		settings: settings,
+		runtime:  runtime,
+	}
 }
 
-// ---- Master password（Phase 1 转发；Phase 3a 搬进来）----
+// Secrets 返回底层的 SecretStorage，供需要存/取受主密码保护的 secret
+// 的调用方使用（如 LLM API Key）。3a 时仍开放此出口；3c 后应改为命名空间
+// 化的 Store/Retrieve 方法。
+func (o *Operations) Secrets() *crypto.SecretStorage {
+	return o.secret
+}
 
-// HasMasterPassword 转发到 runtime。
-func (o *Operations) HasMasterPassword() bool { return o.runtime.HasMasterPassword() }
+// ---- 主密码 ----
 
-// IsUnlocked 转发到 runtime。
-func (o *Operations) IsUnlocked() bool { return o.runtime.IsUnlocked() }
+// HasMasterPassword 返回是否已设置主密码（基于磁盘上的凭据或 BackupConfig 标志）。
+func (o *Operations) HasMasterPassword() bool {
+	cfg := o.settings.BackupConfig()
+	if cfg.HasMasterPassword {
+		return true
+	}
+	return o.secret.HasMasterPassword()
+}
 
-// UnlockCredentials 转发到 runtime。
+// IsUnlocked 返回凭据是否已解锁且锁定期已过。
+func (o *Operations) IsUnlocked() bool {
+	cfg := o.settings.BackupConfig()
+	if !o.secret.IsLocked() && cfg.CredentialLockedUntil <= time.Now().Unix() {
+		return true
+	}
+	return false
+}
+
+// UnlockCredentials 使用给定密码解锁凭据并返回结构化结果。
+// 未设置主密码时 `Success` 恒为 true。
 func (o *Operations) UnlockCredentials(password string) domain.UnlockResult {
-	return o.runtime.UnlockCredentials(password)
+	cfg := o.settings.BackupConfig()
+	if !o.HasMasterPassword() {
+		log.Info("UnlockCredentials: no master password")
+		cfg.CredentialLockedUntil = 0
+		cfg.CredentialsUnlockTime = time.Now().Unix()
+		_ = o.settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
+		return domain.UnlockResult{Success: true, LockedUntil: 0}
+	}
+	err := o.secret.Unlock([]byte(password))
+	if err != nil {
+		log.Error("UnlockCredentials: failed", "error", err.Error())
+		return domain.UnlockResult{Success: false, LockedUntil: o.secret.LockoutUntil()}
+	}
+	log.Info("UnlockCredentials: success")
+	cfg.CredentialLockedUntil = 0
+	cfg.CredentialsUnlockTime = time.Now().Unix()
+	_ = o.settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
+	return domain.UnlockResult{Success: true, LockedUntil: 0}
 }
 
-// SetMasterPassword 转发到 runtime。
+// SetMasterPassword 设置主密码并同步更新 BackupConfig 中的标志。
+// 密码短于 4 字符 → ErrPasswordTooShort。
 func (o *Operations) SetMasterPassword(password string) error {
-	return o.runtime.SetMasterPassword(password)
+	if len(password) < 4 {
+		return ErrPasswordTooShort
+	}
+	if err := o.secret.SetMasterPassword([]byte(password)); err != nil {
+		log.Error("SetMasterPassword: failed", "error", err.Error())
+		return err
+	}
+	log.Info("SetMasterPassword: success")
+	cfg := o.settings.BackupConfig()
+	cfg.HasMasterPassword = true
+	cfg.CredentialLockedUntil = 0
+	return o.settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
 }
 
-// LockCredentials 转发到 runtime。
-func (o *Operations) LockCredentials() { o.runtime.LockCredentials() }
-
-// GetMasterPasswordStatus 转发到 runtime。
+// GetMasterPasswordStatus 返回主密码相关的状态信息。
 func (o *Operations) GetMasterPasswordStatus() domain.MasterPasswordStatus {
-	return o.runtime.GetMasterPasswordStatus()
+	cfg := o.settings.BackupConfig()
+	return domain.MasterPasswordStatus{
+		HasPassword: o.HasMasterPassword(),
+		Unlocked:    o.IsUnlocked(),
+		LockedUntil: cfg.CredentialLockedUntil,
+		UnlockTime:  cfg.CredentialsUnlockTime,
+	}
 }
 
-// ---- Backup（Phase 1 转发；Phase 3b 加凭据闸门）----
+// LockCredentials 立即锁定凭据：将锁定期设为当前时间并清空内存中的密钥缓存。
+func (o *Operations) LockCredentials() {
+	log.Info("LockCredentials: success")
+	cfg := o.settings.BackupConfig()
+	cfg.CredentialLockedUntil = time.Now().Unix() + 1
+	_ = o.settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
+	o.secret.Lock()
+}
+
+// ---- Backup（Phase 3b 加凭据闸门）----
 
 // GetBackupConfig 返回持久化的 BackupConfig（secret 未打码，由 adapter 处理）。
 func (o *Operations) GetBackupConfig() domain.BackupConfig {
@@ -110,15 +163,29 @@ func (o *Operations) GetBackupConfig() domain.BackupConfig {
 }
 
 // UpdateBackupConfig 从 JSON 持久化新配置并重建 manager。
-func (o *Operations) UpdateBackupConfig(ctx context.Context, json string) error {
-	if err := o.settings.UpdateBackupConfigFromJSON(json); err != nil {
+// 云端 target 切换前鉴权：跟原始 handler 一致——
+//   - inbound target 是 webdav/s3 且持久化 cfg 已有该 target 凭据：需 unlocked
+//   - inbound target 是 webdav/s3 但持久化 cfg 没该 target 凭据：需主密码 + unlocked
+//     （inbound JSON 会带新凭据进来）
+//   - local target：不走闸门
+func (o *Operations) UpdateBackupConfig(ctx context.Context, jsonStr string) error {
+	var probe struct {
+		TargetType string `json:"target_type"`
+	}
+	_ = json.Unmarshal([]byte(jsonStr), &probe)
+	if probe.TargetType == "webdav" || probe.TargetType == "s3" {
+		if err := o.requireAuthForConfigUpdate(probe.TargetType); err != nil {
+			return err
+		}
+	}
+	if err := o.settings.UpdateBackupConfigFromJSON(jsonStr); err != nil {
 		return err
 	}
 	_ = o.runtime.Rebuild(ctx)
 	return nil
 }
 
-// CreateBackup 触发一次备份。Phase 3b 会在最前面加 requireCloudCredentials()。
+// CreateBackup 触发一次备份。云端 target 需要凭据可用 + 未锁。
 func (o *Operations) CreateBackup() (string, error) {
 	mgr := o.runtime.Manager()
 	if mgr == nil {
@@ -126,6 +193,9 @@ func (o *Operations) CreateBackup() (string, error) {
 	}
 	if !o.settings.BackupConfig().Enabled {
 		return "", ErrBackupNotEnabled
+	}
+	if err := o.requireCloudCredentials(o.settings.BackupConfig().TargetType.String()); err != nil {
+		return "", err
 	}
 	return mgr.CreateBackup()
 }
@@ -136,10 +206,13 @@ func (o *Operations) RestoreBackup(name string) error {
 	if mgr == nil {
 		return ErrBackupNotConfigured
 	}
+	if err := o.requireCloudCredentials(o.settings.BackupConfig().TargetType.String()); err != nil {
+		return err
+	}
 	return mgr.RestoreFromBackup(name)
 }
 
-// ListBackups 列出现有备份；未配置时返回空切片。
+// ListBackups 列出现有备份；未配置时返回空切片。读操作不需闸门。
 func (o *Operations) ListBackups() ([]backup.BackupInfo, error) {
 	mgr := o.runtime.Manager()
 	if mgr == nil {
@@ -158,6 +231,9 @@ func (o *Operations) DeleteBackup(name string) error {
 	if mgr == nil {
 		return ErrBackupNotConfigured
 	}
+	if err := o.requireCloudCredentials(o.settings.BackupConfig().TargetType.String()); err != nil {
+		return err
+	}
 	return mgr.DeleteBackup(name)
 }
 
@@ -170,10 +246,13 @@ func (o *Operations) VerifyBackup() error {
 	if !o.settings.BackupConfig().Enabled {
 		return ErrBackupNotEnabled
 	}
+	if err := o.requireCloudCredentials(o.settings.BackupConfig().TargetType.String()); err != nil {
+		return err
+	}
 	return mgr.TestConnection()
 }
 
-// BackupSummary 返回备份统计。
+// BackupSummary 返回备份统计。读操作不需闸门。
 func (o *Operations) BackupSummary() (backup.BackupSummary, error) {
 	mgr := o.runtime.Manager()
 	if mgr == nil {
@@ -181,3 +260,103 @@ func (o *Operations) BackupSummary() (backup.BackupSummary, error) {
 	}
 	return mgr.Summary()
 }
+
+// requireCloudCredentials 是 backup 操作的闸门。
+//
+//   - target 不是 webdav/s3：返 nil（local 不需要云端凭据）
+//   - cloud target + 持久化 cfg 没存该 target 凭据：
+//     mode = "setup"（无主密码时）| "unlock"（有主密码但锁着）
+//   - cloud target + 持久化 cfg 有凭据但 IsUnlocked()=false：
+//     mode = "unlock"
+//
+// backup 操作必须有凭据 + 已解锁；不能仅靠主密码鉴权（inbound 没新凭据）。
+//
+// Adapter 拿 Mode 拼 action.params.mode。
+func (o *Operations) requireCloudCredentials(target string) *Error {
+	if target != "webdav" && target != "s3" {
+		return nil
+	}
+	cfg := o.settings.BackupConfig()
+	var hasCreds bool
+	switch target {
+	case "webdav":
+		hasCreds = cfg.WebDAVPassword != ""
+	case "s3":
+		hasCreds = cfg.S3AccessKey != "" && cfg.S3SecretKey != ""
+	}
+	if !hasCreds {
+		mode := "setup"
+		if o.HasMasterPassword() {
+			mode = "unlock"
+		}
+		return &Error{
+			Code:    ErrCredentialsUnavailable.Code,
+			Message: ErrCredentialsUnavailable.Message,
+			Mode:    mode,
+		}
+	}
+	if !o.IsUnlocked() {
+		return &Error{
+			Code:    ErrCredentialsLocked.Code,
+			Message: ErrCredentialsLocked.Message,
+			Mode:    ErrCredentialsLocked.Mode,
+		}
+	}
+	return nil
+}
+
+// requireAuthForConfigUpdate 是 config update 闸门（比 requireCloudCredentials 宽松）。
+//
+//   - 当前 cfg 已有该 target 凭据：只需 unlocked
+//   - 当前 cfg 没该 target 凭据：需主密码 + unlocked
+//     （inbound JSON 会带新凭据，所以仅鉴权就够）
+//   - 无主密码：返 setup modal
+//   - 已设主密码但锁着：返 unlock modal
+func (o *Operations) requireAuthForConfigUpdate(target string) *Error {
+	cfg := o.settings.BackupConfig()
+	var hasCreds bool
+	switch target {
+	case "webdav":
+		hasCreds = cfg.WebDAVPassword != ""
+	case "s3":
+		hasCreds = cfg.S3AccessKey != "" && cfg.S3SecretKey != ""
+	}
+	if hasCreds {
+		if !o.IsUnlocked() {
+			return &Error{
+				Code:    ErrCredentialsLocked.Code,
+				Message: ErrCredentialsLocked.Message,
+				Mode:    ErrCredentialsLocked.Mode,
+			}
+		}
+		return nil
+	}
+	if !o.HasMasterPassword() {
+		return &Error{
+			Code:    ErrCredentialsUnavailable.Code,
+			Message: ErrCredentialsUnavailable.Message,
+			Mode:    "setup",
+		}
+	}
+	if !o.IsUnlocked() {
+		return &Error{
+			Code:    ErrCredentialsLocked.Code,
+			Message: ErrCredentialsLocked.Message,
+			Mode:    ErrCredentialsLocked.Mode,
+		}
+	}
+	return nil
+}
+
+// backupConfigToJSON 把 BackupConfig 序列化成可直接喂给
+// SettingsManager.UpdateBackupConfigFromJSON 的 JSON 字符串。BackupConfig
+// 的 JSON tag 跟解析器期望的 wire 形状一致，直接 marshal 即可。
+func backupConfigToJSON(cfg domain.BackupConfig) string {
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+

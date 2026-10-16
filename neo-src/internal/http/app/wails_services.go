@@ -20,6 +20,7 @@ import (
 	"little-timer/internal/domain"
 	"little-timer/internal/habits"
 	"little-timer/internal/log"
+	"little-timer/internal/vault"
 )
 
 // modeKey 把当前 clock 模式渲染成 JS 客户端期望的稳定字符串。
@@ -512,7 +513,7 @@ func NewBackupService(app *App) *BackupService { return &BackupService{app: app}
 
 // GetBackupConfig 返回持久化的 BackupConfig，secret 已打码。
 func (s *BackupService) GetBackupConfig() (any, error) {
-	cfg := s.app.Settings.BackupConfig()
+	cfg := s.app.Vault.GetBackupConfig()
 	log.Debug("backup.get_config", "method", "BackupService.GetBackupConfig", "target_type", cfg.TargetType.String())
 	return map[string]any{
 		"enabled":              cfg.Enabled,
@@ -533,134 +534,124 @@ func (s *BackupService) GetBackupConfig() (any, error) {
 }
 
 func (s *BackupService) UpdateBackupConfig(json string) (any, error) {
-	cfg := s.app.Settings.BackupConfig()
-	log.Debug("backup.update_config", "method", "BackupService.UpdateBackupConfig", "target_type", cfg.TargetType.String())
-	if err := s.app.Settings.UpdateBackupConfigFromJSON(json); err != nil {
+	a := s.app
+	log.Debug("backup.update_config", "method", "BackupService.UpdateBackupConfig")
+	if err := a.Vault.UpdateBackupConfig(context.Background(), json); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.update_config rejected", "method", "BackupService.UpdateBackupConfig", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
 		log.Error("backup.update_config failed", "method", "BackupService.UpdateBackupConfig", "error", err.Error())
 		return map[string]any{"success": false, "error": err.Error()}, nil
 	}
-	// 配置已持久化；据此重建 manager。重建失败绝不能让调用失败 ——
-	// 配置已存下，manager 会在下次配置变更或启动时重建。
-	if err := s.app.RebuildBackup(context.Background()); err != nil {
-		log.Error("UpdateBackupConfig: rebuild failed", "error", err.Error())
-	}
-	log.Info("backup.update_config ok", "method", "BackupService.UpdateBackupConfig", "target_type", cfg.TargetType.String())
+	log.Info("backup.update_config ok", "method", "BackupService.UpdateBackupConfig")
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) CreateBackup() (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.create", "method", "BackupService.CreateBackup", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": false, "error": "backup not configured"}, nil
-	}
-	if !cfg.Enabled {
-		return map[string]any{"success": false, "error": "backup not enabled"}, nil
-	}
-	name, err := bm.CreateBackup()
+	log.Debug("backup.create", "method", "BackupService.CreateBackup")
+	name, err := a.Vault.CreateBackup()
 	if err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.create rejected", "method", "BackupService.CreateBackup", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
 		log.Error("backup.create failed", "method", "BackupService.CreateBackup", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
+		return nil, err
 	}
-	log.Info("backup.create ok", "method", "BackupService.CreateBackup", "target_type", cfg.TargetType.String(), "backup_name", name)
+	log.Info("backup.create ok", "method", "BackupService.CreateBackup", "backup_name", name)
 	return map[string]any{"success": true, "backup_path": name}, nil
 }
 
 func (s *BackupService) RestoreBackup(name string) (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.restore", "method", "BackupService.RestoreBackup", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": false, "error": "backup not configured"}, nil
+	log.Debug("backup.restore", "method", "BackupService.RestoreBackup", "name", name)
+	if err := a.Vault.RestoreBackup(name); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.restore rejected", "method", "BackupService.RestoreBackup", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
+		log.Error("backup.restore failed", "method", "BackupService.RestoreBackup", "name", name, "error", err.Error())
+		return nil, err
 	}
-	if err := bm.RestoreFromBackup(name); err != nil {
-		log.Error("backup.restore failed", "method", "BackupService.RestoreBackup", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
-	}
-	log.Info("backup.restore ok", "method", "BackupService.RestoreBackup", "target_type", cfg.TargetType.String(), "backup_name", name)
+	log.Info("backup.restore ok", "method", "BackupService.RestoreBackup", "name", name)
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) DeleteBackup(name string) (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.delete", "method", "BackupService.DeleteBackup", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": false, "error": "backup not configured"}, nil
+	log.Debug("backup.delete", "method", "BackupService.DeleteBackup", "name", name)
+	if err := a.Vault.DeleteBackup(name); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.delete rejected", "method", "BackupService.DeleteBackup", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
+		log.Error("backup.delete failed", "method", "BackupService.DeleteBackup", "name", name, "error", err.Error())
+		return nil, err
 	}
-	if err := bm.DeleteBackup(name); err != nil {
-		log.Error("backup.delete failed", "method", "BackupService.DeleteBackup", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
-	}
-	log.Info("backup.delete ok", "method", "BackupService.DeleteBackup", "target_type", cfg.TargetType.String(), "backup_name", name)
+	log.Info("backup.delete ok", "method", "BackupService.DeleteBackup", "name", name)
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) VerifyBackup() (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.verify", "method", "BackupService.VerifyBackup", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": false, "error": "backup not configured"}, nil
-	}
-	if !cfg.Enabled {
-		return map[string]any{"success": false, "error": "backup not enabled"}, nil
-	}
-	if err := bm.TestConnection(); err != nil {
+	log.Debug("backup.verify", "method", "BackupService.VerifyBackup")
+	if err := a.Vault.VerifyBackup(); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.verify rejected", "method", "BackupService.VerifyBackup", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
 		log.Error("backup.verify failed", "method", "BackupService.VerifyBackup", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
+		return nil, err
 	}
-	log.Info("backup.verify ok", "method", "BackupService.VerifyBackup", "target_type", cfg.TargetType.String())
+	log.Info("backup.verify ok", "method", "BackupService.VerifyBackup")
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) ListBackups() (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.list", "method", "BackupService.ListBackups", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": true, "backups": []any{}}, nil
-	}
-	items, err := bm.ListBackups()
+	log.Debug("backup.list", "method", "BackupService.ListBackups")
+	items, err := a.Vault.ListBackups()
 	if err != nil {
 		log.Error("backup.list failed", "method", "BackupService.ListBackups", "error", err.Error())
 		return map[string]any{"success": true, "backups": []any{}}, nil
 	}
-	log.Info("backup.list ok", "method", "BackupService.ListBackups", "target_type", cfg.TargetType.String(), "count", len(items))
+	log.Info("backup.list ok", "method", "BackupService.ListBackups", "count", len(items))
 	return map[string]any{"success": true, "backups": items}, nil
 }
 
 func (s *BackupService) GetMasterPasswordStatus() (any, error) {
-	status := s.app.GetMasterPasswordStatus()
+	status := s.app.Vault.GetMasterPasswordStatus()
 	log.Debug("backup.master_status", "method", "BackupService.GetMasterPasswordStatus", "has_cred", status.HasPassword)
 	return status, nil
 }
 
 func (s *BackupService) SetMasterPassword(password string) (any, error) {
+	a := s.app
 	log.Debug("backup.set_master", "method", "BackupService.SetMasterPassword", "has_cred", password != "")
-	if password == "" {
-		return map[string]any{"success": false, "error": "missing password"}, nil
-	}
-	if len(password) < 4 {
-		return map[string]any{"success": false, "error": "password too short (minimum 4 characters)"}, nil
-	}
-	if err := s.app.SetMasterPassword(password); err != nil {
+	if err := a.Vault.SetMasterPassword(password); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.set_master rejected", "method", "BackupService.SetMasterPassword", "code", ve.Code, "error", ve.Message)
+			return map[string]any{"success": false, "code": ve.Code, "error": ve.Message}, nil
+		}
 		log.Error("backup.set_master failed", "method", "BackupService.SetMasterPassword", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
+		return nil, err
 	}
 	log.Info("backup.set_master ok", "method", "BackupService.SetMasterPassword")
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) UnlockCredentials(password string) (any, error) {
+	a := s.app
 	log.Debug("backup.unlock", "method", "BackupService.UnlockCredentials")
-	res := s.app.UnlockCredentials(password)
+	res := a.Vault.UnlockCredentials(password)
 	log.Info("backup.unlock ok", "method", "BackupService.UnlockCredentials", "success", res.Success)
 	return map[string]any{
 		"success":      res.Success,
@@ -669,10 +660,29 @@ func (s *BackupService) UnlockCredentials(password string) (any, error) {
 }
 
 func (s *BackupService) LockCredentials() (any, error) {
+	a := s.app
 	log.Debug("backup.lock", "method", "BackupService.LockCredentials")
-	s.app.LockCredentials()
+	a.Vault.LockCredentials()
 	log.Info("backup.lock ok", "method", "BackupService.LockCredentials")
 	return map[string]any{"success": true}, nil
+}
+
+// backupErrorMap 把 vault.Error 转成 Wails 调用方期望的 map 形状。
+// 凭据/锁错误带 action（前端 modal），其它错误只有 code + message。
+func backupErrorMap(ve *vault.Error) map[string]any {
+	m := map[string]any{
+		"success": false,
+		"code":    ve.Code,
+		"message": ve.Message,
+	}
+	if ve.Mode != "" {
+		m["action"] = map[string]any{
+			"type":   "show_modal",
+			"target": "master_password",
+			"params": map[string]any{"mode": ve.Mode},
+		}
+	}
+	return m
 }
 
 // 共享辅助函数 —— 从 handlers/ 复制而来，保持本文件自包含。

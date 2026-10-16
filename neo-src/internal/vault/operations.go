@@ -87,7 +87,15 @@ func (o *Operations) HasMasterPassword() bool {
 }
 
 // IsUnlocked 返回凭据是否已解锁且锁定期已过。
+//
+// 无主密码时直接返 true：fresh SecretStorage 的 masterPassword == nil
+// 会让 secret.IsLocked() == true，但“没设主密码”不是“锁定”——没有
+// 任何可锁的东西，也不需要 Unlock。直接返 false 会导致
+// requireCloudCredentials 在“有凭据 + 无主密码”时弹无意义的解锁 modal。
 func (o *Operations) IsUnlocked() bool {
+	if !o.HasMasterPassword() {
+		return true
+	}
 	cfg := o.settings.BackupConfig()
 	if !o.secret.IsLocked() && cfg.CredentialLockedUntil <= time.Now().Unix() {
 		return true

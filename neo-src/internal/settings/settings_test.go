@@ -337,6 +337,33 @@ func TestManagerUpdateBackupConfigFromJSON(t *testing.T) {
 	}
 }
 
+// TestManagerUpdateBackupConfigFromJSON_ParsesCredentialFields 回归测试：
+// credential 三字段（credential_locked_until / credentials_unlock_time /
+// credential_unlock_attempts）必须被解析，不能静默丢弃。save/load 路径
+// 读写这三个字段，parser 漏了会造成字段永远为 0。
+func TestManagerUpdateBackupConfigFromJSON_ParsesCredentialFields(t *testing.T) {
+	mgr := newTestManager(t)
+
+	payload, _ := json.Marshal(map[string]any{
+		"credential_locked_until":    1111111111,
+		"credentials_unlock_time":    2222222222,
+		"credential_unlock_attempts": 3,
+	})
+	if err := mgr.UpdateBackupConfigFromJSON(string(payload)); err != nil {
+		t.Fatalf("UpdateBackupConfigFromJSON: %v", err)
+	}
+	bc := mgr.BackupConfig()
+	if bc.CredentialLockedUntil != 1111111111 {
+		t.Errorf("CredentialLockedUntil = %d, want 1111111111", bc.CredentialLockedUntil)
+	}
+	if bc.CredentialsUnlockTime != 2222222222 {
+		t.Errorf("CredentialsUnlockTime = %d, want 2222222222", bc.CredentialsUnlockTime)
+	}
+	if bc.CredentialUnlockAttempts != 3 {
+		t.Errorf("CredentialUnlockAttempts = %d, want 3", bc.CredentialUnlockAttempts)
+	}
+}
+
 func TestManagerBackupConfigCredentialsEncryptedAtRest(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "settings.db")

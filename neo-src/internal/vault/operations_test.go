@@ -234,3 +234,59 @@ func TestCreateBackup_CloudTarget_HasCreds_Unlocked_PassesGate(t *testing.T) {
 		t.Fatal("expected panic or err; got nil")
 	}
 }
+
+// ---- requireAuthForConfigUpdate（config update 闸门）----
+// 跟原 handler 语义对齐：已有 target 凭据时不检查（即使锁着），
+// 因为 inbound JSON 不一定在改凭据。
+
+func TestUpdateBackupConfig_HasCreds_Locked_NoUnlockCheck(t *testing.T) {
+	v := newTestVault(t)
+	// 持久化 cfg 已有 webdav 凭据
+	if err := v.settings.UpdateBackupConfigFromJSON(`{"target_type":"webdav","webdav_password":"old","webdav_url":"http://old.example"}`); err != nil {
+		t.Fatalf("set cfg: %v", err)
+	}
+	v.LockCredentials()
+	// inbound 仍是 webdav，hasCreds=true → 跳闸门
+	err := v.UpdateBackupConfig(context.Background(), `{"target_type":"webdav","webdav_url":"http://new.example"}`)
+	if err != nil {
+		t.Fatalf("update with creds + locked should succeed (原 handler 行为): %v", err)
+	}
+	if u := v.settings.BackupConfig().WebDAVURL; u != "http://new.example" {
+		t.Errorf("URL not updated: %q", u)
+	}
+}
+
+func TestUpdateBackupConfig_NoCreds_NoMasterPassword(t *testing.T) {
+	v := newTestVault(t)
+	if err := v.settings.UpdateBackupConfigFromJSON(`{"target_type":"webdav","enabled":true}`); err != nil {
+		t.Fatalf("set cfg: %v", err)
+	}
+	// 没凭据 + 没主密码 → 返 setup
+	err := v.UpdateBackupConfig(context.Background(), `{"target_type":"webdav","webdav_url":"http://x"}`)
+	var ve *Error
+	if !errors.As(err, &ve) {
+		t.Fatalf("err = %v, not *Error", err)
+	}
+	if ve.Code != "credentials_not_available" || ve.Mode != "setup" {
+		t.Errorf("got code=%q mode=%q, want credentials_not_available/setup", ve.Code, ve.Mode)
+	}
+}
+
+func TestUpdateBackupConfig_NoCreds_Locked(t *testing.T) {
+	v := newTestVault(t)
+	if err := v.settings.UpdateBackupConfigFromJSON(`{"target_type":"webdav","enabled":true}`); err != nil {
+		t.Fatalf("set cfg: %v", err)
+	}
+	if err := v.SetMasterPassword("long-enough"); err != nil {
+		t.Fatalf("set master password: %v", err)
+	}
+	v.LockCredentials()
+	err := v.UpdateBackupConfig(context.Background(), `{"target_type":"webdav","webdav_url":"http://x"}`)
+	var ve *Error
+	if !errors.As(err, &ve) {
+		t.Fatalf("err = %v, not *Error", err)
+	}
+	if ve.Code != "master_password_not_unlocked" || ve.Mode != "unlock" {
+		t.Errorf("got code=%q mode=%q, want master_password_not_unlocked/unlock", ve.Code, ve.Mode)
+	}
+}

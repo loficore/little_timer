@@ -322,13 +322,7 @@ func (o *Operations) requireAuthForConfigUpdate(target string) *Error {
 		hasCreds = cfg.S3AccessKey != "" && cfg.S3SecretKey != ""
 	}
 	if hasCreds {
-		if !o.IsUnlocked() {
-			return &Error{
-				Code:    ErrCredentialsLocked.Code,
-				Message: ErrCredentialsLocked.Message,
-				Mode:    ErrCredentialsLocked.Mode,
-			}
-		}
+		// 原 handler：有凭据就不检查（无论锁定与否，inbound 不一定在改凭据）
 		return nil
 	}
 	if !o.HasMasterPassword() {

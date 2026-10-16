@@ -54,13 +54,8 @@ type App struct {
 	// Habits 是 habit 域的用例层；Phase 1 转发到 storage，Phase 2 起
 	// 接管 name 校验、唯一性、默认值、日期默认、进度计算。
 	Habits *habits.Operations
-	// Vault 是凭据 + 备份域的用例层；Phase 1 转发到 *App 既有逻辑，
-	// Phase 3a/3b 接管主密码与云端凭据闸门。
+	// Vault 是凭据 + 备份域的用例层。Phase 3a 接管主密码 + SecretStorage。
 	Vault *vault.Operations
-
-	// secrets 是进程内主密码存储，由辅助方法惰性创建，
-	// 因此调用方构造时可以省略它。
-	secrets *crypto.SecretStorage
 }
 
 // NewApp 使用给定的依赖与默认内存状态构造一个 App。
@@ -88,7 +83,7 @@ func NewApp(
 	}
 	if sm != nil {
 		secretPath := filepath.Join(filepath.Dir(dbPath), "secret.db")
-		a.Vault = vault.New(secretPath, sm, appRuntime{a})
+		a.Vault = vault.New(secretPath, sm, a)
 	}
 	return a
 }
@@ -113,36 +108,36 @@ func (a *App) RUnlock() { a.mu.RUnlock() }
 // 处理器和 Wails 服务通过 BackupManager()（RLock 快照）读取当前管理器，
 // 配置变更时调用 RebuildBackup（写锁）。
 
-// BackupManager 返回当前 BackupManager 快照。未配置备份时可能为 nil
-// （处理器将 nil 视为"未配置备份"）。
-func (a *App) BackupManager() *backup.BackupManager {
+// Manager 返回当前 BackupManager 快照。未配置备份时可能为 nil
+// （处理器将 nil 视为"未配置备份"）。满足 vault.BackupRuntime。
+func (a *App) Manager() *backup.BackupManager {
 	a.RLock()
 	defer a.RUnlock()
 	return a.Backup
 }
 
-// RebuildBackup 从持久化的 BackupConfig 重建 BackupManager，并在 App 写锁保护下
-// 换入。云端 target（webdav/s3）构建失败时，本进程禁用备份:记录带 target
-// 类型的错误日志、将 a.Backup 置 nil 并返回错误——绝不静默回退到 local，
-// 因为 UI/设置宣传的是云端 target，本地备份会偏离配置的行为。仅 local
-// target 构建失败时，记录日志并回退到以默认备份目录为根的 local 适配器;
-// 只有该回退也失败时才将 a.Backup 置 nil（本进程禁用备份）。
-func (a *App) RebuildBackup(ctx context.Context) error {
+// Rebuild 从持久化的 BackupConfig 重建 BackupManager，并在 App 写锁保护下
+// 换入。满足 vault.BackupRuntime。云端 target（webdav/s3）构建失败时，本进程
+// 禁用备份:记录带 target 类型的错误日志、将 a.Backup 置 nil 并返回错误——
+// 绝不静默回退到 local，因为 UI/设置宣传的是云端 target，本地备份会偏离
+// 配置的行为。仅 local target 构建失败时，记录日志并回退到以默认备份目录
+// 为根的 local 适配器;只有该回退也失败时才将 a.Backup 置 nil（本进程禁用备份）。
+func (a *App) Rebuild(ctx context.Context) error {
 	backupDir := defaultBackupDir(a.DBPath)
 	cfg := a.Settings.BackupConfig()
 	mgr, err := backup.NewFromConfig(ctx, a.SQLite, a.DBPath, backupDir, cfg)
 	if err != nil {
 		if cfg.TargetType == domain.BackupTargetWebDAV || cfg.TargetType == domain.BackupTargetS3 {
-			log.Error("RebuildBackup: NewFromConfig failed for cloud target, disabling backup", "target_type", cfg.TargetType.String(), "error", err.Error())
+			log.Error("Rebuild: NewFromConfig failed for cloud target, disabling backup", "target_type", cfg.TargetType.String(), "error", err.Error())
 			a.Lock()
 			a.Backup = nil
 			a.Unlock()
 			return err
 		}
-		log.Error("RebuildBackup: NewFromConfig failed, falling back to local", "error", err.Error())
+		log.Error("Rebuild: NewFromConfig failed, falling back to local", "error", err.Error())
 		mgr, err = backup.NewLocal(a.SQLite, a.DBPath, backupDir)
 		if err != nil {
-			log.Error("RebuildBackup: NewLocal fallback failed, disabling backup", "error", err.Error())
+			log.Error("Rebuild: NewLocal fallback failed, disabling backup", "error", err.Error())
 			a.Lock()
 			a.Backup = nil
 			a.Unlock()
@@ -152,7 +147,7 @@ func (a *App) RebuildBackup(ctx context.Context) error {
 	a.Lock()
 	a.Backup = mgr
 	a.Unlock()
-	log.Info("RebuildBackup: ok", "target_type", cfg.TargetType.String())
+	log.Info("Rebuild: ok", "target_type", cfg.TargetType.String())
 	return nil
 }
 
@@ -313,102 +308,6 @@ func (a *App) SaveProgressLocked() {
 	log.Info("timer.session.save_progress", "session_id", row.ID, "elapsed", state.GetElapsedSeconds())
 }
 
-// 主密码辅助方法。状态存放在 SettingsManager 的 BackupConfig（已带锁定
-// 字段）加上用于保存解锁密码本身的 SecretStorage。
-//
-// 所有辅助方法都容忍 Secrets 为 nil（视为"未设置主密码"）。
-
-func (a *App) ensureSecrets() *crypto.SecretStorage {
-	if a.secrets == nil {
-		a.secrets = crypto.New(filepath.Join(filepath.Dir(a.DBPath), "secret.db"))
-	}
-	return a.secrets
-}
-
-// Secrets 返回 SecretStorage(惰性初始化)。供需要存/取受主密码保护的 secret
-// 的处理器使用(例如 LLM API Key)。
-func (a *App) Secrets() *crypto.SecretStorage {
-	return a.ensureSecrets()
-}
-
-// HasMasterPassword 返回是否已设置主密码（基于磁盘上的凭据或 BackupConfig 标志）。
-func (a *App) HasMasterPassword() bool {
-	cfg := a.Settings.BackupConfig()
-	if cfg.HasMasterPassword {
-		return true
-	}
-	return a.ensureSecrets().HasMasterPassword()
-}
-
-// IsUnlocked 返回凭据是否已解锁且锁定期已过。
-func (a *App) IsUnlocked() bool {
-	cfg := a.Settings.BackupConfig()
-	if !a.ensureSecrets().IsLocked() && cfg.CredentialLockedUntil <= time.Now().Unix() {
-		return true
-	}
-	return false
-}
-
-// UnlockCredentials 使用给定密码解锁凭据并返回结构化结果。
-// 未设置主密码时 `Success` 恒为 true。
-func (a *App) UnlockCredentials(password string) domain.UnlockResult {
-	cfg := a.Settings.BackupConfig()
-	if !a.HasMasterPassword() {
-		log.Info("UnlockCredentials: no master password")
-		// 无主密码：总是成功。
-		cfg.CredentialLockedUntil = 0
-		cfg.CredentialsUnlockTime = time.Now().Unix()
-		_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
-		return domain.UnlockResult{Success: true, LockedUntil: 0}
-	}
-	err := a.ensureSecrets().Unlock([]byte(password))
-	if err != nil {
-		log.Error("UnlockCredentials: failed", "error", err.Error())
-		return domain.UnlockResult{Success: false, LockedUntil: a.ensureSecrets().LockoutUntil()}
-	}
-	log.Info("UnlockCredentials: success")
-	cfg.CredentialLockedUntil = 0
-	cfg.CredentialsUnlockTime = time.Now().Unix()
-	_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
-	return domain.UnlockResult{Success: true, LockedUntil: 0}
-}
-
-// SetMasterPassword 设置主密码并同步更新 BackupConfig 中的标志。
-func (a *App) SetMasterPassword(password string) error {
-	if len(password) < 4 {
-		return errPasswordTooShort
-	}
-	if err := a.ensureSecrets().SetMasterPassword([]byte(password)); err != nil {
-		log.Error("SetMasterPassword: failed", "error", err.Error())
-		return err
-	}
-	log.Info("SetMasterPassword: success")
-	cfg := a.Settings.BackupConfig()
-	cfg.HasMasterPassword = true
-	cfg.CredentialLockedUntil = 0
-	return a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
-}
-
-// GetMasterPasswordStatus 返回主密码相关的状态信息。
-func (a *App) GetMasterPasswordStatus() domain.MasterPasswordStatus {
-	cfg := a.Settings.BackupConfig()
-	return domain.MasterPasswordStatus{
-		HasPassword: a.HasMasterPassword(),
-		Unlocked:    a.IsUnlocked(),
-		LockedUntil: cfg.CredentialLockedUntil,
-		UnlockTime:  cfg.CredentialsUnlockTime,
-	}
-}
-
-// LockCredentials 立即锁定凭据：将锁定期设为当前时间并清空内存中的密钥缓存。
-func (a *App) LockCredentials() {
-	log.Info("LockCredentials: success")
-	cfg := a.Settings.BackupConfig()
-	cfg.CredentialLockedUntil = time.Now().Unix() + 1
-	_ = a.Settings.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg))
-	a.ensureSecrets().Lock()
-}
-
 // 认证辅助方法。
 
 // GenerateToken 生成 32 字节随机令牌并以 base64 字符串形式返回。
@@ -418,13 +317,3 @@ func GenerateToken() string {
 }
 
 // 错误。
-
-// errPasswordTooShort 在 SetMasterPassword 接收到不足 4 个字符的密码时返回。
-var errPasswordTooShort = &httpError{code: "password_too_short", message: "password too short (minimum 4 characters)"}
-
-// httpError 是供内部使用的轻量错误类型，便于在 JSON 响应中生成稳定的错误字符串。
-type httpError struct {
-	code, message string
-}
-
-func (e *httpError) Error() string { return e.message }

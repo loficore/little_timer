@@ -103,7 +103,7 @@ func LLMSettingsUpdate(c *gin.Context) {
 		bodyClearKey = true
 	}
 
-	secrets := a.Secrets()
+	secrets := a.Vault.Secrets()
 	if (hasAPIKey || bodyClearKey) && secrets.IsLocked() {
 		c.JSON(http.StatusLocked, gin.H{"success": false, "code": "auth.master_password_required", "error": "master password required"})
 		return
@@ -146,7 +146,7 @@ func readLLMSettings(a *app.App) (*LLMSettingsDTO, error) {
 		return nil, err
 	}
 
-	secrets := a.Secrets()
+	secrets := a.Vault.Secrets()
 	if !secrets.IsLocked() {
 		if key, err := secrets.Retrieve([]byte(llmAPIKeySecret)); err == nil && len(key) > 0 {
 			d.APIKeySet = true

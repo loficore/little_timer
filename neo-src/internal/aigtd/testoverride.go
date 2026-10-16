@@ -38,7 +38,11 @@ type staticProvider struct {
 	failWith int
 }
 
+// Name 实现 Provider,固定返 "test_override"。
 func (p *staticProvider) Name() string { return "test_override" }
+
+// Complete 实现 Provider:failWith 非 0 时返 ErrRetryable(模拟 5xx),
+// 否则返固定 text。忽略请求内容。
 func (p *staticProvider) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
 	if p.failWith != 0 {
 		return CompletionResponse{}, ErrRetryable

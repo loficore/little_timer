@@ -102,11 +102,22 @@ func TestGetMasterPasswordStatus_Composes(t *testing.T) {
 	if status.HasPassword {
 		t.Errorf("HasPassword = true; want false")
 	}
-	// 预存在的 bug：IsUnlocked 在无主密码时返 false（因为 fresh SecretStorage
-	// 以 locked 状态初始化，且 UnlockCredentials 在无主密码路径不调
-	// secret.Unlock）。记在 .omo/evidence 里；本测试锁定现有行为。
-	if status.Unlocked {
-		t.Errorf("Unlocked = true; want false (pre-existing: no master password = secret starts locked)")
+	// 无主密码 = 没东西可锁 = IsUnlocked 应返 true。
+	if !status.Unlocked {
+		t.Errorf("Unlocked = false; want true (无主密码 = 没东西可锁)")
+	}
+}
+
+// TestIsUnlocked_NoMasterPassword_ReturnsTrue 回归测试：fresh SecretStorage
+// 的 masterPassword == nil（即 secret.IsLocked() == true），但不代表“锁定”
+// 了——没设主密码时没有任何可锁的东西，IsUnlocked 应返 true。
+func TestIsUnlocked_NoMasterPassword_ReturnsTrue(t *testing.T) {
+	v := newTestVault(t)
+	if v.HasMasterPassword() {
+		t.Fatal("setup: expected no master password")
+	}
+	if !v.IsUnlocked() {
+		t.Error("IsUnlocked = false with no master password; want true (无主密码 = 没东西可锁)")
 	}
 }
 
@@ -117,11 +128,12 @@ func TestLockCredentials_AfterSet(t *testing.T) {
 	}
 	v.LockCredentials()
 	// 锁后 secret 在内存中锁定，IsUnlocked 应返 false。
-	// （预存在的 bug：settings.UpdateBackupConfigFromJSON 不解析
-	// credential_locked_until 字段，持久化的 cfg.CredentialLockedUntil 不会变。
-	// 修这个超出 candidate 2 范围，记在 .omo/evidence 里。）
 	if v.IsUnlocked() {
 		t.Error("IsUnlocked = true after lock; want false")
+	}
+	// Bug A 修复后：CredentialLockedUntil 会被持久化（now+1）。
+	if until := v.settings.BackupConfig().CredentialLockedUntil; until <= 0 {
+		t.Errorf("CredentialLockedUntil = %d, want > 0 after lock", until)
 	}
 }
 

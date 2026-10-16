@@ -35,7 +35,7 @@ func TestRebuildBackupSwitchesTargetType(t *testing.T) {
 
 	assertTarget := func(want backup.BackupTarget) *backup.BackupManager {
 		t.Helper()
-		got := a.BackupManager()
+		got := a.Manager()
 		if got == nil {
 			t.Fatalf("BackupManager() = nil, want adapter target %q", want)
 		}
@@ -50,7 +50,7 @@ func TestRebuildBackupSwitchesTargetType(t *testing.T) {
 		if err := sm.UpdateBackupConfigFromJSON(json); err != nil {
 			t.Fatalf("update backup config: %v", err)
 		}
-		if err := a.RebuildBackup(context.Background()); err != nil {
+		if err := a.Rebuild(context.Background()); err != nil {
 			t.Fatalf("RebuildBackup: %v", err)
 		}
 	}
@@ -109,11 +109,11 @@ func TestRebuildBackupDisablesOnCloudConfigError(t *testing.T) {
 	if err := sm.UpdateBackupConfigFromJSON(`{"target_type": "s3"}`); err != nil {
 		t.Fatalf("update backup config: %v", err)
 	}
-	if err := a.RebuildBackup(context.Background()); err == nil {
-		t.Fatal("RebuildBackup with broken s3 config should return an error")
+	if err := a.Rebuild(context.Background()); err == nil {
+		t.Fatal("Rebuild with broken s3 config should return an error")
 	}
-	if mgr := a.BackupManager(); mgr != nil {
-		t.Fatalf("BackupManager() = %v after cloud config error, want nil (disabled)", mgr)
+	if mgr := a.Manager(); mgr != nil {
+		t.Fatalf("Manager() = %v after cloud config error, want nil (disabled)", mgr)
 	}
 }
 
@@ -150,11 +150,11 @@ func TestRebuildBackupDisablesOnDoubleFailure(t *testing.T) {
 
 	a := NewApp(domain.NewClockManager(domain.NewDefaultClockTaskConfig()), sm, sqlite, nil, filepath.Join(blocker, "test.db"))
 
-	err = a.RebuildBackup(context.Background())
+	err = a.Rebuild(context.Background())
 	if err == nil {
-		t.Fatal("RebuildBackup with uncreatable backup dir should return an error")
+		t.Fatal("Rebuild with uncreatable backup dir should return an error")
 	}
-	if mgr := a.BackupManager(); mgr != nil {
-		t.Fatalf("BackupManager() = %v after double failure, want nil", mgr)
+	if mgr := a.Manager(); mgr != nil {
+		t.Fatalf("Manager() = %v after double failure, want nil", mgr)
 	}
 }

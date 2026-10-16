@@ -494,7 +494,7 @@ func TestLLMSettings_RoundTrip(t *testing.T) {
 	r := setupAIGtdRouter(t, a)
 
 	// 设置主密码(解锁 SecretStorage)。
-	if err := a.SetMasterPassword("testpass123"); err != nil {
+	if err := a.Vault.SetMasterPassword("testpass123"); err != nil {
 		t.Fatalf("set master password: %v", err)
 	}
 

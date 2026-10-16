@@ -14,11 +14,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"little-timer/internal/domain"
+	"little-timer/internal/habits"
 	"little-timer/internal/log"
-	"little-timer/internal/storage"
+	"little-timer/internal/vault"
 )
 
 // modeKey 把当前 clock 模式渲染成 JS 客户端期望的稳定字符串。
@@ -286,7 +288,7 @@ func NewHabitService(app *App) *HabitService { return &HabitService{app: app} }
 
 func (s *HabitService) ListHabitSets() (any, error) {
 	log.Debug("habit.list_sets", "method", "HabitService.ListHabitSets")
-	rows, err := s.app.SQLite.HabitSets().List(100, 0)
+	rows, err := s.app.Habits.ListHabitSets(100, 0)
 	if err != nil {
 		log.Error("habit.list_sets failed", "method", "HabitService.ListHabitSets", "error", err.Error())
 		return nil, err
@@ -296,51 +298,54 @@ func (s *HabitService) ListHabitSets() (any, error) {
 
 func (s *HabitService) CreateHabitSet(name string, description string, color string) (any, error) {
 	log.Debug("habit.create_set", "method", "HabitService.CreateHabitSet", "name", truncStr(name), "color", color)
-	if name == "" {
-		return nil, errEmptyName
-	}
-	if color == "" {
-		color = domain.DefaultColor
-	}
-	id, err := s.app.SQLite.HabitSets().Create(name, description, color)
+	res, err := s.app.Habits.CreateHabitSet(habits.CreateHabitSetInput{
+		Name: name, Description: description, Color: color,
+	})
 	if err != nil {
+		var he *habits.Error
+		if errors.As(err, &he) {
+			log.Warn("habit.create_set rejected", "method", "HabitService.CreateHabitSet", "code", he.Code, "error", he.Message)
+			return map[string]any{"success": false, "code": he.Code, "error": he.Message}, nil
+		}
 		log.Error("habit.create_set failed", "method", "HabitService.CreateHabitSet", "name", truncStr(name), "error", err.Error())
 		return nil, err
 	}
-	log.Info("habit.create_set ok", "method", "HabitService.CreateHabitSet", "id", id)
+	log.Info("habit.create_set ok", "method", "HabitService.CreateHabitSet", "id", res.ID)
 	return map[string]any{
-		"id":          id,
-		"name":        name,
-		"description": description,
-		"color":       color,
+		"id":          res.ID,
+		"name":        res.Name,
+		"description": res.Description,
+		"color":       res.Color,
 	}, nil
 }
 
 func (s *HabitService) UpdateHabitSet(id int64, name string, description string, color string, wallpaper string) (any, error) {
 	log.Debug("habit.update_set", "method", "HabitService.UpdateHabitSet", "id", id, "name", truncStr(name), "color", color)
-	if name == "" {
-		return nil, errEmptyName
-	}
-	if color == "" {
-		color = domain.DefaultColor
-	}
-	if err := s.app.SQLite.HabitSets().Update(id, name, description, color, wallpaper); err != nil {
+	res, err := s.app.Habits.UpdateHabitSet(id, habits.UpdateHabitSetInput{
+		Name: name, Description: description, Color: color, Wallpaper: wallpaper,
+	})
+	if err != nil {
+		var he *habits.Error
+		if errors.As(err, &he) {
+			log.Warn("habit.update_set rejected", "method", "HabitService.UpdateHabitSet", "id", id, "code", he.Code, "error", he.Message)
+			return map[string]any{"success": false, "code": he.Code, "error": he.Message}, nil
+		}
 		log.Error("habit.update_set failed", "method", "HabitService.UpdateHabitSet", "id", id, "error", err.Error())
 		return nil, err
 	}
 	log.Info("habit.update_set ok", "method", "HabitService.UpdateHabitSet", "id", id)
 	return map[string]any{
-		"id":          id,
-		"name":        name,
-		"description": description,
-		"color":       color,
-		"wallpaper":   wallpaper,
+		"id":          res.ID,
+		"name":        res.Name,
+		"description": res.Description,
+		"color":       res.Color,
+		"wallpaper":   res.Wallpaper,
 	}, nil
 }
 
 func (s *HabitService) DeleteHabitSet(id int64) (any, error) {
 	log.Debug("habit.delete_set", "method", "HabitService.DeleteHabitSet", "id", id)
-	if err := s.app.SQLite.HabitSets().Delete(id); err != nil {
+	if err := s.app.Habits.DeleteHabitSet(id); err != nil {
 		log.Error("habit.delete_set failed", "method", "HabitService.DeleteHabitSet", "id", id, "error", err.Error())
 		return nil, err
 	}
@@ -351,16 +356,8 @@ func (s *HabitService) DeleteHabitSet(id int64) (any, error) {
 // ListHabits 在 setID 为 nil 时返回所有 habit，否则限定在请求的 set 内。
 func (s *HabitService) ListHabits(setID *int64) (any, error) {
 	log.Debug("habit.list", "method", "HabitService.ListHabits", "set_id", setID)
-	var (
-		rows []storage.HabitRow
-		err  error
-	)
 	const limit, offset = 100, 0
-	if setID != nil {
-		rows, err = s.app.SQLite.Habits().ListBySet(*setID, limit, offset)
-	} else {
-		rows, err = s.app.SQLite.Habits().List(limit, offset)
-	}
+	rows, err := s.app.Habits.ListHabits(setID, limit, offset)
 	if err != nil {
 		log.Error("habit.list failed", "method", "HabitService.ListHabits", "error", err.Error())
 		return nil, err
@@ -369,59 +366,58 @@ func (s *HabitService) ListHabits(setID *int64) (any, error) {
 }
 
 func (s *HabitService) CreateHabit(setID int64, name string, goalSeconds int64, color string) (any, error) {
+	a := s.app
 	log.Debug("habit.create", "method", "HabitService.CreateHabit", "set_id", setID, "name", truncStr(name), "goal_seconds", goalSeconds)
-	if name == "" {
-		return nil, errEmptyName
-	}
-	if goalSeconds == 0 {
-		goalSeconds = domain.DefaultGoalSeconds
-	}
-	if color == "" {
-		color = domain.DefaultColor
-	}
-	id, err := s.app.SQLite.Habits().Create(setID, name, goalSeconds, color)
+	res, err := a.Habits.CreateHabit(habits.CreateHabitInput{
+		SetID: setID, Name: name, GoalSeconds: goalSeconds, Color: color,
+	})
 	if err != nil {
+		var he *habits.Error
+		if errors.As(err, &he) {
+			log.Warn("habit.create rejected", "method", "HabitService.CreateHabit", "code", he.Code, "error", he.Message)
+			return map[string]any{"success": false, "code": he.Code, "error": he.Message}, nil
+		}
 		log.Error("habit.create failed", "method", "HabitService.CreateHabit", "name", truncStr(name), "error", err.Error())
 		return nil, err
 	}
-	log.Info("habit.create ok", "method", "HabitService.CreateHabit", "id", id)
+	log.Info("habit.create ok", "method", "HabitService.CreateHabit", "id", res.ID)
 	return map[string]any{
-		"id":           id,
-		"set_id":       setID,
-		"name":         name,
-		"goal_seconds": goalSeconds,
-		"color":        color,
+		"id":           res.ID,
+		"set_id":       res.SetID,
+		"name":         res.Name,
+		"goal_seconds": res.GoalSeconds,
+		"color":        res.Color,
 	}, nil
 }
 
 func (s *HabitService) UpdateHabit(id int64, name string, goalSeconds int64, color string, wallpaper string) (any, error) {
+	a := s.app
 	log.Debug("habit.update", "method", "HabitService.UpdateHabit", "id", id, "name", truncStr(name), "goal_seconds", goalSeconds, "color", color)
-	if name == "" {
-		return nil, errEmptyName
-	}
-	if goalSeconds == 0 {
-		goalSeconds = domain.DefaultGoalSeconds
-	}
-	if color == "" {
-		color = domain.DefaultColor
-	}
-	if err := s.app.SQLite.Habits().Update(id, name, goalSeconds, color, wallpaper); err != nil {
+	res, err := a.Habits.UpdateHabit(id, habits.UpdateHabitInput{
+		Name: name, GoalSeconds: goalSeconds, Color: color, Wallpaper: wallpaper,
+	})
+	if err != nil {
+		var he *habits.Error
+		if errors.As(err, &he) {
+			log.Warn("habit.update rejected", "method", "HabitService.UpdateHabit", "id", id, "code", he.Code, "error", he.Message)
+			return map[string]any{"success": false, "code": he.Code, "error": he.Message}, nil
+		}
 		log.Error("habit.update failed", "method", "HabitService.UpdateHabit", "id", id, "error", err.Error())
 		return nil, err
 	}
 	log.Info("habit.update ok", "method", "HabitService.UpdateHabit", "id", id)
 	return map[string]any{
-		"id":           id,
-		"name":         name,
-		"goal_seconds": goalSeconds,
-		"color":        color,
-		"wallpaper":    wallpaper,
+		"id":           res.ID,
+		"name":         res.Name,
+		"goal_seconds": res.GoalSeconds,
+		"color":        res.Color,
+		"wallpaper":    res.Wallpaper,
 	}, nil
 }
 
 func (s *HabitService) DeleteHabit(id int64) (any, error) {
 	log.Debug("habit.delete", "method", "HabitService.DeleteHabit", "id", id)
-	if err := s.app.SQLite.Habits().Delete(id); err != nil {
+	if err := s.app.Habits.DeleteHabit(id); err != nil {
 		log.Error("habit.delete failed", "method", "HabitService.DeleteHabit", "id", id, "error", err.Error())
 		return nil, err
 	}
@@ -431,14 +427,11 @@ func (s *HabitService) DeleteHabit(id int64) (any, error) {
 
 // CreateSession 把空 `date` 视为今天。
 func (s *HabitService) CreateSession(habitID int64, durationSeconds int64, count int64, date string) (any, error) {
+	a := s.app
 	log.Debug("habit.create_session", "method", "HabitService.CreateSession", "habit_id", habitID, "duration_seconds", durationSeconds, "count", count)
-	if date == "" {
-		date = domain.TodayString(s.app.Settings.Config().Basic.Timezone)
-	}
-	if count == 0 {
-		count = 1
-	}
-	id, err := s.app.SQLite.Timers().CreateSession(habitID, durationSeconds, count, date)
+	id, err := a.Habits.CreateSession(habits.CreateSessionInput{
+		HabitID: habitID, DurationSeconds: durationSeconds, Count: count, Date: date,
+	})
 	if err != nil {
 		log.Error("habit.create_session failed", "method", "HabitService.CreateSession", "habit_id", habitID, "error", err.Error())
 		return nil, err
@@ -448,26 +441,15 @@ func (s *HabitService) CreateSession(habitID int64, durationSeconds int64, count
 		"id":               id,
 		"habit_id":         habitID,
 		"duration_seconds": durationSeconds,
-		"date":             date,
+		"date":             domain.TodayString(a.Settings.Config().Basic.Timezone),
 	}, nil
 }
 
 // ListSessions 支持三种查询形态：单日、日期区间、或不带过滤（= 今天）。
 func (s *HabitService) ListSessions(date string, startDate string, endDate string) (any, error) {
 	log.Debug("habit.list_sessions", "method", "HabitService.ListSessions", "date", date, "start_date", startDate, "end_date", endDate)
-	var (
-		rows []storage.SessionRow
-		err  error
-	)
 	const limit, offset = 100, 0
-	switch {
-	case startDate != "" && endDate != "":
-		rows, err = s.app.SQLite.Timers().ListSessionsByDateRange(startDate, endDate, limit, offset)
-	case date != "":
-		rows, err = s.app.SQLite.Timers().ListSessionsByDate(date, limit, offset)
-	default:
-		rows, err = s.app.SQLite.Timers().ListSessionsByDate(domain.TodayString(s.app.Settings.Config().Basic.Timezone), limit, offset)
-	}
+	rows, err := s.app.Habits.ListSessions(date, startDate, endDate, limit, offset)
 	if err != nil {
 		log.Error("habit.list_sessions failed", "method", "HabitService.ListSessions", "error", err.Error())
 		return nil, err
@@ -479,26 +461,18 @@ func (s *HabitService) ListSessions(date string, startDate string, endDate strin
 func (s *HabitService) GetHabitDetail(id int64, date string) (any, error) {
 	log.Debug("habit.detail", "method", "HabitService.GetHabitDetail", "id", id, "date", date)
 	a := s.app
-	if date == "" {
-		date = domain.TodayString(a.Settings.Config().Basic.Timezone)
-	}
-	row, err := a.SQLite.Habits().GetByID(id)
+	detail, err := a.Habits.GetHabitDetail(id, date)
 	if err != nil {
 		log.Error("habit.detail failed", "method", "HabitService.GetHabitDetail", "id", id, "error", err.Error())
 		return nil, err
 	}
-	todaySeconds, _ := a.SQLite.Timers().TodaySecondsForHabit(id, date)
-	var progressPercent int64
-	if row.GoalSeconds > 0 {
-		progressPercent = (todaySeconds * 100) / row.GoalSeconds
-	}
 	return map[string]any{
-		"id":               row.ID,
-		"name":             row.Name,
-		"goal_seconds":     row.GoalSeconds,
-		"color":            row.Color,
-		"today_seconds":    todaySeconds,
-		"progress_percent": progressPercent,
+		"id":               detail.ID,
+		"name":             detail.Name,
+		"goal_seconds":     detail.GoalSeconds,
+		"color":            detail.Color,
+		"today_seconds":    detail.TodaySeconds,
+		"progress_percent": detail.ProgressPercent,
 	}, nil
 }
 
@@ -539,7 +513,7 @@ func NewBackupService(app *App) *BackupService { return &BackupService{app: app}
 
 // GetBackupConfig 返回持久化的 BackupConfig，secret 已打码。
 func (s *BackupService) GetBackupConfig() (any, error) {
-	cfg := s.app.Settings.BackupConfig()
+	cfg := s.app.Vault.GetBackupConfig()
 	log.Debug("backup.get_config", "method", "BackupService.GetBackupConfig", "target_type", cfg.TargetType.String())
 	return map[string]any{
 		"enabled":              cfg.Enabled,
@@ -560,134 +534,124 @@ func (s *BackupService) GetBackupConfig() (any, error) {
 }
 
 func (s *BackupService) UpdateBackupConfig(json string) (any, error) {
-	cfg := s.app.Settings.BackupConfig()
-	log.Debug("backup.update_config", "method", "BackupService.UpdateBackupConfig", "target_type", cfg.TargetType.String())
-	if err := s.app.Settings.UpdateBackupConfigFromJSON(json); err != nil {
+	a := s.app
+	log.Debug("backup.update_config", "method", "BackupService.UpdateBackupConfig")
+	if err := a.Vault.UpdateBackupConfig(context.Background(), json); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.update_config rejected", "method", "BackupService.UpdateBackupConfig", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
 		log.Error("backup.update_config failed", "method", "BackupService.UpdateBackupConfig", "error", err.Error())
 		return map[string]any{"success": false, "error": err.Error()}, nil
 	}
-	// 配置已持久化；据此重建 manager。重建失败绝不能让调用失败 ——
-	// 配置已存下，manager 会在下次配置变更或启动时重建。
-	if err := s.app.RebuildBackup(context.Background()); err != nil {
-		log.Error("UpdateBackupConfig: rebuild failed", "error", err.Error())
-	}
-	log.Info("backup.update_config ok", "method", "BackupService.UpdateBackupConfig", "target_type", cfg.TargetType.String())
+	log.Info("backup.update_config ok", "method", "BackupService.UpdateBackupConfig")
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) CreateBackup() (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.create", "method", "BackupService.CreateBackup", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": false, "error": "backup not configured"}, nil
-	}
-	if !cfg.Enabled {
-		return map[string]any{"success": false, "error": "backup not enabled"}, nil
-	}
-	name, err := bm.CreateBackup()
+	log.Debug("backup.create", "method", "BackupService.CreateBackup")
+	name, err := a.Vault.CreateBackup()
 	if err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.create rejected", "method", "BackupService.CreateBackup", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
 		log.Error("backup.create failed", "method", "BackupService.CreateBackup", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
+		return nil, err
 	}
-	log.Info("backup.create ok", "method", "BackupService.CreateBackup", "target_type", cfg.TargetType.String(), "backup_name", name)
+	log.Info("backup.create ok", "method", "BackupService.CreateBackup", "backup_name", name)
 	return map[string]any{"success": true, "backup_path": name}, nil
 }
 
 func (s *BackupService) RestoreBackup(name string) (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.restore", "method", "BackupService.RestoreBackup", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": false, "error": "backup not configured"}, nil
+	log.Debug("backup.restore", "method", "BackupService.RestoreBackup", "name", name)
+	if err := a.Vault.RestoreBackup(name); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.restore rejected", "method", "BackupService.RestoreBackup", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
+		log.Error("backup.restore failed", "method", "BackupService.RestoreBackup", "name", name, "error", err.Error())
+		return nil, err
 	}
-	if err := bm.RestoreFromBackup(name); err != nil {
-		log.Error("backup.restore failed", "method", "BackupService.RestoreBackup", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
-	}
-	log.Info("backup.restore ok", "method", "BackupService.RestoreBackup", "target_type", cfg.TargetType.String(), "backup_name", name)
+	log.Info("backup.restore ok", "method", "BackupService.RestoreBackup", "name", name)
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) DeleteBackup(name string) (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.delete", "method", "BackupService.DeleteBackup", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": false, "error": "backup not configured"}, nil
+	log.Debug("backup.delete", "method", "BackupService.DeleteBackup", "name", name)
+	if err := a.Vault.DeleteBackup(name); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.delete rejected", "method", "BackupService.DeleteBackup", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
+		log.Error("backup.delete failed", "method", "BackupService.DeleteBackup", "name", name, "error", err.Error())
+		return nil, err
 	}
-	if err := bm.DeleteBackup(name); err != nil {
-		log.Error("backup.delete failed", "method", "BackupService.DeleteBackup", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
-	}
-	log.Info("backup.delete ok", "method", "BackupService.DeleteBackup", "target_type", cfg.TargetType.String(), "backup_name", name)
+	log.Info("backup.delete ok", "method", "BackupService.DeleteBackup", "name", name)
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) VerifyBackup() (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.verify", "method", "BackupService.VerifyBackup", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": false, "error": "backup not configured"}, nil
-	}
-	if !cfg.Enabled {
-		return map[string]any{"success": false, "error": "backup not enabled"}, nil
-	}
-	if err := bm.TestConnection(); err != nil {
+	log.Debug("backup.verify", "method", "BackupService.VerifyBackup")
+	if err := a.Vault.VerifyBackup(); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.verify rejected", "method", "BackupService.VerifyBackup", "code", ve.Code, "error", ve.Message)
+			return backupErrorMap(ve), nil
+		}
 		log.Error("backup.verify failed", "method", "BackupService.VerifyBackup", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
+		return nil, err
 	}
-	log.Info("backup.verify ok", "method", "BackupService.VerifyBackup", "target_type", cfg.TargetType.String())
+	log.Info("backup.verify ok", "method", "BackupService.VerifyBackup")
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) ListBackups() (any, error) {
 	a := s.app
-	cfg := a.Settings.BackupConfig()
-	log.Debug("backup.list", "method", "BackupService.ListBackups", "target_type", cfg.TargetType.String())
-	bm := a.BackupManager()
-	if bm == nil {
-		return map[string]any{"success": true, "backups": []any{}}, nil
-	}
-	items, err := bm.ListBackups()
+	log.Debug("backup.list", "method", "BackupService.ListBackups")
+	items, err := a.Vault.ListBackups()
 	if err != nil {
 		log.Error("backup.list failed", "method", "BackupService.ListBackups", "error", err.Error())
 		return map[string]any{"success": true, "backups": []any{}}, nil
 	}
-	log.Info("backup.list ok", "method", "BackupService.ListBackups", "target_type", cfg.TargetType.String(), "count", len(items))
+	log.Info("backup.list ok", "method", "BackupService.ListBackups", "count", len(items))
 	return map[string]any{"success": true, "backups": items}, nil
 }
 
 func (s *BackupService) GetMasterPasswordStatus() (any, error) {
-	status := s.app.GetMasterPasswordStatus()
+	status := s.app.Vault.GetMasterPasswordStatus()
 	log.Debug("backup.master_status", "method", "BackupService.GetMasterPasswordStatus", "has_cred", status.HasPassword)
 	return status, nil
 }
 
 func (s *BackupService) SetMasterPassword(password string) (any, error) {
+	a := s.app
 	log.Debug("backup.set_master", "method", "BackupService.SetMasterPassword", "has_cred", password != "")
-	if password == "" {
-		return map[string]any{"success": false, "error": "missing password"}, nil
-	}
-	if len(password) < 4 {
-		return map[string]any{"success": false, "error": "password too short (minimum 4 characters)"}, nil
-	}
-	if err := s.app.SetMasterPassword(password); err != nil {
+	if err := a.Vault.SetMasterPassword(password); err != nil {
+		var ve *vault.Error
+		if errors.As(err, &ve) {
+			log.Warn("backup.set_master rejected", "method", "BackupService.SetMasterPassword", "code", ve.Code, "error", ve.Message)
+			return map[string]any{"success": false, "code": ve.Code, "error": ve.Message}, nil
+		}
 		log.Error("backup.set_master failed", "method", "BackupService.SetMasterPassword", "error", err.Error())
-		return map[string]any{"success": false, "error": err.Error()}, nil
+		return nil, err
 	}
 	log.Info("backup.set_master ok", "method", "BackupService.SetMasterPassword")
 	return map[string]any{"success": true}, nil
 }
 
 func (s *BackupService) UnlockCredentials(password string) (any, error) {
+	a := s.app
 	log.Debug("backup.unlock", "method", "BackupService.UnlockCredentials")
-	res := s.app.UnlockCredentials(password)
+	res := a.Vault.UnlockCredentials(password)
 	log.Info("backup.unlock ok", "method", "BackupService.UnlockCredentials", "success", res.Success)
 	return map[string]any{
 		"success":      res.Success,
@@ -696,10 +660,29 @@ func (s *BackupService) UnlockCredentials(password string) (any, error) {
 }
 
 func (s *BackupService) LockCredentials() (any, error) {
+	a := s.app
 	log.Debug("backup.lock", "method", "BackupService.LockCredentials")
-	s.app.LockCredentials()
+	a.Vault.LockCredentials()
 	log.Info("backup.lock ok", "method", "BackupService.LockCredentials")
 	return map[string]any{"success": true}, nil
+}
+
+// backupErrorMap 把 vault.Error 转成 Wails 调用方期望的 map 形状。
+// 凭据/锁错误带 action（前端 modal），其它错误只有 code + message。
+func backupErrorMap(ve *vault.Error) map[string]any {
+	m := map[string]any{
+		"success": false,
+		"code":    ve.Code,
+		"message": ve.Message,
+	}
+	if ve.Mode != "" {
+		m["action"] = map[string]any{
+			"type":   "show_modal",
+			"target": "master_password",
+			"params": map[string]any{"mode": ve.Mode},
+		}
+	}
+	return m
 }
 
 // 共享辅助函数 —— 从 handlers/ 复制而来，保持本文件自包含。
@@ -711,15 +694,3 @@ func maskSecret(s string) string {
 	}
 	return "******"
 }
-
-// errEmptyName 由 CreateHabitSet / CreateHabit / Update* 在调用方漏传
-// name 字段时返回。
-var errEmptyName = &wailsError{code: "missing_name", message: "missing name"}
-
-// wailsError 是 Wails service 层使用的小型错误类型。与 httpError
-// （app.go 中）保持独立，让两层解耦。
-type wailsError struct {
-	code, message string
-}
-
-func (e *wailsError) Error() string { return e.message }

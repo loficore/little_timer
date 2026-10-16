@@ -200,8 +200,8 @@ func (s appSettingsAdapter) LLMSettings() aigtd.LLMConfig {
 	if cfg.TimeoutSeconds == 0 {
 		cfg.TimeoutSeconds = 30
 	}
-	if !s.app.Secrets().IsLocked() {
-		if key, err := s.app.Secrets().Retrieve([]byte(aigtd.APIKeySecretName)); err == nil {
+	if !s.app.Vault.Secrets().IsLocked() {
+		if key, err := s.app.Vault.Secrets().Retrieve([]byte(aigtd.APIKeySecretName)); err == nil {
 			cfg.APIKey = string(key)
 		}
 	}
@@ -231,7 +231,7 @@ func bootstrapApp(dbPath string) (*httpapp.App, func(), error) {
 	// 备份可选——从持久化的 BackupConfig 重建;RebuildBackup 会回退到
 	// local 适配器，只有回退也失败时才返回错误（本进程禁用备份）。
 	a := httpapp.NewApp(clk, sm, sqlite, nil, dbPath)
-	if err := a.RebuildBackup(context.Background()); err != nil {
+	if err := a.Rebuild(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: backup disabled (%v)\n", err)
 	}
 

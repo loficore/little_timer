@@ -124,6 +124,33 @@ func TestHandleBackupConfigUpdate(t *testing.T) {
 	}
 }
 
+// 去锁化（issue #13）：切换到云端 target 不再需要"先设主密码"的授权证明——
+// 凭据由平台 keystore 托管，保护边界是 OS 登录会话。带凭据的云端配置更新
+// 必须直接成功（回归：曾被 requireAuthForConfigUpdate 的 setup 闸门拦下）。
+func TestHandleBackupConfigUpdate_CloudWithCreds_NoMasterPassword(t *testing.T) {
+	a, _ := newBackupTestApp(t)
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := strings.NewReader(`{"enabled":true,"target_type":"webdav","webdav_url":"http://example.com","webdav_username":"u","webdav_password":"p"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/config", body)
+	c.Set("app", a)
+
+	BackupConfigUpdate(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if got["success"] != true {
+		t.Errorf("success = %v, want true (body=%s)", got["success"], w.Body.String())
+	}
+}
+
 func TestHandleBackupConfigUpdate_S3(t *testing.T) {
 	a, _ := newBackupTestApp(t)
 	gin.SetMode(gin.TestMode)
@@ -169,6 +196,30 @@ func TestHandleBackupConfigUpdate_S3(t *testing.T) {
 	}
 	if gotCfg["s3_bucket"] != "my-bucket" {
 		t.Errorf("s3_bucket = %v, want my-bucket", gotCfg["s3_bucket"])
+	}
+}
+
+func TestHandleBackupConfigUpdate_S3WithCreds_NoMasterPassword(t *testing.T) {
+	a, _ := newBackupTestApp(t)
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := strings.NewReader(`{"enabled":true,"target_type":"s3","s3_endpoint":"https://s3.example.com","s3_bucket":"my-bucket","s3_region":"us-east-1","s3_access_key":"AKIAEXAMPLE","s3_secret_key":"secret","s3_path_prefix":"backups"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/config", body)
+	c.Set("app", a)
+
+	BackupConfigUpdate(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if got["success"] != true {
+		t.Errorf("success = %v, want true (body=%s)", got["success"], w.Body.String())
 	}
 }
 

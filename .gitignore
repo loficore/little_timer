@@ -94,6 +94,9 @@ example/
 # === Superpowers specs (设计/计划文档本地留底,不入版本控制) ===
 docs/superpowers/
 .superpowers/
+# === Private docs (本地留底,不入版本控制) ===
+docs/_private/
+scripts/_private/
 
 .tool-versions
 

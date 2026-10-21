@@ -347,6 +347,15 @@ func (sm *SettingsManager) UpdateBackupConfigFromJSON(jsonStr string) error {
 	if v, ok := raw["has_master_password"].(bool); ok {
 		sm.backupConfig.HasMasterPassword = v
 	}
+	if v, ok := toInt64(raw["credentials_unlock_time"]); ok {
+		sm.backupConfig.CredentialsUnlockTime = v
+	}
+	if v, ok := toInt64(raw["credential_unlock_attempts"]); ok {
+		sm.backupConfig.CredentialUnlockAttempts = uint32(v)
+	}
+	if v, ok := toInt64(raw["credential_locked_until"]); ok {
+		sm.backupConfig.CredentialLockedUntil = v
+	}
 
 	sm.dirty = true
 	return sm.saveBackupConfigToDB()

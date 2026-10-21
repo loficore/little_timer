@@ -17,11 +17,13 @@ import (
 
 	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
+"little-timer/internal/habits"
 	"little-timer/internal/keystore"
 	"little-timer/internal/log"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
+	"little-timer/internal/vault"
 )
 
 // App 汇集 HTTP 处理器所需的应用依赖与运行时状态。
@@ -57,6 +59,14 @@ type App struct {
 	// CurrentTimerSessionID 是当前计时会话 ID。
 	CurrentTimerSessionID *int64
 
+// Habits 是 habit 域的用例层；Phase 1 转发到 storage，Phase 2 起
+	// 接管 name 校验、唯一性、默认值、日期默认、进度计算。
+	Habits *habits.Operations
+	// Vault 是凭据 + 备份域的用例层。去锁化后（issue #13）它只保留备份用例，
+	// 凭据本身由 secrets（平台 keystore 托管）持有，Vault 经 runtime.Secrets()
+	// 访问，不再自己构造 SecretStorage。
+	Vault *vault.Operations
+
 	// secrets 是进程内凭据存储，由 secretsOnce 惰性创建，因此调用方构造时
 	// 可以省略它。每个 App 持有自己的 Once：新建 App 会重新解析 keystore。
 	secretsOnce sync.Once
@@ -73,13 +83,23 @@ func NewApp(
 	bm *backup.BackupManager,
 	dbPath string,
 ) *App {
-	return &App{
+	a := &App{
 		Clock:    clk,
 		Settings: sm,
 		SQLite:   sqlite,
 		Backup:   bm,
 		DBPath:   dbPath,
 	}
+	// Phase 1 scaffold（见 .omo/plans/habit-vault-extraction.md）：
+	// 构造 habits / vault 用例层。Adapter 当前不调用它们——仅 wire 好，
+	// 让 Phase 2/3 迁移时只动规则、不动接线。
+	if sqlite != nil {
+		a.Habits = habits.New(sqlite, sm)
+	}
+	if sm != nil {
+		a.Vault = vault.New(sm, a)
+	}
+	return a
 }
 
 // mutex 便捷访问器——以 Lock/Unlock 形式暴露而非藏进辅助方法，
@@ -100,38 +120,38 @@ func (a *App) RUnlock() { a.mu.RUnlock() }
 // Backup 管理器访问器。持久化的 BackupConfig 一变（切换 target、轮换
 // 凭据）就重建管理器——BackupManager 上没有 SetTarget 可变方法。
 // 处理器和 Wails 服务通过 BackupManager()（RLock 快照）读取当前管理器，
-// 配置变更时调用 RebuildBackup（写锁）。
+// 配置变更时调用 Rebuild（写锁）。
 
-// BackupManager 返回当前 BackupManager 快照。未配置备份时可能为 nil
-// （处理器将 nil 视为"未配置备份"）。
-func (a *App) BackupManager() *backup.BackupManager {
+// Manager 返回当前 BackupManager 快照。未配置备份时可能为 nil
+// （处理器将 nil 视为"未配置备份"）。满足 vault.BackupRuntime。
+func (a *App) Manager() *backup.BackupManager {
 	a.RLock()
 	defer a.RUnlock()
 	return a.Backup
 }
 
-// RebuildBackup 从持久化的 BackupConfig 重建 BackupManager，并在 App 写锁保护下
-// 换入。云端 target（webdav/s3）构建失败时，本进程禁用备份:记录带 target
-// 类型的错误日志、将 a.Backup 置 nil 并返回错误——绝不静默回退到 local，
-// 因为 UI/设置宣传的是云端 target，本地备份会偏离配置的行为。仅 local
-// target 构建失败时，记录日志并回退到以默认备份目录为根的 local 适配器;
-// 只有该回退也失败时才将 a.Backup 置 nil（本进程禁用备份）。
-func (a *App) RebuildBackup(ctx context.Context) error {
+// Rebuild 从持久化的 BackupConfig 重建 BackupManager，并在 App 写锁保护下
+// 换入。满足 vault.BackupRuntime。云端 target（webdav/s3）构建失败时，本进程
+// 禁用备份:记录带 target 类型的错误日志、将 a.Backup 置 nil 并返回错误——
+// 绝不静默回退到 local，因为 UI/设置宣传的是云端 target，本地备份会偏离
+// 配置的行为。仅 local target 构建失败时，记录日志并回退到以默认备份目录
+// 为根的 local 适配器;只有该回退也失败时才将 a.Backup 置 nil（本进程禁用备份）。
+func (a *App) Rebuild(ctx context.Context) error {
 	backupDir := defaultBackupDir(a.DBPath)
 	cfg := a.Settings.BackupConfig()
 	mgr, err := backup.NewFromConfig(ctx, a.SQLite, a.DBPath, backupDir, cfg)
 	if err != nil {
 		if cfg.TargetType == domain.BackupTargetWebDAV || cfg.TargetType == domain.BackupTargetS3 {
-			log.Error("RebuildBackup: NewFromConfig failed for cloud target, disabling backup", "target_type", cfg.TargetType.String(), "error", err.Error())
+			log.Error("Rebuild: NewFromConfig failed for cloud target, disabling backup", "target_type", cfg.TargetType.String(), "error", err.Error())
 			a.Lock()
 			a.Backup = nil
 			a.Unlock()
 			return err
 		}
-		log.Error("RebuildBackup: NewFromConfig failed, falling back to local", "error", err.Error())
+		log.Error("Rebuild: NewFromConfig failed, falling back to local", "error", err.Error())
 		mgr, err = backup.NewLocal(a.SQLite, a.DBPath, backupDir)
 		if err != nil {
-			log.Error("RebuildBackup: NewLocal fallback failed, disabling backup", "error", err.Error())
+			log.Error("Rebuild: NewLocal fallback failed, disabling backup", "error", err.Error())
 			a.Lock()
 			a.Backup = nil
 			a.Unlock()
@@ -141,7 +161,7 @@ func (a *App) RebuildBackup(ctx context.Context) error {
 	a.Lock()
 	a.Backup = mgr
 	a.Unlock()
-	log.Info("RebuildBackup: ok", "target_type", cfg.TargetType.String())
+	log.Info("Rebuild: ok", "target_type", cfg.TargetType.String())
 	return nil
 }
 

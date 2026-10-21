@@ -405,10 +405,10 @@ func bootstrapApp(dbPath string) (*httpapp.App, func(), error) {
 	// 备份可选——从持久化的 BackupConfig 重建;RebuildBackup 会回退到
 	// local 适配器，只有回退也失败时才返回错误（本进程禁用备份）。
 	a := httpapp.NewApp(clk, sm, sqlite, nil, dbPath)
-	// 尽早建凭据存储并接线 SettingsManager:RebuildBackup 及后续配置保存
+	// 尽早建凭据存储并接线 SettingsManager:Rebuild 及后续配置保存
 	// 路径都需要已接线的 secret store(Task 4 的凭据分流)。
 	_ = a.Secrets()
-	if err := a.RebuildBackup(context.Background()); err != nil {
+	if err := a.Rebuild(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: backup disabled (%v)\n", err)
 	}
 

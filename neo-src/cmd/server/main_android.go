@@ -92,15 +92,15 @@ func bootWails() {
 	// RebuildBackup 从 dbPath 推导备份目录（`<storage>/backups`）并遵循
 	// 持久化的 BackupConfig，失败时回退到 local。
 	a := httpapp.NewApp(clk, sm, sqlite, nil, dbPath)
-	// 尽早建凭据存储并接线 SettingsManager:RebuildBackup 与配置保存路径
+	// 尽早建凭据存储并接线 SettingsManager:Rebuild 与配置保存路径
 	// 都需要已接线的 secret store(Task 4 的凭据分流)。
 	_ = a.Secrets()
-	if err := a.RebuildBackup(context.Background()); err != nil {
+	if err := a.Rebuild(context.Background()); err != nil {
 		log.Info(fmt.Sprintf("[bootWails] backup disabled: %v", err))
 	}
 
 	log.Debug(fmt.Sprintf("[bootWails] app created a=%p sqlite=%p sm=%p clk=%p bm=%p",
-		a, sqlite, sm, clk, a.BackupManager()))
+		a, sqlite, sm, clk, a.Manager()))
 
 	wailsApp = application.New(application.Options{
 		Services: []application.Service{

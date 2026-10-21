@@ -397,3 +397,34 @@ func TestPresetsManagerIsNoop(t *testing.T) {
 		t.Errorf("MaxCount = %d, want %d", p.MaxCount(), MaxPresetCount)
 	}
 }
+
+// TestManagerUpdateBackupConfigFromJSON_ParsesCredentialFields 回归测试（#35）：
+// credential 三字段（credential_locked_until / credentials_unlock_time /
+// credential_unlock_attempts）必须被白名单解析，不能静默丢弃。save/load 路径
+// 读写这三个字段，parser 漏了会造成字段永远为 0。
+//
+// 去锁化（issue #13）后这四列不再有写入方、恒为默认值——保护边界改由平台
+// keystore 承担，DB 列按 Path B 保留以兼容存量 schema。但解析仍要正确，
+// 否则将来读存量库时无法还原其中残留的值。
+func TestManagerUpdateBackupConfigFromJSON_ParsesCredentialFields(t *testing.T) {
+	mgr := newTestManager(t)
+
+	payload, _ := json.Marshal(map[string]any{
+		"credential_locked_until":    1111111111,
+		"credentials_unlock_time":    2222222222,
+		"credential_unlock_attempts": 3,
+	})
+	if err := mgr.UpdateBackupConfigFromJSON(string(payload)); err != nil {
+		t.Fatalf("UpdateBackupConfigFromJSON: %v", err)
+	}
+	bc := mgr.BackupConfig()
+	if bc.CredentialLockedUntil != 1111111111 {
+		t.Errorf("CredentialLockedUntil = %d, want 1111111111", bc.CredentialLockedUntil)
+	}
+	if bc.CredentialsUnlockTime != 2222222222 {
+		t.Errorf("CredentialsUnlockTime = %d, want 2222222222", bc.CredentialsUnlockTime)
+	}
+	if bc.CredentialUnlockAttempts != 3 {
+		t.Errorf("CredentialUnlockAttempts = %d, want 3", bc.CredentialUnlockAttempts)
+	}
+}

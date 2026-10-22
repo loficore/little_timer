@@ -24,6 +24,7 @@ package keystore
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -208,14 +209,36 @@ func TestIntegrationKeyPersistsDaemonRestart(t *testing.T) {
 // startKeyringDaemon 用口令经 stdin 以 --unlock --daemonize 启动
 // gnome-keyring-daemon(不经 shell,口令不作为参数暴露)。失败时 Fatalf,
 // 仅限测试主体在已授权重启的语境下调用。
+// startKeyringDaemon 用与 CI 初始设置完全相同的两段式配方重启 daemon。
+//
+// 曾经这里只用单段 `gnome-keyring-daemon --unlock --daemonize`，重启后得到的
+// daemon 会把 login 集合呈现为**锁定**态 —— 于是重启持久性测试必然失败
+// （Unseal 报「master key 所在集合已锁定」），且失败会被误读成「凭没落盘」。
+// 差别就在两段式：`--unlock` 物化集合、`--start --components=secrets` 才
+// fork 出可用 daemon，且两段 stdout（socket 环境变量的 export 语句）都要
+// eval，否则 daemon 虽在 bus 上却无人能连。
+//
+// 口令经子进程**环境变量**传入，不作为 argv，因此不出现在命令行 /
+//proc/<pid>/cmdline 中。
 func startKeyringDaemon(t *testing.T, password string) {
 	t.Helper()
-	start := exec.Command("gnome-keyring-daemon", "--unlock", "--daemonize")
-	start.Stdin = strings.NewReader(password)
-	start.Env = os.Environ()
-	if out, err := start.CombinedOutput(); err != nil {
-		t.Fatalf("重启 gnome-keyring-daemon 失败: %v: %s", err, out)
+	if err := runKeyringRecipe(password); err != nil {
+		t.Fatalf("重启 gnome-keyring-daemon 失败: %v", err)
 	}
+}
+
+// runKeyringRecipe 执行两段式 keyring 启动配方。
+func runKeyringRecipe(password string) error {
+	script := `
+	  eval "$(printf '%s\n' "$KRPW" | gnome-keyring-daemon --unlock)"
+	  eval "$(printf '%s\n' "$KRPW" | gnome-keyring-daemon --start --components=secrets)"
+	`
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Env = append(os.Environ(), "KRPW="+password)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%v: %s", err, out)
+	}
+	return nil
 }
 
 // reviveKeyringDaemon 尽力(daemon 语义下非断言)复活本会话 keyring daemon:
@@ -244,11 +267,8 @@ func reviveKeyringDaemon(t *testing.T, password string) {
 	if namePresent() {
 		return
 	}
-	start := exec.Command("gnome-keyring-daemon", "--unlock", "--daemonize")
-	start.Stdin = strings.NewReader(password)
-	start.Env = os.Environ()
-	if out, err := start.CombinedOutput(); err != nil {
-		t.Logf("cleanup 复活 gnome-keyring-daemon 失败(daemon 可能已死,需手工重启): %v: %s", err, out)
+	if err := runKeyringRecipe(password); err != nil {
+		t.Logf("cleanup 复活 gnome-keyring-daemon 失败(daemon 可能已死,需手工重启): %v", err)
 		return
 	}
 	deadline := time.Now().Add(10 * time.Second)

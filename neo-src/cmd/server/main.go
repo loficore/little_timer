@@ -325,30 +325,56 @@ func bootstrapKeystore(ks keystore.Keystore, secretDBPath string) error {
 // 最后一次主口令触发 Task 8 的迁移器)。在那之前本进程刻意不开 DB、不接
 // Auth/ConflictGuard 中间件 —— 密钥服务不可用时任何凭据读写都无法 Seal,
 // 统一 501 是最诚实的语义。
-func newMigrationWaitRouter(corsOrigin string) *gin.Engine {
+// 本进程是"迁移等待模式"专用,只挂三条 credentials 端点,不接
+// Auth / ConflictGuard 中间件 —— 密钥服务不可用时任何凭据读写都无法 Seal,
+// 让非凭据端点可被调用只会给出误导性的成功。
+func newMigrationWaitRouter(a *httpapp.App, corsOrigin string) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.CORS(corsOrigin))
-	stub := func(c *gin.Context) {
-		c.JSON(http.StatusNotImplemented, gin.H{
-			"error": "迁移等待模式:系统密钥服务不可用,credentials 端点尚未启用",
-		})
-	}
+	r.Use(func(c *gin.Context) {
+		c.Set("app", a)
+		c.Next()
+	})
 	g := r.Group("/api/credentials")
-	g.GET("/status", stub)
-	g.POST("/reset", stub)
-	g.POST("/migrate", stub)
+	g.GET("/status", handlers.CredentialsStatus)
+	g.POST("/reset", handlers.CredentialsReset)
+	g.POST("/migrate", handlers.CredentialsMigrate)
 	return r
+}
+
+// runKeystoreMigration 在正常模式下跑一次性迁移（Task 8 的 MigrateAll）。
+//
+// 放在 bootstrapKeystore 之后、打开 DB 之前：迁移要读 settings 的旧密文列，
+// 所以 settings manager 必须已就绪；但要在起 worker/cron 之前完成，避免
+// worker 抢在凭据就绪前就去读 API Key。
+//
+// password 为空表示"没有已知口令"——此时若磁盘上确无 v1 文件即无事可做；
+// 若有 v1 文件，MigrateAll 会返回 ErrUnseal（缺口令），由调用方决定是
+// 提示用户还是继续（headless 场景用户可以事后跑 migrate-keystore CLI）。
+func runKeystoreMigration(ks keystore.Keystore, dbPath string, creds keystore.SettingsCreds, password []byte) error {
+	secretPath := secretStorePath(dbPath)
+	_, err := keystore.MigrateAll(ks, keystore.MigrateOptions{
+		DBPath:       dbPath,
+		SecretPath:   secretPath,
+		SentinelPath: filepath.Join(filepath.Dir(secretPath), keystore.SentinelName),
+		Password:     password,
+	})
+	return err
 }
 
 // runMigrationWaitServer 以迁移等待模式服务:HTTP 只暴露 501 占位路由,
 // 等待运维修复密钥服务后重启(迁移逻辑见 Task 8)。webview/cron/worker
 // 一概不启动。SIGINT/SIGTERM 走与正常模式相同的优雅关闭。
 func runMigrationWaitServer(opts *cli.ServeOptions) error {
+	// 迁移等待模式仍需 App：credentials 端点要从它拿 SecretStorage 与
+	// SettingsManager 来完成迁移。但 keystore 此时不可用，故不跑
+	// bootstrapApp 的常规引导（worker/cron/备份一律不启动）。
+	migApp := newMigrationWaitApp(opts.DBPath)
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", opts.Port),
-		Handler:           newMigrationWaitRouter(opts.CORSOrigin),
+		Handler:           newMigrationWaitRouter(migApp, opts.CORSOrigin),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -384,6 +410,27 @@ func runMigrationWaitServer(opts *cli.ServeOptions) error {
 
 // bootstrapApp 接线 SQLite → Settings → Clock → Backup → App 链。
 // 返回 App 和一个 cleanup 函数，后者关闭 DB 并反初始化时钟管理器。
+// newMigrationWaitApp 为迁移等待模式构造一个"瘦" App：只有 credentials 端点
+// 需要的东西（SQLite / settings / keystore 接线），不建 backup manager，
+// 也不跑备份重建——此时 keystore 不可用，任何凭据 Seal 都会失败。
+func newMigrationWaitApp(dbPath string) *httpapp.App {
+	sqlite := storage.NewSqliteManager().Init(dbPath)
+	if err := sqlite.Open(); err != nil {
+		fmt.Fprintf(os.Stderr, "migration-wait: open sqlite: %v\n", err)
+		return httpapp.NewApp(domain.NewClockManager(domain.NewDefaultClockTaskConfig()),
+			nil, sqlite, nil, dbPath)
+	}
+	_ = sqlite.Migrate()
+	sm, err := settings.NewFromSqliteManager(sqlite, dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "migration-wait: settings: %v\n", err)
+	}
+	a := httpapp.NewApp(domain.NewClockManager(domain.NewDefaultClockTaskConfig()),
+		sm, sqlite, nil, dbPath)
+	_ = a.Secrets()
+	return a
+}
+
 func bootstrapApp(dbPath string) (*httpapp.App, func(), error) {
 	sqlite := storage.NewSqliteManager().Init(dbPath)
 	if err := sqlite.Open(); err != nil {
@@ -405,6 +452,18 @@ func bootstrapApp(dbPath string) (*httpapp.App, func(), error) {
 	// 备份可选——从持久化的 BackupConfig 重建;RebuildBackup 会回退到
 	// local 适配器，只有回退也失败时才返回错误（本进程禁用备份）。
 	a := httpapp.NewApp(clk, sm, sqlite, nil, dbPath)
+	// Task 11:在凭据存储就绪后、备份重建前跑一次性迁移。必须早于 Rebuild
+	// ——备份适配器要用云端凭据，迁移没完成就读不到。errMigrationPending /
+	// ErrUnseal 说明磁盘上有 v1 数据但没口令：不是致命错误（旧路径仍可用
+	// 直到用户补跑 CLI），记 warn 后继续启动。
+	if err := runKeystoreMigration(keystore.Current(), dbPath, sm, nil); err != nil {
+		if errors.Is(err, errMigrationPending) || errors.Is(err, keystore.ErrUnseal) {
+			log.Warn("server: 一次性凭据迁移未完成,旧凭据保持原样",
+				"error", err.Error())
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: credential migration failed (%v)\n", err)
+		}
+	}
 	// 尽早建凭据存储并接线 SettingsManager:Rebuild 及后续配置保存
 	// 路径都需要已接线的 secret store(Task 4 的凭据分流)。
 	_ = a.Secrets()

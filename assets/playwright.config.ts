@@ -44,8 +44,14 @@ export default defineConfig({
       // CI 里 neo-src/bin/server 已由前置步骤 go build 生成，直接 exec 单一进程；
       // 本地保留 go run 免手动构建。用 `go run` 时 Playwright 只 kill 到 shell wrapper，
       // 真正的 server 子进程可能残留 stdout 管道，导致 CI 结束后进程挂住十几分钟。
+      // CI 里必须把后端包在 dbus-run-session + gnome-keyring 里：凭据改由系统
+      // 密钥环托管（issue #13），headless runner 上没有 Secret Service，服务器
+      // 会在启动期 fail-fast 直接退出（spec §9 规定的行为）。所以在同一个
+      // session bus 里先起一个仅本次运行有效的内存 keyring 再 exec 服务器。
+      //
+      // 本地开发不包：开发者桌面的登录会话本身就是保护边界，自带 keyring。
       command: process.env.CI
-        ? "../neo-src/bin/server serve --http-only --db-path ./test_tmp/e2e.db"
+        ? `dbus-run-session -- sh -c 'echo -n "" | gnome-keyring-daemon --unlock --daemonize --components=secrets && exec ../neo-src/bin/server serve --http-only --db-path ./test_tmp/e2e.db'`
         : "cd ../neo-src && go run ./cmd/server/ serve --http-only --db-path ../assets/test_tmp/e2e.db",
       cwd: __dirname,
       url: "http://127.0.0.1:8080/api/state",

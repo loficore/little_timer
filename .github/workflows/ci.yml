@@ -178,7 +178,10 @@ jobs:
           dbus-run-session -- bash -c '
             eval "$(printf "\n" | gnome-keyring-daemon --unlock)"
             eval "$(printf "\n" | gnome-keyring-daemon --start --components=secrets)"
-            go test -tags "linux integration_dbus" ./internal/keystore/
+            # -v 是必需的：这些测试在 daemon 不可用时会 t.Skip 而非失败，
+            # 不带 -v 的话「全跳过」和「全跑过」在 CI 输出里长得一模一样
+            # （都只打印一行 ok）。绿得有没有意义必须一眼可辨。
+            go test -v -tags "linux integration_dbus" ./internal/keystore/
           '
         working-directory: neo-src
       - run: go mod tidy

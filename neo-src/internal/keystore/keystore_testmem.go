@@ -30,9 +30,9 @@ import (
 
 // memStore 是进程内 keystore。master key 只存在于堆内存，进程退出即消失。
 type memStore struct {
-	mu       sync.Mutex
-	key      []byte
-	hasKey   bool
+	mu     sync.Mutex
+	key    []byte
+	hasKey bool
 	// perProcess 前缀让 blob 不可跨进程复用，避免测试间串味。
 	perProcess []byte
 }

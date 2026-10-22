@@ -55,7 +55,12 @@ jobs:
 
       - name: Build Go backend
         working-directory: neo-src
-        run: go build -o bin/server ./cmd/server
+        # test_keystore：VRT 验的是渲染，不是 keystore 正确性（后者由
+        # ci.yml 的 keystore-integration job 用真 daemon 覆盖）。不注入的话，
+        # runner 上没有 Secret Service，后端会在启动期 fail-fast 直接退出，
+        # playwright 的 webServer 起不来 → 整个 job 挂在启动阶段、截图一条都没跑。
+        # 漏掉这个 tag 会让「VRT 红」的真实原因完全被掩盖（本 PR 就发生过）。
+        run: go build -tags test_keystore -o bin/server ./cmd/server
 
       - name: Ensure test_tmp exists for backend db path
         run: mkdir -p assets/test_tmp

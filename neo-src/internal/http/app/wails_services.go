@@ -515,6 +515,20 @@ type BackupService struct {
 // NewBackupService 构造绑定到给定 App 的 BackupService。
 func NewBackupService(app *App) *BackupService { return &BackupService{app: app} }
 
+// CredentialStatus 返回凭据子系统健康度（取代已删除的 GetMasterPasswordStatus）。
+//
+// 前端据此渲染「系统密钥环托管（<backend>）」一行而非口令输入框。
+// 载入失败态 backend="unavailable" 且 detail 非空——那是环境问题提示，
+// 不应引导用户去重新填写凭据。
+func (s *BackupService) CredentialStatus() (domain.CredentialStatus, error) {
+	st := s.app.CredentialStatus()
+	log.Debug("credentials.status",
+		"method", "BackupService.CredentialStatus",
+		"backend", st.Backend,
+		"has_secret", st.HasSecret)
+	return st, nil
+}
+
 // GetBackupConfig 返回持久化的 BackupConfig，secret 已打码。
 func (s *BackupService) GetBackupConfig() (any, error) {
 	cfg := s.app.Vault.GetBackupConfig()

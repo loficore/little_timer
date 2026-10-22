@@ -76,7 +76,37 @@ func (sm *SettingsManager) PutSecret(key string, value []byte) error {
 	return sm.secretStore.Store([]byte(key), value)
 }
 
+// ClearCredentialState 是"重置"路径用的清理：比 ClearLegacyState 多清三个
+// has_* 标记列，把内存态一并复位。
+//
+// 与 ClearLegacyState 的语义差别是关键：迁移刚把凭据搬进 secrets，此时
+// has_* 必须**保持 1**——它是"secret store 里有这个凭据"的信号，清零会让
+// 下次 Load 认为该凭据未配置。而重置是真把凭据删了，has_* 就该归 0。
+func (sm *SettingsManager) ClearCredentialState() error {
+	db := sm.sqlite.DB()
+	if db == nil {
+		return errors.New("settings: sqlite not open")
+	}
+	if err := sm.ClearLegacyState(); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`
+        UPDATE backup_config SET
+            has_webdav_password = 0,
+            has_s3_access_key    = 0,
+            has_s3_secret_key    = 0
+        WHERE id = 1;`); err != nil {
+		return fmt.Errorf("settings: 清理凭据标记失败: %w", err)
+	}
+	// 凭据明文也从内存态抹掉，避免本进程内还能读到已"重置"的凭据。
+	sm.backupConfig.WebDAVPassword = ""
+	sm.backupConfig.S3AccessKey = ""
+	sm.backupConfig.S3SecretKey = ""
+	return nil
+}
+
 // ClearLegacyState 复位 v1 遗留状态：三列密文置 NULL，四个主口令标记列置 0。
+// **不动 has_webdav_password / has_s3_* —— 见 ClearCredentialState 的说明。**
 //
 // 注意这**不是**删列：Path B 决定保留 backup_config 表的存量 schema
 // （cmd/migrate 的 expected columns 也列了它们），只是把值清成"没有"。

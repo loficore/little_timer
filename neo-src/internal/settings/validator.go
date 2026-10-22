@@ -44,7 +44,10 @@ const (
 	maxLoopInterval = uint64(3600)
 
 	minMaxSeconds = uint64(1)
-	maxMaxSeconds = domain.Year * 365
+	// 显式 uint64（与 minMaxSeconds 同型）：保持无类型时该值只在上下文里定型，
+	// 而 fmt.Errorf 的 %d 默认按 int 物化——11510640000 在 32 位目标
+	// （如 android/386）上溢出 int。参数 maxSeconds 本身是 uint64。
+	maxMaxSeconds = uint64(domain.Year * 365)
 
 	minTickIntervalMs = domain.MinTickIntervalMs // 100
 	maxTickIntervalMs = domain.MaxTickIntervalMs // 5000

@@ -520,13 +520,22 @@ func NewBackupService(app *App) *BackupService { return &BackupService{app: app}
 // 前端据此渲染「系统密钥环托管（<backend>）」一行而非口令输入框。
 // 载入失败态 backend="unavailable" 且 detail 非空——那是环境问题提示，
 // 不应引导用户去重新填写凭据。
-func (s *BackupService) CredentialStatus() (domain.CredentialStatus, error) {
+// 返回 map 而非 domain.CredentialStatus：本文件所有 Wails 方法都返回
+// any / map[string]any。让它返回内部 domain 类型会把 internal/domain 拖进
+// 绑定生成器的扫描范围，产出对 "../../domain/models.js" 的引用，而该文件
+// 并不存在 —— 构建期直接报 "Could not resolve"（前端 pnpm run build 挂）。
+// 前端需要的形状由 HTTP 层的 domain.CredentialStatus 定义，两端一致。
+func (s *BackupService) CredentialStatus() (map[string]any, error) {
 	st := s.app.CredentialStatus()
 	log.Debug("credentials.status",
 		"method", "BackupService.CredentialStatus",
 		"backend", st.Backend,
 		"has_secret", st.HasSecret)
-	return st, nil
+	return map[string]any{
+		"backend":    st.Backend,
+		"detail":     st.Detail,
+		"has_secret": st.HasSecret,
+	}, nil
 }
 
 // GetBackupConfig 返回持久化的 BackupConfig，secret 已打码。

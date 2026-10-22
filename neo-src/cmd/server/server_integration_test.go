@@ -53,7 +53,12 @@ func TestMain(m *testing.M) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	binPath := filepath.Join(tmpDir, "lt-server-test-bin")
-	build := exec.Command("go", "build", "-o", binPath, ".")
+	// test_keystore：这些子进程测试验的是 bootstrap / 信号 / HTTP 行为，与
+	// keystore 无关。但 server 在启动期对 keystore fail-fast（issue #13
+	// spec §9），无密钥环的 runner（GitHub runner 就没有）会在到达被测路径
+	// 之前就退出 —— 表现为断言"错误信息里应含 bootstrap"却拿到
+	// "keystore 不可用"。给子进程注入内存 keystore，让它与被测行为无关。
+	build := exec.Command("go", "build", "-tags", "test_keystore", "-o", binPath, ".")
 	var buildStderr bytes.Buffer
 	build.Stderr = &buildStderr
 	if err := build.Run(); err != nil {

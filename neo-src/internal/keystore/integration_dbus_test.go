@@ -290,3 +290,103 @@ func waitBusName(t *testing.T, wantPresent bool, timeout time.Duration) bool {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// ---- 锁定集合的识别（Review Focus: 启动 fail-fast 不能被静默绕过）----
+
+// newLiveSecretService 造一条连到真实 daemon 的 secretService，用于测试直接
+// 调 D-Bus。同一包内构造，不走 Keystore 接口。
+func newLiveSecretService(t *testing.T) *secretService {
+	t.Helper()
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		t.Skipf("无法连接 session bus: %v", err)
+	}
+	return &secretService{conn: conn, obj: conn.Object(secretBusName, secretObjPath)}
+}
+
+// defaultCollectionPath 读 default 别名指向的集合。
+func defaultCollectionPath(t *testing.T, s *secretService) dbus.ObjectPath {
+	t.Helper()
+	var path dbus.ObjectPath
+	call := s.obj.Call(serviceIface+".ReadAlias", 0, defaultAlias)
+	if call.Err != nil {
+		t.Fatalf("ReadAlias: %v", call.Err)
+	}
+	if err := call.Store(&path); err != nil {
+		t.Fatalf("ReadAlias store: %v", err)
+	}
+	if isEmptyPath(path) {
+		t.Skip("default 别名为空（daemon 尚未创建 login 集合），本用例不适用")
+	}
+	return path
+}
+
+// TestIntegrationLockedCollection_AvailableNeverSilentlyPasses 覆盖一条不变量：
+// **只要默认集合仍处于锁定状态，Available() 就不得返回 nil。**
+//
+// 背景：daemon 在线但集合锁定时，若 Available() 返回 nil，启动期 fail-fast
+// （spec §9）就形同虚设 —— 服务器带着不可用的凭据存储启动，直到第一次读写
+// 凭据才炸，且错误文案指向用户而非环境。
+//
+// 断言写成不变量而非某个分支，是因为两段式配方下集合有口令，Unlock 往往
+// 能自动成功；此时 Available() 返回 nil 是正确的（它真的把集合解开了）。
+// 真正要禁止的是「集合还锁着却返回 nil」——那只能是漏检。
+func TestIntegrationLockedCollection_AvailableNeverSilentlyPasses(t *testing.T) {
+	liveKeystoreOrSkip(t) // daemon 必须先可用，否则本用例无从谈起
+
+	s := newLiveSecretService(t)
+	coll := defaultCollectionPath(t, s)
+
+	if locked, err := s.collectionLocked(coll); err != nil {
+		t.Fatalf("前置 collectionLocked: %v", err)
+	} else if locked {
+		t.Skip("默认集合本就锁定，daemon 侧环境不干净，跳过")
+	}
+
+	// 锁定集合，并尽力恢复（测试绝不能把用户留在锁定态）。
+	if call := s.obj.Call(serviceIface+".Lock", 0, []dbus.ObjectPath{coll}); call.Err != nil {
+		t.Skipf("Lock 调用失败（daemon 不支持无交互锁定）: %v", call.Err)
+	}
+	t.Cleanup(func() {
+		unlocked, prompt, err := s.unlock(coll)
+		if err != nil || !isEmptyPath(prompt) || len(unlocked) == 0 {
+			t.Errorf("清理失败：无法解锁集合 %s（err=%v prompt=%v unlocked=%v）——"+
+				"后续集成测试将因集合锁定而失败。CI 的两段式配方用 printf '\\n' "+
+				"创建了无口令集合，理论上 Unlock 应能自动成功", coll, err, prompt, unlocked)
+			return
+		}
+	})
+
+	// 给 daemon 一点时间真正落锁，避免与 Lock 的异步生效竞态。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if locked, err := s.collectionLocked(coll); err == nil && locked {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	ks := Current()
+	availErr := ks.Available()
+	stillLocked, lockErr := s.collectionLocked(coll)
+	if lockErr != nil {
+		t.Fatalf("事后 collectionLocked: %v", lockErr)
+	}
+
+	switch {
+	case availErr == nil && stillLocked:
+		t.Fatalf("集合仍锁定但 Available() 返回 nil —— 锁定态被静默绕过，启动 fail-fast 会失效")
+	case availErr == nil && !stillLocked:
+		// 正常分支：Unlock 自动成功，集合已被解开，Available 报健康是对的。
+		t.Log("Available() 返回 nil：集合确已被解锁（非静默绕过），符合预期")
+	case availErr != nil:
+		if !errors.Is(availErr, ErrUnavailable) {
+			t.Errorf("err = %v，want 可 errors.Is 到 ErrUnavailable", availErr)
+		}
+		// 错误文案必须给出可操作指引，不能只说"失败了"。
+		msg := availErr.Error()
+		if !strings.Contains(msg, "交互口令") && !strings.Contains(msg, "解锁登录密钥环") {
+			t.Errorf("错误文案缺少可操作指引: %s", msg)
+		}
+	}
+}

@@ -277,7 +277,11 @@ func (s *secretService) defaultCollection() (dbus.ObjectPath, error) {
 		return "", unavailable("ReadAlias 响应解析失败: " + err.Error())
 	}
 	if !isEmptyPath(path) {
-		return path, nil
+		// 别名已存在是**正常路径**（任何真实桌面、以及 CI 上都是如此），所以
+		// Locked 检查必须落在这一支上。早先的实现在这里直接 return，导致
+		// usableCollection 只挂在下面的 CreateCollection 分支后 —— 那条分支
+		// 几乎永不执行，整个锁定态处理等于死代码。
+		return s.usableCollection(path)
 	}
 	props := map[string]dbus.Variant{
 		collectionLabelProp: dbus.MakeVariant(collectionLabel),
@@ -323,7 +327,7 @@ func (s *secretService) usableCollection(path dbus.ObjectPath) (dbus.ObjectPath,
 	if err != nil {
 		return "", err
 	}
-	if len(prompt) > 0 {
+	if !isEmptyPath(prompt) {
 		return "", unavailable("默认密钥环(" + string(path) +
 			")已锁定且需要交互口令才能解锁(CI/无桌面环境下无解);" +
 			"请登录桌面会话解锁登录密钥环,或在测试环境改用注入的测试 keystore")
@@ -348,14 +352,21 @@ func (s *secretService) collectionLocked(path dbus.ObjectPath) (bool, error) {
 	return locked, nil
 }
 
-// unlock 按规范解锁集合,返回 (已解锁集合, 需交互的 Prompt 集合)。
-func (s *secretService) unlock(path dbus.ObjectPath) (unlocked, prompt []dbus.ObjectPath, err error) {
+// unlock 按规范解锁集合,返回 (已解锁的集合列表, 需交互的 Prompt 对象)。
+//
+// 注意 prompt 的类型:规范 org.freedesktop.Secret.Service.Unlock 的出参是
+// (ao unlocked, o prompt) —— prompt 是**单个 object**,不是数组。
+// 早先这里把两者都声明成 []dbus.ObjectPath,导致 daemon 返回单个 o 时
+// dbus.Store 报 "cannot convert dbus.ObjectPath to []dbus.ObjectPath",
+// 锁定态处理整条路径失效且不报错。该缺陷此前不可见,是因为集合从未被
+// 锁定过,Unlock 分支从未执行。
+func (s *secretService) unlock(path dbus.ObjectPath) (unlocked []dbus.ObjectPath, prompt dbus.ObjectPath, err error) {
 	call := s.obj.Call(serviceIface+".Unlock", 0, []dbus.ObjectPath{path})
 	if call.Err != nil {
-		return nil, nil, unavailable("Unlock 调用失败: " + call.Err.Error())
+		return nil, "", unavailable("Unlock 调用失败: " + call.Err.Error())
 	}
 	if err := call.Store(&unlocked, &prompt); err != nil {
-		return nil, nil, unavailable("Unlock 响应解析失败: " + err.Error())
+		return nil, "", unavailable("Unlock 响应解析失败: " + err.Error())
 	}
 	return unlocked, prompt, nil
 }

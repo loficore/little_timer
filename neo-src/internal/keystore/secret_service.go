@@ -59,6 +59,10 @@ const (
 	itemLabelProp      = "org.freedesktop.Secret.Item.Label"
 	itemAttributesProp = "org.freedesktop.Secret.Item.Attributes"
 
+	// collectionLockedProp —— 集合的 Locked 属性(规范 Collection.Locked)。
+	// 为 true 时 SearchItems 不返回其中的 item,写入则直接失败。
+	collectionLockedProp = "org.freedesktop.Secret.Collection.Locked"
+
 	// defaultAlias —— ReadAlias 查询默认集合的别名;gnome-keyring 仅支持
 	// "default"/"" 两种 CreateCollection alias("Only the 'default' alias is
 	// supported"),故建集合时不指定 little_timer 别名。
@@ -293,9 +297,79 @@ func (s *secretService) defaultCollection() (dbus.ObjectPath, error) {
 	if isEmptyPath(coll) {
 		return "", unavailable("CreateCollection 未返回集合路径")
 	}
-	return coll, nil
+	return s.usableCollection(coll)
 }
 
+// usableCollection 校验集合是否可写,必要时按规范解锁后返回。
+//
+// 为什么必须有这一步:集合被锁定时,SearchItems **不返回**其中的 item,
+// 于是 searchMasterKey 返回 found=false,EnsureMasterKey 会误判成
+// "密钥环里没有 master key",转而往这个锁定集合里 CreateItem —— 报出来的
+// 是 "master key 所在集合已锁定",既晚(拖到第一次 Seal)又让人误以为是
+// 用户数据问题。锁定态必须在这里就地识别。
+//
+// 解锁走规范 org.freedesktop.Secret.Service.Unlock(不在 Prompt 路径时
+// daemon 会直接解锁;gnome-keyring 对有口令的 login 集合会返回 Prompt,
+// 那种情况无交互无法解锁,如实报错让运维去解锁登录密钥环)。
+func (s *secretService) usableCollection(path dbus.ObjectPath) (dbus.ObjectPath, error) {
+	locked, err := s.collectionLocked(path)
+	if err != nil {
+		return "", err
+	}
+	if !locked {
+		return path, nil
+	}
+	unlocked, prompt, err := s.unlock(path)
+	if err != nil {
+		return "", err
+	}
+	if len(prompt) > 0 {
+		return "", unavailable("默认密钥环(" + string(path) +
+			")已锁定且需要交互口令才能解锁(CI/无桌面环境下无解);" +
+			"请登录桌面会话解锁登录密钥环,或在测试环境改用注入的测试 keystore")
+	}
+	if len(unlocked) == 0 {
+		return "", unavailable("集合解锁未生效:" + string(path))
+	}
+	return path, nil
+}
+
+// collectionLocked 读集合的 Locked 属性。
+func (s *secretService) collectionLocked(path dbus.ObjectPath) (bool, error) {
+	obj := s.conn.Object(secretBusName, path)
+	v, err := obj.GetProperty(collectionLockedProp)
+	if err != nil {
+		return false, unavailable("读取集合 Locked 属性失败(" + string(path) + "): " + err.Error())
+	}
+	locked, ok := v.Value().(bool)
+	if !ok {
+		return false, unavailable("集合 Locked 属性类型异常(" + string(path) + ")")
+	}
+	return locked, nil
+}
+
+// unlock 按规范解锁集合,返回 (已解锁集合, 需交互的 Prompt 集合)。
+func (s *secretService) unlock(path dbus.ObjectPath) (unlocked, prompt []dbus.ObjectPath, err error) {
+	call := s.obj.Call(serviceIface+".Unlock", 0, []dbus.ObjectPath{path})
+	if call.Err != nil {
+		return nil, nil, unavailable("Unlock 调用失败: " + call.Err.Error())
+	}
+	if err := call.Store(&unlocked, &prompt); err != nil {
+		return nil, nil, unavailable("Unlock 响应解析失败: " + err.Error())
+	}
+	return unlocked, prompt, nil
+}
+
+// probeCollectionUsable 供 Available 使用:只判断"能不能往密钥环里存东西",
+// 不创建任何 item —— 探测必须是只读的,否则每次启动探测都会留垃圾。
+func (s *secretService) probeCollectionUsable() error {
+	path, err := s.defaultCollection()
+	if err != nil {
+		return err
+	}
+	_ = path
+	return nil
+}
 // storeMasterKey 把 32 字节 master key 作为 item 存入默认集合。
 func (s *secretService) storeMasterKey(key []byte) error {
 	sess, err := s.openSession()

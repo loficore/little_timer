@@ -115,8 +115,6 @@ jobs:
           sudo apt-get install -y \
             libgtk-4-dev \
             libwebkitgtk-6.0-dev \
-            gnome-keyring \
-            dbus-x11 \
             pkg-config \
             libgirepository1.0-dev
       - name: Generate Wails bindings
@@ -126,7 +124,10 @@ jobs:
         working-directory: assets
       - run: pnpm run build
         working-directory: assets
-      - run: go build -o bin/server ./cmd/server
+      # test_keystore：e2e 验的是应用行为而非 keystore 正确性（后者由
+      # keystore-integration job 用真 daemon 覆盖）。该 build tag 让
+      # keystore.Current() 返回内存实现，编译期门禁，生产构建不含。
+      - run: go build -tags test_keystore -o bin/server ./cmd/server
         working-directory: neo-src
       - name: Ensure test_tmp exists for backend db path
         run: mkdir -p assets/test_tmp
@@ -165,13 +166,20 @@ jobs:
             libgtk-4-dev \
             libwebkitgtk-6.0-dev \
             libsqlite3-dev
+      # gnome-keyring 的两段式初始化。**不要**改成 --daemonize：
+      #   1) `--unlock` 用管道里的口令物化 login 集合（daemon 尚不存在）；
+      #   2) `--start --components=secrets` 才 fork 出 daemon。
+      # 两段的 stdout 都是 shell export 语句（GNOME_KEYRING_* socket 路径），
+      # **必须 eval**，丢掉它们则 Secret Service 虽在 bus 上却无人能连 ——
+      # 症状是 "collection/login does not exist" 或集合始终 Locked=true。
+      # 整个 job 的测试都跑在这一个 dbus 会话里，故 bus 不会中途消失。
       - name: 启动内存 keyring（仅本 job 生命周期）
         run: |
-          # --unlock 让 collection 不需要交互口令；--components=secrets 只加载
-          # Secret Service 组件，不拉起 GNOME shell 依赖。
-          dbus-run-session -- \
-            sh -c 'echo -n "" | gnome-keyring-daemon --unlock --daemonize --components=secrets && \
-                   go test -tags "linux integration_dbus" ./internal/keystore/'
+          dbus-run-session -- bash -c '
+            eval "$(printf "\n" | gnome-keyring-daemon --unlock)"
+            eval "$(printf "\n" | gnome-keyring-daemon --start --components=secrets)"
+            go test -tags "linux integration_dbus" ./internal/keystore/
+          '
         working-directory: neo-src
       - run: go mod tidy
         working-directory: neo-src
@@ -214,7 +222,11 @@ jobs:
       - name: Generate Wails bindings
         run: bash scripts/generate-bindings.sh
       - name: Install Chinese fonts for VRT
-        run: sudo apt-get install -y fonts-noto-cjk gnome-keyring dbus-x11
+        run: sudo apt-get install -y fonts-noto-cjk
+      # 与 e2e 同理：VRT 验的是渲染，不是 keystore 正确性。注入内存 keystore，
+      # 避免把 D-Bus / gnome-keyring 的脆弱性带进视觉回归。
+      - run: go build -tags test_keystore -o bin/server ./cmd/server
+        working-directory: neo-src
       - run: pnpm exec playwright install --with-deps chromium
         working-directory: assets
       - run: pnpm run test:vrt || true

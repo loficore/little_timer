@@ -34,8 +34,15 @@ func (linuxStore) Name() string { return "secret-service" }
 // Available 探测 session bus 上 org.freedesktop.secrets 是否可达
 // (必要时尝试 D-Bus 激活)。失败带 §9 sway 指引文案。
 func (linuxStore) Available() error {
-	_, err := dialSecretService()
-	return err
+	svc, err := dialSecretService()
+	if err != nil {
+		return err
+	}
+	// 只查 bus name 是不够的：daemon 在线但默认集合锁定时，bus name 明明在，
+	// 可所有凭据操作都会失败。启动 fail-fast（spec §9）要拦的正是这种
+	// "半可用"状态 —— 放它过去，报错会拖到第一次读/写凭据才炸，且文案
+	// 指向用户而不是环境。
+	return svc.probeCollectionUsable()
 }
 
 // HasMasterKey 报告密钥环中是否已存在 master key item;item 被锁定也算存在。

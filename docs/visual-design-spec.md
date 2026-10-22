@@ -82,7 +82,9 @@
 
 ## R7 弹窗系统统一
 
-**问题**：三个弹窗三套语法——HabitModal 无关闭按钮、内容超屏被硬裁切（壁纸选择区露半截）且 Escape 无效；WallpaperModal 有 X 和 header 分隔线，但「渐变」tab 缺失、「取色器」渲染成未设样式的小方块；MasterPasswordModal 尺寸克制、按钮可读（正面样例）。
+**问题**：三个弹窗三套语法——HabitModal 无关闭按钮、内容超屏被硬裁切（壁纸选择区露半截）且 Escape 无效；WallpaperModal 有 X 和 header 分隔线，但「渐变」tab 缺失、「取色器」渲染成未设样式的小方块。
+
+> **2026-10-22 更新（issue #13）**：MasterPasswordModal 已随主口令 UX 一并删除（凭据改由 OS 原生密钥服务托管，见 README「凭据安全」）。它原本是本节的正面样例，删除后当前剩余两个弹窗（HabitModal / WallpaperModal）**都**需要向本节规则收敛，不再有可直接参照的既有实现。
 
 **规则**：
 - 所有弹窗共用一个壳组件：header（T2 标题 + X）、内容区（超高时内部滚动，禁止裁切）、footer（取消/确认，确认走 R1 solid）。

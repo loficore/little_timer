@@ -31,6 +31,7 @@ import type {
   WallpaperUploadResult,
   WallpaperListResult,
   WallpaperDeleteResult,
+  CredentialStatus,
 } from "../types/api";
 
 /* eslint-disable @typescript-eslint/require-await */
@@ -331,37 +332,15 @@ export class WailsAPIClient {
   }
 
   /**
-   * 获取主密码状态（是否设置、是否解锁、锁定剩余时间）
+   * 获取凭据子系统状态（取代已删的主口令状态）。
+   *
+   * backend === "unavailable" 表示磁盘上有凭据文件但系统密钥环解不开
+   * （keyring 被重置 / 条目被删）。这时要展示 detail 里的可操作原因，
+   * 而不是引导用户重新填写凭据 —— 那是环境问题，填了也白填。
    */
-  async getMasterPasswordStatus(): Promise<{ has_password: boolean; unlocked: boolean; locked_until: number; unlock_time: number }> {
+  async getCredentialStatus(): Promise<CredentialStatus> {
     const BS = await this._b('BackupService');
-    return BS.GetMasterPasswordStatus();
-  }
-
-  /**
-   * 设置主密码
-   * @param password - 密码
-   */
-  async setMasterPassword(password: string): Promise<{ success: boolean; error?: string }> {
-    const BS = await this._b('BackupService');
-    return BS.SetMasterPassword(password);
-  }
-
-  /**
-   * 解锁凭证（使用主密码）
-   * @param password - 主密码
-   */
-  async unlockCredentials(password: string): Promise<{ success: boolean; locked_until: number; error?: string }> {
-    const BS = await this._b('BackupService');
-    return BS.UnlockCredentials(password);
-  }
-
-  /**
-   * 锁定凭证
-   */
-  async lockCredentials(): Promise<{ success: boolean }> {
-    const BS = await this._b('BackupService');
-    return BS.LockCredentials();
+    return BS.CredentialStatus();
   }
 
   /**
@@ -415,21 +394,39 @@ export class WailsAPIClient {
   // ===== GTD Daily Sweep / Review (v12) =====
   // Android Wails 绑定尚未包含 daily-sweep 服务 — stub 为 throw,避免 proxy
   // 静默返回 undefined。Web (HTTP) 路径走 APIClient 完整实现。
+  /**
+   *
+   */
   async startDailySweep(): Promise<{ job_ids: number[] }> {
     throw new Error("daily_sweep.startDailySweep: not implemented on Android (Wails)");
   }
+  /**
+   *
+   */
   async getDailySweepToday(): Promise<unknown> {
     throw new Error("daily_sweep.getDailySweepToday: not implemented on Android (Wails)");
   }
+  /**
+   *
+   */
   async adoptDailySweep(_body: unknown): Promise<unknown> {
     throw new Error("daily_sweep.adoptDailySweep: not implemented on Android (Wails)");
   }
+  /**
+   *
+   */
   async rejectDailySweep(_body: unknown): Promise<void> {
     throw new Error("daily_sweep.rejectDailySweep: not implemented on Android (Wails)");
   }
+  /**
+   *
+   */
   async getDailySweepSettings(): Promise<unknown> {
     throw new Error("daily_sweep.getDailySweepSettings: not implemented on Android (Wails)");
   }
+  /**
+   *
+   */
   async updateDailySweepSettings(_patch: unknown): Promise<unknown> {
     throw new Error("daily_sweep.updateDailySweepSettings: not implemented on Android (Wails)");
   }

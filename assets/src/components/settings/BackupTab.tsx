@@ -3,8 +3,7 @@ import { useState, useEffect } from "preact/hooks";
 import { t } from "../../utils/i18n";
 import { getAPIClient } from "../../utils/apiClientSingleton";
 import { showToast } from "../common/Toast";
-import type { BackupConfig } from "../../types/api";
-import { MasterPasswordModal } from "../MasterPasswordModal";
+import type { BackupConfig, CredentialStatus } from "../../types/api";
 
 interface BackupTabProps {
   config: any;
@@ -25,13 +24,13 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
   const [isRestoring, setIsRestoring] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [masterPasswordModalOpen, setMasterPasswordModalOpen] = useState(false);
-  const [masterPasswordModalMode, setMasterPasswordModalMode] = useState<"setup" | "unlock">("setup");
-  const [masterPasswordStatus, setMasterPasswordStatus] = useState({
-    has_password: false,
-    unlocked: false,
-    locked_until: 0,
-    unlock_time: 0,
+  // 凭据由系统密钥环托管（issue #13），不再有主口令/锁状态。
+  // backend === "unavailable" 表示磁盘有凭据但密钥环解不开 —— 那是环境问题，
+  // 要提示用户去修密钥服务，而不是重新填凭据。
+  const [credentialStatus, setCredentialStatus] = useState<CredentialStatus>({
+    backend: "",
+    detail: "",
+    has_secret: false,
   });
   const [backupConfig, setBackupConfig] = useState<BackupConfig>({
     enabled: config?.backup_enabled ?? false,
@@ -69,32 +68,30 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       auto_interval_hours: config?.backup_auto_interval_hours ?? 24,
       max_backups: config?.backup_max_backups ?? 7,
     });
-    void loadMasterPasswordStatus();
+    void loadCredentialStatus();
   }, [config]);
+
+  // 把后端标识映射到 i18n 键。未知后端统一归到 "other"——
+  // 翻译缺失时宁可显示兜底文案，也不要在界面上裸奔原始标识。
+  const credentialBackendKey = (backend: string): string => {
+    if (backend === "secret-service") return "secretService";
+    if (backend === "android-keystore") return "androidKeystore";
+    return "other";
+  };
 
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 4000);
   };
 
-  const loadMasterPasswordStatus = async () => {
+  const loadCredentialStatus = async () => {
     try {
-      const status = await apiClient.getMasterPasswordStatus();
-      setMasterPasswordStatus(status);
+      setCredentialStatus(await apiClient.getCredentialStatus());
     } catch (err) {
-      console.error('Failed to load master password status:', err);
+      console.error('Failed to load credential status:', err);
     }
   };
 
-  const handleApiError = (result: { success: boolean; error?: string; action?: { type: string; target: string; params?: { mode: string } } }) => {
-    if (result.action && result.action.type === "show_modal" && result.action.target === "master_password") {
-      const mode = result.action.params?.mode as "setup" | "unlock" || "setup";
-      setMasterPasswordModalMode(mode);
-      setMasterPasswordModalOpen(true);
-      return true;
-    }
-    return false;
-  };
 
   const getBackupErrorText = (error: string | undefined): string | null => {
     if (!error) return null;
@@ -143,9 +140,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         showToast(t("backup.created_at", { path: result.backup_path }), 'success');
         await loadBackups();
       } else {
-        if (!handleApiError(result)) {
-          showMessage('error', result.error || t("backup.create_failed"));
-        }
+        showMessage('error', result.error || t("backup.create_failed"));
       }
     } catch (err) {
       console.error('Failed to create backup:', err);
@@ -166,9 +161,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       if (result.success) {
         showToast(t("backup.restore_success"), 'success');
       } else {
-        if (!handleApiError(result)) {
-          showMessage('error', result.error || t("backup.restore_failed"));
-        }
+        showMessage('error', result.error || t("backup.restore_failed"));
       }
     } catch (err) {
       console.error('Failed to restore backup:', err);
@@ -248,23 +241,6 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
         </div>
       )}
 
-      {((backupConfig.target_type === 'webdav' && backupConfig.webdav_url) ||
-        (backupConfig.target_type === 's3' && backupConfig.s3_endpoint)) &&
-        !masterPasswordStatus.has_password && (
-        <div className="alert alert-warning">
-          <span>{t("master_password.suggestion_title")}</span>
-          <button
-            className="btn btn-sm"
-            onClick={() => {
-              setMasterPasswordModalMode("setup");
-              setMasterPasswordModalOpen(true);
-            }}
-          >
-            {t("master_password.set_now")}
-          </button>
-        </div>
-      )}
-
       <div className="form-control">
         <label className="label cursor-pointer">
           <span className="label-text">{t("backup.auto_backup")}</span>
@@ -295,65 +271,44 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       {(backupConfig.target_type === 'webdav' || backupConfig.target_type === 's3') && (
         <div className="border border-base-300 rounded-lg p-4 space-y-2">
           <div className="flex items-center gap-2 text-sm">
-            <span>🔐 {t("master_password.status")}:</span>
-            <span className={masterPasswordStatus.has_password ? "text-success" : "text-error"}>
-              {masterPasswordStatus.has_password
-                ? t("master_password.status_set")
-                : t("master_password.status_not_set")}
-            </span>
+            <span>🔐 {t("credentials.status")}:</span>
+            {credentialStatus.backend === "unavailable" ? (
+              <span className="text-error">{t("credentials.unavailable")}</span>
+            ) : (
+              <span className="text-success">
+                {t(`credentials.backend.${credentialBackendKey(credentialStatus.backend)}`)}
+              </span>
+            )}
           </div>
-          {masterPasswordStatus.has_password && (
-            <div className="flex items-center gap-2 text-sm">
-              <span>{t("master_password.unlocked")}:</span>
-              <span className={masterPasswordStatus.unlocked ? "text-success" : "text-warning"}>
-                {masterPasswordStatus.unlocked
-                  ? t("master_password.unlocked")
-                  : t("master_password.locked")}
+
+          {credentialStatus.backend === "unavailable" && (
+            <div className="alert alert-warning text-sm">
+              <span>
+                {t("credentials.unavailable_detail")}
+                {credentialStatus.detail ? ` ${credentialStatus.detail}` : ""}
               </span>
             </div>
           )}
+
           <div className="flex gap-2">
             <button
-              className="btn btn-sm"
+              className="btn btn-sm btn-ghost"
               onClick={() => {
-                const mode = masterPasswordStatus.has_password && !masterPasswordStatus.unlocked
-                  ? "unlock"
-                  : "setup";
-                setMasterPasswordModalMode(mode);
-                setMasterPasswordModalOpen(true);
+                if (!confirm(t("credentials.reset_confirm"))) return;
+                void (async () => {
+                  try {
+                    await apiClient.resetCredentials();
+                    showMessage("success", t("credentials.reset_done"));
+                    await loadCredentialStatus();
+                  } catch (err) {
+                    showMessage("error", t("credentials.reset_failed"));
+                    void err;
+                  }
+                })();
               }}
             >
-              {masterPasswordStatus.has_password
-                ? t("master_password.change_password")
-                : t("master_password.set_password")}
+              {t("credentials.reset")}
             </button>
-            {masterPasswordStatus.has_password && (
-              <button
-                className="btn btn-sm btn-ghost"
-                onClick={() => {
-                  if (masterPasswordStatus.unlocked) {
-                    void (async () => {
-                      try {
-                        const result = await apiClient.lockCredentials();
-                        if (result.success) {
-                          showMessage('success', t("master_password.locked"));
-                          await loadMasterPasswordStatus();
-                        }
-                      } catch {
-                        showMessage('error', t("backup.lock_failed"));
-                      }
-                    })();
-                  } else {
-                    setMasterPasswordModalMode("unlock");
-                    setMasterPasswordModalOpen(true);
-                  }
-                }}
-              >
-                {masterPasswordStatus.unlocked
-                  ? t("master_password.lock")
-                  : t("master_password.unlock")}
-              </button>
-            )}
           </div>
         </div>
       )}
@@ -562,17 +517,6 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
           </div>
         )}
       </div>
-
-      <MasterPasswordModal
-        isOpen={masterPasswordModalOpen}
-        mode={masterPasswordModalMode}
-        onSuccess={() => {
-          setMasterPasswordModalOpen(false);
-          void loadMasterPasswordStatus();
-          showMessage("success", masterPasswordModalMode === "setup" ? t("master_password.success") : t("master_password.unlock_success"));
-        }}
-        onClose={() => setMasterPasswordModalOpen(false)}
-      />
     </div>
   );
 };

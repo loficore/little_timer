@@ -20,6 +20,7 @@ import type {
     WallpaperUploadResult,
     WallpaperListResult,
     WallpaperDeleteResult,
+  CredentialStatus,
 } from "../types/api";
 import type {
     TaskDTO,
@@ -111,6 +112,19 @@ export class APIClient {
             throw new Error(`HTTP ${res.status}: ${await res.text()}`);
         }
         return res.json() as Promise<T>;
+    }
+
+    /**
+     * 只关心状态码、不解析 body 的请求。
+     *
+     * reset / migrate 成功时返回 204 No Content，走 fetchJson 会在
+     * res.json() 上抛"Unexpected end of JSON input"，把成功报成失败。
+     */
+    private async request(url: string, options?: RequestInit): Promise<void> {
+        const res = await fetch(url, this.ensureMutationVersion(options));
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        }
     }
 
     /**
@@ -456,49 +470,34 @@ export class APIClient {
     }
 
     /**
-     * 获取主密码状态
-     * @returns 返回含 has_password、unlocked、locked_until、unlock_time 的 Promise
+     * 获取凭据子系统状态。
+     *
+     * backend 为 "unavailable" 表示磁盘上有凭据文件但系统密钥环解不开
+     * （keyring 被重置 / 条目被删）。此时 Detail 给出原因，**不应**引导
+     * 用户重新填写凭据——那是环境问题，填了也白填。
      */
-    async getMasterPasswordStatus(): Promise<{
-        has_password: boolean;
-        unlocked: boolean;
-        locked_until: number;
-        unlock_time: number;
-    }> {
-        return this.fetchJson<{
-            has_password: boolean;
-            unlocked: boolean;
-            locked_until: number;
-            unlock_time: number;
-        }>(`${this.baseUrl}/api/backup/master-password`);
+    async getCredentialStatus(): Promise<CredentialStatus> {
+        return this.fetchJson<CredentialStatus>(`${this.baseUrl}/api/credentials/status`);
     }
 
     /**
-     * 设置主密码
-     * @param password - 新主密码
-     * @returns 返回含成功状态的 Promise
+     * 重置凭据：删除系统密钥环中的主密钥并清空全部凭据。
+     * 破坏性操作，用户需重新填写 LLM Key 与备份凭据。
      */
-    async setMasterPassword(password: string): Promise<{ success: boolean; error?: string }> {
-        return this.fetchJson<{ success: boolean; error?: string }>(`${this.baseUrl}/api/backup/master-password`, {
+    async resetCredentials(): Promise<void> {
+        await this.request(`${this.baseUrl}/api/credentials/reset`, { method: "POST" });
+    }
+
+    /**
+     * 用 v1 主口令完成一次性凭据迁移（启动等待态用）。
+     */
+    async migrateCredentials(password: string): Promise<void> {
+        await this.request(`${this.baseUrl}/api/credentials/migrate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ password }),
         });
     }
-
-    /**
-     * 解锁凭证
-     * @param password - 主密码
-     * @returns 返回含成功状态的 Promise
-     */
-    async unlockCredentials(password: string): Promise<{ success: boolean; locked_until: number; error?: string }> {
-        return this.fetchJson<{ success: boolean; locked_until: number; error?: string }>(`${this.baseUrl}/api/backup/unlock`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password }),
-        });
-    }
-
     /**
      * 锁定凭证
      * @returns 返回含成功状态的 Promise

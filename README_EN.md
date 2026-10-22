@@ -126,6 +126,17 @@ You can read/update settings via API:
 - `GET /api/settings`
 - `POST /api/settings`
 
+## Credential Security
+
+API keys and WebDAV / S3 backup credentials are held by the **operating system's native key service**: Secret Service (D-Bus) on Linux, Android Keystore (StrongBox-backed when available) on Android. There is no master password — the protection boundary is your **OS login session** on desktop, or the **device lock screen** on Android.
+
+Requirements and troubleshooting:
+
+- Desktop environments (GNOME / KDE / Cinnamon) ship a key service; nothing to do.
+- **sway / minimal installs** often do not. Run `gnome-keyring-daemon --daemonize --components=secrets`, or install KWallet / KeePassXC.
+- If no key service is available at startup, the app **fails fast** with that command in the error message rather than starting with unusable credentials.
+- Windows is not supported yet (see issue #13).
+
 ## Tooling
 
 ```bash

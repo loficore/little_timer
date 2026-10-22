@@ -9,6 +9,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
 	"little-timer/internal/habits"
+	"little-timer/internal/keystore"
 	"little-timer/internal/log"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
@@ -46,6 +48,12 @@ type App struct {
 	// DBPath 是数据库文件路径，构造时捕获，供备份处理器使用。
 	DBPath string
 
+	// Keystore 是注入的 master key 托管(供 Secrets()/CredentialStatus 惰性
+	// 建 store 时使用)。为 nil 时 ensureSecrets 回退到 keystore.Current(),
+	// 便于测试替换、同时不让生产引导路径遗漏接线;启动期 fail-fast 校验由
+	// Task 6 落地。
+	Keystore keystore.Keystore
+
 	// CurrentHabitID 是当前计时关联的习惯 ID。
 	CurrentHabitID *int64
 	// CurrentTimerSessionID 是当前计时会话 ID。
@@ -54,8 +62,15 @@ type App struct {
 	// Habits 是 habit 域的用例层；Phase 1 转发到 storage，Phase 2 起
 	// 接管 name 校验、唯一性、默认值、日期默认、进度计算。
 	Habits *habits.Operations
-	// Vault 是凭据 + 备份域的用例层。Phase 3a 接管主密码 + SecretStorage。
+	// Vault 是凭据 + 备份域的用例层。去锁化后（issue #13）它只保留备份用例，
+	// 凭据本身由 secrets（平台 keystore 托管）持有，Vault 经 runtime.Secrets()
+	// 访问，不再自己构造 SecretStorage。
 	Vault *vault.Operations
+
+	// secrets 是进程内凭据存储，由 secretsOnce 惰性创建，因此调用方构造时
+	// 可以省略它。每个 App 持有自己的 Once：新建 App 会重新解析 keystore。
+	secretsOnce sync.Once
+	secrets     *crypto.SecretStorage
 }
 
 // NewApp 使用给定的依赖与默认内存状态构造一个 App。
@@ -82,8 +97,7 @@ func NewApp(
 		a.Habits = habits.New(sqlite, sm)
 	}
 	if sm != nil {
-		secretPath := filepath.Join(filepath.Dir(dbPath), "secret.db")
-		a.Vault = vault.New(secretPath, sm, a)
+		a.Vault = vault.New(sm, a)
 	}
 	return a
 }
@@ -106,7 +120,7 @@ func (a *App) RUnlock() { a.mu.RUnlock() }
 // Backup 管理器访问器。持久化的 BackupConfig 一变（切换 target、轮换
 // 凭据）就重建管理器——BackupManager 上没有 SetTarget 可变方法。
 // 处理器和 Wails 服务通过 BackupManager()（RLock 快照）读取当前管理器，
-// 配置变更时调用 RebuildBackup（写锁）。
+// 配置变更时调用 Rebuild（写锁）。
 
 // Manager 返回当前 BackupManager 快照。未配置备份时可能为 nil
 // （处理器将 nil 视为"未配置备份"）。满足 vault.BackupRuntime。
@@ -308,6 +322,108 @@ func (a *App) SaveProgressLocked() {
 	log.Info("timer.session.save_progress", "session_id", row.ID, "elapsed", state.GetElapsedSeconds())
 }
 
+// 凭据辅助方法。SecretStorage 由平台 keystore 托管 master key,不再有
+// 主口令 / 锁的概念;SettingsManager 的 WebDAV/S3 凭据分流依赖这里的接线。
+
+// secretStorePath 返回与 DB 同级的 secret blob 路径。裸文件名 DB 路径
+// （Dir 为 "" 或 "."）解析为当前目录下的 secret.db。
+func secretStorePath(dbPath string) string {
+	return filepath.Join(filepath.Dir(dbPath), "secret.db")
+}
+
+// secretFileExists 报告磁盘上是否已存在 secret blob（用于区分"新装"与
+// "有历史凭据但读不出来"）。
+func secretFileExists(dbPath string) bool {
+	_, err := os.Stat(secretStorePath(dbPath))
+	return err == nil
+}
+
+// ensureSecrets 惰性构造 SecretStorage，并把同一个实例接线到 SettingsManager
+// （后者据此把 WebDAV/S3 凭据分流到 keystore Secrets，见 Task 4）。keystore
+// 取自 a.Keystore，未注入时回退 keystore.Current()。构造由 sync.Once 保护：
+// 并发首调只建一次、只接线一次，且 happens-before 保证后续读 a.secrets 无竞争。
+func (a *App) ensureSecrets() *crypto.SecretStorage {
+	a.secretsOnce.Do(func() {
+		ks := a.Keystore
+		if ks == nil {
+			ks = keystore.Current()
+		}
+		a.secrets = crypto.NewSecretStorage(secretStorePath(a.DBPath), ks)
+		if a.Settings != nil {
+			a.Settings.SetSecretStore(a.secrets)
+		}
+	})
+	return a.secrets
+}
+
+// Secrets 返回 SecretStorage（惰性初始化 + 接线 settings）。供需要存 / 取受
+// keystore 保护的 secret 的调用方使用（例如 LLM API Key、备份凭据）。
+func (a *App) Secrets() *crypto.SecretStorage {
+	return a.ensureSecrets()
+}
+
+// MigrateLegacySecrets 用用户补输的 v1 主口令完成一次性凭据迁移。
+//
+// 迁移器的两阶段语义（先解密完再落盘、口令错则零副作用）都在
+// internal/keystore 里；本方法只负责把 App 的接线凑齐 MigrateOptions：
+// secret.db 路径、哨兵位置、DB 路径（v1 凭据密钥由它派生），以及作为
+// SettingsCreds 适配器的 SettingsManager。
+//
+// 错误语义透传给调用方：ErrUnseal = 口令错/文件损坏，ErrUnavailable =
+// keystore 不可用。credentials 端点据此返回 403 / 409。
+func (a *App) MigrateLegacySecrets(password string) error {
+	ks := a.ActiveKeystore()
+	secretPath := secretStorePath(a.DBPath)
+	_, err := keystore.MigrateAll(ks, keystore.MigrateOptions{
+		DBPath:       a.DBPath,
+		SecretPath:   secretPath,
+		SentinelPath: filepath.Join(filepath.Dir(secretPath), keystore.SentinelName),
+		Password:     []byte(password),
+		Creds:        a.Settings,
+	})
+	return err
+}
+
+// ActiveKeystore 返回当前生效的 keystore：注入优先，否则回退平台实现。
+// 导出是因为跨包消费——handlers 的 credentials 端点要拿它做 reset/migrate。
+func (a *App) ActiveKeystore() keystore.Keystore {
+	if a.Keystore != nil {
+		return a.Keystore
+	}
+	return keystore.Current()
+}
+
+// CredentialStatus 概览凭据子系统健康度。载入失败态（磁盘有 blob 但 master
+// key 缺失 / 解封失败）透出 Backend="unavailable" + 非空 Detail，绝不假装
+// "没有凭据"；否则取生效 keystore 的 Name()，HasSecret 反映 store 内是否
+// 已有 secret。Detail / 日志只带错误文本，绝不含凭据值。
+func (a *App) CredentialStatus() domain.CredentialStatus {
+	store := a.ensureSecrets()
+	if lf := store.LoadFailure(); lf != nil {
+		return domain.CredentialStatus{
+			Backend:   "unavailable",
+			Detail:    lf.Error(),
+			HasSecret: secretFileExists(a.DBPath),
+		}
+	}
+	ks := a.ActiveKeystore()
+	backend := "unavailable"
+	detail := ""
+	if ks != nil {
+		backend = ks.Name()
+	} else {
+		// 维持 "unavailable ⇒ Detail 非空" 不变式:平台 keystore 缺失时
+		// 也要透出原因,绝不留下空的不可用说明。
+		detail = "平台 keystore 未注册"
+	}
+	items, err := store.Items()
+	return domain.CredentialStatus{
+		Backend:   backend,
+		Detail:    detail,
+		HasSecret: err == nil && len(items) > 0,
+	}
+}
+
 // 认证辅助方法。
 
 // GenerateToken 生成 32 字节随机令牌并以 base64 字符串形式返回。
@@ -315,5 +431,3 @@ func (a *App) SaveProgressLocked() {
 func GenerateToken() string {
 	return base64Raw(crypto.GenerateKey())
 }
-
-// 错误。

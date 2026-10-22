@@ -368,3 +368,25 @@ export interface TimerStartOptions {
   /** 循环次数 */
   loopCount?: number;
 }
+
+/**
+ * 凭据子系统状态，与后端 `domain.CredentialStatus` 对齐。
+ *
+ * 取代 v1 的主口令状态对象（has_password / unlocked / locked_until /
+ * unlock_time）—— 凭据改由操作系统原生密钥服务托管，不再有"设/解锁/锁定"
+ * 这组状态。
+ */
+export interface CredentialStatus {
+  /**
+   * 后端标识：`secret-service` | `android-keystore` | `other` | `unavailable`。
+   *
+   * `unavailable` 表示**磁盘上有凭据文件但系统密钥环解不开**（keyring 被重置、
+   * 条目被用户删除）。这不是"没有凭据"——此时应展示 `detail` 里的可操作原因，
+   * 引导用户去修密钥服务；引导其重新填写凭据是错的，填了也解不开。
+   */
+  backend: string;
+  /** 仅当 backend === "unavailable" 时非空：可操作的失败原因。 */
+  detail: string;
+  /** secret store 内是否已有凭据。 */
+  has_secret: boolean;
+}

@@ -11,18 +11,6 @@ vi.mock("../../../utils/apiClientSingleton", () => ({
   getAPIClient: vi.fn(),
 }));
 
-vi.mock("../../../components/MasterPasswordModal", () => ({
-  MasterPasswordModal: ({ isOpen, mode, onSuccess, onClose }: any) => {
-    if (!isOpen) return null;
-    return (
-      <div data-testid="master-password-modal">
-        <div data-testid="modal-mode">{mode}</div>
-        <button data-testid="modal-close" onClick={onClose}>关闭</button>
-        <button data-testid="modal-success" onClick={onSuccess}>成功</button>
-      </div>
-    );
-  },
-}));
 
 vi.mock("../../../components/common/Toast", () => ({
   showToast: mocks.showToastMock,
@@ -36,7 +24,8 @@ const mockApiClient = {
   restoreBackup: vi.fn(),
   deleteBackup: vi.fn(),
   verifyBackup: vi.fn(),
-  getMasterPasswordStatus: vi.fn(),
+  getCredentialStatus: vi.fn(),
+  resetCredentials: vi.fn(),
   getBackupConfig: vi.fn(),
   updateBackupConfig: vi.fn(),
 };
@@ -99,7 +88,7 @@ describe("BackupTab", () => {
 
   it("calls onChange when target type changes to webdav", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
-    mockApiClient.getMasterPasswordStatus.mockResolvedValue({ has_password: false, unlocked: false });
+    mockApiClient.getCredentialStatus.mockResolvedValue({ backend: "secret-service", detail: "", has_secret: false });
     const onChange = vi.fn();
 
     render(<BackupTab config={{}} onChange={onChange} />);
@@ -118,7 +107,7 @@ describe("BackupTab", () => {
 
   it("shows webdav fields when target_type is webdav", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
-    mockApiClient.getMasterPasswordStatus.mockResolvedValue({ has_password: false, unlocked: false });
+    mockApiClient.getCredentialStatus.mockResolvedValue({ backend: "secret-service", detail: "", has_secret: false });
 
     render(<BackupTab config={{}} onChange={vi.fn()} />);
 
@@ -138,7 +127,7 @@ describe("BackupTab", () => {
 
   it("shows s3 fields when target_type is s3", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
-    mockApiClient.getMasterPasswordStatus.mockResolvedValue({ has_password: false, unlocked: false });
+    mockApiClient.getCredentialStatus.mockResolvedValue({ backend: "secret-service", detail: "", has_secret: false });
 
     render(<BackupTab config={{}} onChange={vi.fn()} />);
 
@@ -344,12 +333,13 @@ describe("BackupTab", () => {
     });
   });
 
-  it("opens master password modal when createBackup returns action with setup mode", async () => {
+  // 去锁化（issue #13）：后端不再返回 action/show_modal，也没有 modal 可弹。
+  // 凭据缺失应降级为一条普通错误提示，而不是把用户拖进解锁流程。
+  it("shows credentials_not_available as a plain error, no modal", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
     mockApiClient.createBackup.mockResolvedValue({
       success: false,
-      error: "credentials_not_available",
-      action: { type: "show_modal", target: "master_password", params: { mode: "setup" } }
+      error: "credentials_not_available"
     });
 
     render(<BackupTab config={{}} onChange={vi.fn()} />);
@@ -358,36 +348,49 @@ describe("BackupTab", () => {
       expect(screen.getByText("备份")).toBeTruthy();
     });
 
-    const createButton = screen.getByText(t("backup.create_now"));
-    fireEvent.click(createButton);
+    fireEvent.click(screen.getByText(t("backup.create_now")));
 
     await waitFor(() => {
-      expect(screen.getByTestId("modal-mode")).toBeTruthy();
-      expect(screen.getByTestId("modal-mode").textContent).toBe("setup");
+      expect(screen.queryByTestId("master-password-modal")).toBeNull();
+      expect(mocks.showToastMock).toHaveBeenCalled();
     });
   });
 
-  it("opens master password modal when createBackup returns action with unlock mode", async () => {
+  it("renders credential backend status instead of a master password panel", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
-    mockApiClient.createBackup.mockResolvedValue({
-      success: false,
-      error: "master_password_not_unlocked",
-      action: { type: "show_modal", target: "master_password", params: { mode: "unlock" } }
+    mockApiClient.getCredentialStatus.mockResolvedValue({
+      backend: "secret-service",
+      detail: "",
+      has_secret: false
     });
 
-    render(<BackupTab config={{}} onChange={vi.fn()} />);
+    render(<BackupTab config={{ backup_target_type: "webdav", backup_webdav_url: "http://x" }} onChange={vi.fn()} />);
+
+    // 断言 backend 标签而非 "凭据托管" 那一行——后者是
+    // `🔐 {t(...)}:` 的组合文本，会被拆成多个文本节点。
+    await waitFor(() => {
+      expect(screen.getByText(t("credentials.backend.secretService"))).toBeTruthy();
+    });
+    // 主口令面板的入口按钮不该再存在。
+    expect(screen.queryByText(t("master_password.set_password"))).toBeNull();
+    expect(screen.queryByTestId("master-password-modal")).toBeNull();
+  });
+
+  it("surfaces backend=unavailable detail instead of prompting to re-enter credentials", async () => {
+    mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.getCredentialStatus.mockResolvedValue({
+      backend: "unavailable",
+      detail: "master key 不在托管中",
+      has_secret: true
+    });
+
+    render(<BackupTab config={{ backup_target_type: "webdav", backup_webdav_url: "http://x" }} onChange={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByText("备份")).toBeTruthy();
+      expect(screen.getByText(t("credentials.unavailable"))).toBeTruthy();
     });
-
-    const createButton = screen.getByText(t("backup.create_now"));
-    fireEvent.click(createButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("modal-mode")).toBeTruthy();
-      expect(screen.getByTestId("modal-mode").textContent).toBe("unlock");
-    });
+    // 关键是展示可操作原因，而不是让用户去重新填凭据。
+    expect(screen.getByText(new RegExp("master key 不在托管中"))).toBeTruthy();
   });
 
   it("shows regular error when no action in response", async () => {

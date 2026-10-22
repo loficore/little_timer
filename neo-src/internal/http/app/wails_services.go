@@ -493,6 +493,9 @@ func (s *SettingsService) GetSettings() (any, error) {
 
 func (s *SettingsService) UpdateSettings(json string) (any, error) {
 	log.Debug("settings.update", "method", "SettingsService.UpdateSettings")
+	// 去锁化(Task 5):HandleSettingsEvent 经 Save 落 backup 段,需已接线的
+	// 凭据 store;惰性确保接线,与 HTTP handler 一致。
+	_ = s.app.Secrets()
 	if err := s.app.Settings.HandleSettingsEvent(domain.SettingsChangeEvent{JSON: json}); err != nil {
 		log.Error("settings.update failed", "method", "SettingsService.UpdateSettings", "error", err.Error())
 		return map[string]any{"success": false, "error": err.Error()}, nil
@@ -503,13 +506,37 @@ func (s *SettingsService) UpdateSettings(json string) (any, error) {
 
 // BackupService
 
-// BackupService 向 Wails v3 前端暴露 backup 配置 + 主口令生命周期。
+// BackupService 向 Wails v3 前端暴露 backup 配置读写(主口令生命周期已随
+// 去锁化移除,凭据端点见后续 Task 9)。
 type BackupService struct {
 	app *App
 }
 
 // NewBackupService 构造绑定到给定 App 的 BackupService。
 func NewBackupService(app *App) *BackupService { return &BackupService{app: app} }
+
+// CredentialStatus 返回凭据子系统健康度（取代已删除的 GetMasterPasswordStatus）。
+//
+// 前端据此渲染「系统密钥环托管（<backend>）」一行而非口令输入框。
+// 载入失败态 backend="unavailable" 且 detail 非空——那是环境问题提示，
+// 不应引导用户去重新填写凭据。
+// 返回 map 而非 domain.CredentialStatus：本文件所有 Wails 方法都返回
+// any / map[string]any。让它返回内部 domain 类型会把 internal/domain 拖进
+// 绑定生成器的扫描范围，产出对 "../../domain/models.js" 的引用，而该文件
+// 并不存在 —— 构建期直接报 "Could not resolve"（前端 pnpm run build 挂）。
+// 前端需要的形状由 HTTP 层的 domain.CredentialStatus 定义，两端一致。
+func (s *BackupService) CredentialStatus() (map[string]any, error) {
+	st := s.app.CredentialStatus()
+	log.Debug("credentials.status",
+		"method", "BackupService.CredentialStatus",
+		"backend", st.Backend,
+		"has_secret", st.HasSecret)
+	return map[string]any{
+		"backend":    st.Backend,
+		"detail":     st.Detail,
+		"has_secret": st.HasSecret,
+	}, nil
+}
 
 // GetBackupConfig 返回持久化的 BackupConfig，secret 已打码。
 func (s *BackupService) GetBackupConfig() (any, error) {
@@ -626,63 +653,21 @@ func (s *BackupService) ListBackups() (any, error) {
 	return map[string]any{"success": true, "backups": items}, nil
 }
 
-func (s *BackupService) GetMasterPasswordStatus() (any, error) {
-	status := s.app.Vault.GetMasterPasswordStatus()
-	log.Debug("backup.master_status", "method", "BackupService.GetMasterPasswordStatus", "has_cred", status.HasPassword)
-	return status, nil
-}
-
-func (s *BackupService) SetMasterPassword(password string) (any, error) {
-	a := s.app
-	log.Debug("backup.set_master", "method", "BackupService.SetMasterPassword", "has_cred", password != "")
-	if err := a.Vault.SetMasterPassword(password); err != nil {
-		var ve *vault.Error
-		if errors.As(err, &ve) {
-			log.Warn("backup.set_master rejected", "method", "BackupService.SetMasterPassword", "code", ve.Code, "error", ve.Message)
-			return map[string]any{"success": false, "code": ve.Code, "error": ve.Message}, nil
-		}
-		log.Error("backup.set_master failed", "method", "BackupService.SetMasterPassword", "error", err.Error())
-		return nil, err
-	}
-	log.Info("backup.set_master ok", "method", "BackupService.SetMasterPassword")
-	return map[string]any{"success": true}, nil
-}
-
-func (s *BackupService) UnlockCredentials(password string) (any, error) {
-	a := s.app
-	log.Debug("backup.unlock", "method", "BackupService.UnlockCredentials")
-	res := a.Vault.UnlockCredentials(password)
-	log.Info("backup.unlock ok", "method", "BackupService.UnlockCredentials", "success", res.Success)
-	return map[string]any{
-		"success":      res.Success,
-		"locked_until": res.LockedUntil,
-	}, nil
-}
-
-func (s *BackupService) LockCredentials() (any, error) {
-	a := s.app
-	log.Debug("backup.lock", "method", "BackupService.LockCredentials")
-	a.Vault.LockCredentials()
-	log.Info("backup.lock ok", "method", "BackupService.LockCredentials")
-	return map[string]any{"success": true}, nil
-}
+// 主口令生命周期方法(GetMasterPasswordStatus/SetMasterPassword/UnlockCredentials/
+// LockCredentials)已随去锁化删除(Task 5):凭据改由平台 keystore 托管,不再有
+// 锁/解锁概念;凭据端点由后续任务(Task 9)以 /api/credentials/* 形式重建。
 
 // backupErrorMap 把 vault.Error 转成 Wails 调用方期望的 map 形状。
-// 凭据/锁错误带 action（前端 modal），其它错误只有 code + message。
+//
+// 去锁化（issue #13）：原本凭据/锁错误会附带 action=show_modal 让前端弹主口令
+// modal，现在凭据由平台 keystore 托管，没有"要用户输口令"这件事，故 map 只剩
+// success / code / message 三元组。
 func backupErrorMap(ve *vault.Error) map[string]any {
-	m := map[string]any{
+	return map[string]any{
 		"success": false,
 		"code":    ve.Code,
 		"message": ve.Message,
 	}
-	if ve.Mode != "" {
-		m["action"] = map[string]any{
-			"type":   "show_modal",
-			"target": "master_password",
-			"params": map[string]any{"mode": ve.Mode},
-		}
-	}
-	return m
 }
 
 // 共享辅助函数 —— 从 handlers/ 复制而来，保持本文件自包含。

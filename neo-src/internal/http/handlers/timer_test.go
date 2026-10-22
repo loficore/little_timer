@@ -15,6 +15,7 @@ import (
 
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/keystore/keystoretest"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 )
@@ -40,13 +41,18 @@ func newTestApp(t *testing.T) *app.App {
 		t.Fatalf("settings: %v", err)
 	}
 
-	return app.NewApp(
+	a := app.NewApp(
 		domain.NewClockManager(domain.NewDefaultClockTaskConfig()),
 		sm,
 		sqlite,
 		nil, // backup
 		dbPath,
 	)
+	// 去锁化(Task 5):注入内存 keystore 并接线凭据 store,使 LLM Key 等
+	// Store/Retrieve/Delete 在无 keyring daemon 的 CI 上也能真实落盘。
+	a.Keystore = keystoretest.New("secret-service", true)
+	_ = a.Secrets()
+	return a
 }
 
 // setupTestRouter 构建只注册 timer 路由的 gin.Engine。

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"little-timer/internal/domain"
+	"little-timer/internal/keystore/keystoretest"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
@@ -32,7 +33,12 @@ func wailsBackupTestApp(t *testing.T) *App {
 	if err != nil {
 		t.Fatalf("backup manager: %v", err)
 	}
-	return NewApp(domain.NewClockManager(domain.NewDefaultClockTaskConfig()), sm, sqlite, bm, dbPath)
+	a := NewApp(domain.NewClockManager(domain.NewDefaultClockTaskConfig()), sm, sqlite, bm, dbPath)
+	// 去锁化（issue #13）：SettingsManager 未接线凭据 store 时保存云端配置会直接
+	// 报错（避免凭据被静默丢弃），因此测试 App 也要注入内存 keystore 并完成接线。
+	a.Keystore = keystoretest.New("secret-service", true)
+	_ = a.Secrets()
+	return a
 }
 
 // setCloudTarget 把持久化 BackupConfig 切到 cloud target（无凭据）。
@@ -67,19 +73,10 @@ func TestWailsCreateBackup_CloudNoCreds_ReturnsMasterPasswordAction(t *testing.T
 	if code, _ := m["code"].(string); code != "credentials_not_available" {
 		t.Errorf("code = %q, want credentials_not_available", code)
 	}
-	action, ok := m["action"].(map[string]any)
-	if !ok {
-		t.Fatalf("action missing or wrong type; map = %+v", m)
-	}
-	if action["type"] != "show_modal" {
-		t.Errorf("action.type = %v, want show_modal", action["type"])
-	}
-	if action["target"] != "master_password" {
-		t.Errorf("action.target = %v, want master_password", action["target"])
-	}
-	params, _ := action["params"].(map[string]any)
-	if params["mode"] != "setup" {
-		t.Errorf("action.params.mode = %v, want setup", params["mode"])
+	// 去锁化（issue #13）后没有"弹主口令 modal"这回事：凭据由平台 keystore
+	// 托管，缺凭据时错误形状退化为 success/code/message 三元组。
+	if _, ok := m["action"]; ok {
+		t.Errorf("action 应随主口令 UX 一并删除; map = %+v", m)
 	}
 }
 
@@ -101,18 +98,20 @@ func TestWailsRestoreBackup_CloudNoCreds_ReturnsMasterPasswordAction(t *testing.
 	if code, _ := m["code"].(string); code != "credentials_not_available" {
 		t.Errorf("code = %q, want credentials_not_available", code)
 	}
-	if _, ok := m["action"].(map[string]any); !ok {
-		t.Errorf("action missing; map = %+v", m)
+	if _, ok := m["action"]; ok {
+		t.Errorf("action 应随主口令 UX 一并删除; map = %+v", m)
 	}
 }
 
-// TestWailsUpdateBackupConfig_CloudNoMasterPassword_ReturnsSetupMode 覆盖
-// config update 路径的闸门（之前 Wails 完全不检查）。
-func TestWailsUpdateBackupConfig_CloudNoMasterPassword_ReturnsSetupMode(t *testing.T) {
+// TestWailsUpdateBackupConfig_CloudNoMasterPassword_Succeeds 覆盖 config update
+// 路径。去锁化（issue #13）前：切到云端 target 若库里还没有该 target 的凭据，
+// vault 会要求"先设主密码"作为授权证明（setup 闸门）；凭据改由平台 keystore
+// 托管后保护边界是 OS 登录会话，该闸门整体删除——带凭据的更新必须直接成功。
+func TestWailsUpdateBackupConfig_CloudNoMasterPassword_Succeeds(t *testing.T) {
 	a := wailsBackupTestApp(t)
 	svc := NewBackupService(a)
 
-	res, err := svc.UpdateBackupConfig(`{"enabled":true,"target_type":"webdav","webdav_url":"http://example.com"}`)
+	res, err := svc.UpdateBackupConfig(`{"enabled":true,"target_type":"webdav","webdav_url":"http://example.com","webdav_username":"u","webdav_password":"p"}`)
 	if err != nil {
 		t.Fatalf("UpdateBackupConfig returned Go error: %v", err)
 	}
@@ -120,12 +119,14 @@ func TestWailsUpdateBackupConfig_CloudNoMasterPassword_ReturnsSetupMode(t *testi
 	if !ok {
 		t.Fatalf("res = %T, want map[string]any", res)
 	}
-	if code, _ := m["code"].(string); code != "credentials_not_available" {
-		t.Errorf("code = %q, want credentials_not_available", code)
+	if success, _ := m["success"].(bool); !success {
+		t.Fatalf("success = false, want true; map = %+v", m)
 	}
-	action, _ := m["action"].(map[string]any)
-	params, _ := action["params"].(map[string]any)
-	if params["mode"] != "setup" {
-		t.Errorf("action.params.mode = %v, want setup", params["mode"])
+	if _, ok := m["action"]; ok {
+		t.Errorf("action 应随主口令 UX 一并删除; map = %+v", m)
+	}
+	// 凭据必须真的经 keystore secrets 往返回来，而不是被当普通字段丢弃。
+	if got := a.Settings.BackupConfig().WebDAVPassword; got != "p" {
+		t.Errorf("WebDAVPassword = %q, want p", got)
 	}
 }

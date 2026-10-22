@@ -28,6 +28,7 @@ import (
 
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/keystore/keystoretest"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
@@ -88,6 +89,11 @@ func newIntegrationServer(t *testing.T) *integrationFixture {
 		bm,
 		dbPath,
 	)
+	// 去锁化(Task 5):注入内存 keystore 并接线凭据 store,让 settings/backup
+	// 的配置保存路径(需要已接线 store)在无 keyring daemon 的 CI 上跑通,
+	// 且云端凭据的 Seal/Unseal 不依赖 dbus。
+	a.Keystore = keystoretest.New("secret-service", true)
+	_ = a.Secrets()
 
 	srv := httptest.NewServer(NewRouter(a, "*"))
 	t.Cleanup(func() {

@@ -1,14 +1,14 @@
-// Package crypto —— 加密 + secret 存储辅助函数的测试。
+// Package crypto —— 加密原语测试(encryption.go + legacy_v1.go)。
 //
-// 只测公开接口：往返一致性、篡改检测、错误密钥拒绝、密钥派生的确定性，
-// 以及 SecretStorage 的锁定 / 持久化行为。
+// 只测公开接口:往返一致性、篡改检测、错误密钥拒绝、密钥派生的确定性。
+// v1 口令派生原语(DeriveKey / EncryptWithPassword / DecryptWithPassword)
+// 的测试随函数迁移保留在此;SecretStorage v2 的行为测试见同目录
+// secret_v2_test.go(外部测试包)。
 package crypto
 
 import (
 	"bytes"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -167,153 +167,5 @@ func TestGenerateProducesDistinctValues(t *testing.T) {
 	a, b := GenerateKey(), GenerateKey()
 	if bytes.Equal(a, b) {
 		t.Fatal("two consecutive GenerateKey() calls returned identical bytes")
-	}
-}
-
-// SecretStorage。
-
-func TestSecretStorageSetStoreRetrieveUnlock(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "secrets.enc")
-	store := New(path)
-
-	if store.HasMasterPassword() {
-		t.Fatal("expected HasMasterPassword=false on fresh store")
-	}
-	if !store.IsLocked() {
-		t.Fatal("expected IsLocked=true on fresh store")
-	}
-
-	if err := store.SetMasterPassword([]byte("master-pw")); err != nil {
-		t.Fatalf("SetMasterPassword: %v", err)
-	}
-	if !store.HasMasterPassword() {
-		t.Fatal("expected HasMasterPassword=true after SetMasterPassword")
-	}
-	if store.IsLocked() {
-		t.Fatal("expected IsLocked=false after SetMasterPassword")
-	}
-
-	if err := store.Store([]byte("api_key"), []byte("deadbeef")); err != nil {
-		t.Fatalf("Store: %v", err)
-	}
-	got, err := store.Retrieve([]byte("api_key"))
-	if err != nil {
-		t.Fatalf("Retrieve: %v", err)
-	}
-	if string(got) != "deadbeef" {
-		t.Fatalf("Retrieve = %q, want %q", got, "deadbeef")
-	}
-
-	// 用新实例通过 Unlock 做往返验证。
-	store2 := New(path)
-	if err := store2.Unlock([]byte("master-pw")); err != nil {
-		t.Fatalf("Unlock: %v", err)
-	}
-	got2, err := store2.Retrieve([]byte("api_key"))
-	if err != nil {
-		t.Fatalf("Retrieve after Unlock: %v", err)
-	}
-	if string(got2) != "deadbeef" {
-		t.Fatalf("Retrieve after Unlock = %q, want %q", got2, "deadbeef")
-	}
-}
-
-func TestSecretStorageWrongPasswordDoesNotUnlock(t *testing.T) {
-	dir := t.TempDir()
-	store := New(filepath.Join(dir, "secrets.enc"))
-	if err := store.SetMasterPassword([]byte("right")); err != nil {
-		t.Fatalf("SetMasterPassword: %v", err)
-	}
-	if err := store.Store([]byte("k"), []byte("v")); err != nil {
-		t.Fatalf("Store: %v", err)
-	}
-
-	store2 := New(filepath.Join(dir, "secrets.enc"))
-	if err := store2.Unlock([]byte("wrong")); err == nil {
-		t.Fatal("expected error for wrong password")
-	} else if !errors.Is(err, ErrAuthenticationFailed) && !errors.Is(err, ErrSecretDecryptionFailed) {
-		t.Fatalf("Unlock wrong pw = %v, want ErrAuthenticationFailed or ErrSecretDecryptionFailed", err)
-	}
-}
-
-func TestSecretStorageLockoutAfterRepeatedFailures(t *testing.T) {
-	dir := t.TempDir()
-	store := New(filepath.Join(dir, "secrets.enc"))
-	if err := store.SetMasterPassword([]byte("right")); err != nil {
-		t.Fatalf("SetMasterPassword: %v", err)
-	}
-
-	for i := 0; i < MaxUnlockAttempts; i++ {
-		_ = store.Unlock([]byte("wrong"))
-	}
-	if store.LockoutUntil() == 0 {
-		t.Fatal("expected LockoutUntil > 0 after repeated failures")
-	}
-	if err := store.Unlock([]byte("right")); !errors.Is(err, ErrSecretLocked) {
-		t.Fatalf("Unlock during lockout = %v, want ErrSecretLocked", err)
-	}
-}
-
-func TestSecretStorageDeleteAndClear(t *testing.T) {
-	dir := t.TempDir()
-	store := New(filepath.Join(dir, "secrets.enc"))
-	if err := store.SetMasterPassword([]byte("pw")); err != nil {
-		t.Fatalf("SetMasterPassword: %v", err)
-	}
-	for _, k := range []string{"a", "b", "c"} {
-		if err := store.Store([]byte(k), []byte("v-"+k)); err != nil {
-			t.Fatalf("Store %s: %v", k, err)
-		}
-	}
-	if err := store.Delete([]byte("b")); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if _, err := store.Retrieve([]byte("b")); !errors.Is(err, ErrSecretNotFound) {
-		t.Fatalf("Retrieve after Delete = %v, want ErrSecretNotFound", err)
-	}
-	if err := store.Clear(); err != nil {
-		t.Fatalf("Clear: %v", err)
-	}
-	if _, err := store.Retrieve([]byte("a")); !errors.Is(err, ErrSecretNotFound) {
-		t.Fatalf("Retrieve after Clear = %v, want ErrSecretNotFound", err)
-	}
-}
-
-func TestSecretStorageLockedStoreFails(t *testing.T) {
-	dir := t.TempDir()
-	store := New(filepath.Join(dir, "secrets.enc"))
-	if err := store.Store([]byte("k"), []byte("v")); !errors.Is(err, ErrSecretLocked) {
-		t.Fatalf("Store when locked = %v, want ErrSecretLocked", err)
-	}
-}
-
-func TestSecretStorageInMemoryOnly(t *testing.T) {
-	store := New("")
-	if err := store.SetMasterPassword([]byte("pw")); err != nil {
-		t.Fatalf("SetMasterPassword: %v", err)
-	}
-	if err := store.Store([]byte("k"), []byte("v")); err != nil {
-		t.Fatalf("Store: %v", err)
-	}
-	if store.HasMasterPassword() {
-		t.Fatal("HasMasterPassword should be false for in-memory-only store")
-	}
-}
-
-// 双保险：确认磁盘文件带 magic 前缀。
-func TestSecretStorageDiskBlobHasMagic(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "secrets.enc")
-	store := New(path)
-	if err := store.SetMasterPassword([]byte("pw")); err != nil {
-		t.Fatalf("SetMasterPassword: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if !bytes.HasPrefix(data, secretMagic) {
-		t.Fatalf("on-disk blob missing magic prefix")
 	}
 }

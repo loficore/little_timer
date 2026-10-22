@@ -44,6 +44,15 @@ export default defineConfig({
       // CI 里 neo-src/bin/server 已由前置步骤 go build 生成，直接 exec 单一进程；
       // 本地保留 go run 免手动构建。用 `go run` 时 Playwright 只 kill 到 shell wrapper，
       // 真正的 server 子进程可能残留 stdout 管道，导致 CI 结束后进程挂住十几分钟。
+      // 注意：CI 里**不**需要启动真实密钥环。
+      //
+      // e2e / vrt 验的是应用行为（计时、备份、设置流），不是 keystore 的正确性；
+      // 后者由 keystore-integration job 用真 daemon 单独覆盖。让这两个 job
+      // 去启 gnome-keyring 会引入一整套与被测目标无关的脆弱依赖（D-Bus 会话
+      // 存活、gnome-keyring 版本差异、login 集合锁定时序 —— 真实项目里反复踩坑）。
+      //
+      // 注入点：keystore.Current() 在 -tags test_keystore 下返回内存实现。
+      // 那个后端编译期由 build tag 门禁，生产构建不可能带上。
       command: process.env.CI
         ? "../neo-src/bin/server serve --http-only --db-path ./test_tmp/e2e.db"
         : "cd ../neo-src && go run ./cmd/server/ serve --http-only --db-path ../assets/test_tmp/e2e.db",

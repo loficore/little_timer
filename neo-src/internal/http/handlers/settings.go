@@ -27,6 +27,9 @@ func SettingsUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "read body"})
 		return
 	}
+	// 去锁化(Task 5):HandleSettingsEvent 经 Save 落 backup 段,需已接线的
+	// 凭据 store。惰性确保接线,与 backup handler 一致(生产由 bootstrapApp 接线)。
+	_ = a.Secrets()
 	if err := a.Settings.HandleSettingsEvent(domain.SettingsChangeEvent{JSON: string(raw)}); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
 		return

@@ -141,10 +141,8 @@ func TestAllRoutesRegistered(t *testing.T) {
 		{http.MethodGet, "/api/backup/list"},
 		{http.MethodGet, "/api/backup/info"},
 		{http.MethodPost, "/api/backup/verify"},
-		{http.MethodPost, "/api/backup/unlock"},
-		{http.MethodPost, "/api/backup/lock"},
-		{http.MethodGet, "/api/backup/master-password"},
-		{http.MethodPost, "/api/backup/master-password"},
+		// 去锁化(Task 5):/api/backup/unlock、/api/backup/lock、
+		// /api/backup/master-password 端点已移除。
 
 		// 鉴权
 		{http.MethodGet, "/api/auth/status"},
@@ -378,5 +376,39 @@ func TestGenerateTokenIsUnique(t *testing.T) {
 	}
 	if t1 == t2 {
 		t.Errorf("GenerateToken returned duplicate: %s", t1)
+	}
+}
+
+// TestMasterPasswordRoutesRemoved 守住 issue #13 的删除面：v1 的四个主口令
+// 端点必须全部消失。它们留着就等于用户还能走老路把凭据锁死在一个已经不
+// 存在的解锁流程里——对应的 SettingsManager 状态机已整体删除。
+func TestMasterPasswordRoutesRemoved(t *testing.T) {
+	r, _ := newTestRouter(t)
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/api/backup/master-password"},
+		{http.MethodPost, "/api/backup/master-password"},
+		{http.MethodPost, "/api/backup/unlock"},
+		{http.MethodPost, "/api/backup/lock"},
+	} {
+		if routeExists(r, tc.method, tc.path) {
+			t.Errorf("%s %s 仍可路由，主口令端点未删除", tc.method, tc.path)
+		}
+	}
+}
+
+// TestCredentialsRoutesRegistered 三条新凭据端点确实注册了
+// （取代上面的四个）。这里只验"路由在"，语义断言在 handlers 包。
+func TestCredentialsRoutesRegistered(t *testing.T) {
+	r, _ := newTestRouter(t)
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/api/credentials/status"},
+		{http.MethodPost, "/api/credentials/reset"},
+		{http.MethodPost, "/api/credentials/migrate"},
+	} {
+		if !routeExists(r, tc.method, tc.path) {
+			t.Errorf("%s %s 未注册", tc.method, tc.path)
+		}
 	}
 }

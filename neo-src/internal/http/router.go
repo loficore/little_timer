@@ -67,6 +67,7 @@ func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	registerAIGtd(api)
 	registerSchedule(api)
 	registerBackup(api)
+	registerCredentials(api)
 	registerWallpapers(api)
 	registerEvents(api)
 
@@ -202,14 +203,20 @@ func registerBackup(g *gin.RouterGroup) {
 	g.DELETE("/backup/delete/:name", handlers.BackupDeleteByName)
 	g.DELETE("/backup/:id", handlers.BackupDelete)
 	g.POST("/backup/verify", handlers.BackupVerify)
-	g.POST("/backup/unlock", handlers.BackupUnlock)
-	g.POST("/backup/lock", handlers.BackupLock)
-	g.GET("/backup/master-password", handlers.MasterPasswordGet)
-	g.POST("/backup/master-password", handlers.MasterPasswordSet)
 
 	g.GET("/auth/status", handlers.AuthStatus)
 	g.POST("/auth/enable", handlers.AuthEnable)
 	g.POST("/auth/disable", handlers.AuthDisable)
+}
+
+// 凭据路由（issue #13）。取代 v1 的 /api/backup/master-password 与
+// /api/backup/{unlock,lock} —— 凭据改由平台 keystore 托管，不再有"设/解锁
+// 主口令"这组动作。"lock" 没有对应物：没有锁可上。
+
+func registerCredentials(g *gin.RouterGroup) {
+	g.GET("/credentials/status", handlers.CredentialsStatus)
+	g.POST("/credentials/reset", handlers.CredentialsReset)
+	g.POST("/credentials/migrate", handlers.CredentialsMigrate)
 }
 
 // 壁纸路由。

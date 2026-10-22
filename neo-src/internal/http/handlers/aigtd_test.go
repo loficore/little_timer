@@ -493,10 +493,8 @@ func TestLLMSettings_RoundTrip(t *testing.T) {
 	a := newTestApp(t)
 	r := setupAIGtdRouter(t, a)
 
-	// 设置主密码(解锁 SecretStorage)。
-	if err := a.Vault.SetMasterPassword("testpass123"); err != nil {
-		t.Fatalf("set master password: %v", err)
-	}
+	// 去锁化(Task 5):凭据由注入的内存 keystore 托管,无需设主密码即
+	// 可直接写入/清除 API Key。
 
 	w := doJSON(t, r, http.MethodPut, "/api/settings/llm", map[string]any{
 		"provider": "openai_compat",

@@ -1,8 +1,7 @@
-// Package handlers —— Backup + 主口令 + 鉴权 endpoint。
+// Package handlers —— Backup + 鉴权 endpoint(主口令端点已随去锁化移除)。
 //
 // 本文件是 transport adapter：bind HTTP → a.Vault.X → 把 *vault.Error 映射成
-// HTTP 响应。业务规则（凭据闸门、主密码 setup-vs-unlock 决策）在
-// internal/vault 里。
+// HTTP 响应。业务规则（备份用例的凭据闸门）在 internal/vault 里。
 package handlers
 
 import (
@@ -55,7 +54,7 @@ func BackupConfigUpdate(c *gin.Context) {
 	if err := a.Vault.UpdateBackupConfig(c.Request.Context(), string(raw)); err != nil {
 		var ve *vault.Error
 		if errors.As(err, &ve) {
-			c.JSON(http.StatusOK, masterPasswordError(ve.Code, ve.Message, ve.Mode))
+			respondBackupError(c, err)
 			return
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
@@ -199,58 +198,9 @@ func BackupVerify(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// /api/backup/unlock  /  /api/backup/lock
-
-func BackupUnlock(c *gin.Context) {
-	a := appFromCtx(c)
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "missing password"})
-		return
-	}
-	res := a.Vault.UnlockCredentials(req.Password)
-	c.JSON(http.StatusOK, gin.H{
-		"success":      res.Success,
-		"locked_until": res.LockedUntil,
-	})
-}
-
-func BackupLock(c *gin.Context) {
-	a := appFromCtx(c)
-	a.Vault.LockCredentials()
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
-// /api/backup/master-password
-
-func MasterPasswordGet(c *gin.Context) {
-	a := appFromCtx(c)
-	c.JSON(http.StatusOK, a.Vault.GetMasterPasswordStatus())
-}
-
-// MasterPasswordSet 要求口令至少 4 个字符。
-func MasterPasswordSet(c *gin.Context) {
-	a := appFromCtx(c)
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "missing password"})
-		return
-	}
-	if err := a.Vault.SetMasterPassword(req.Password); err != nil {
-		var ve *vault.Error
-		if errors.As(err, &ve) {
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "code": ve.Code, "error": ve.Message})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
+// 去锁化(Task 5):/api/backup/unlock、/api/backup/lock、
+// /api/backup/master-password 端点随主口令概念一并移除,凭据端点由后续
+// Task 9 以 /api/credentials/* 重建。
 
 // /api/auth/*
 
@@ -294,25 +244,24 @@ func AuthDisable(c *gin.Context) {
 
 // respondBackupError 把 vault.Operations 返回的错误映射成 HTTP 响应。
 //
-//   - ErrBackupNotConfigured      → 503 ServiceUnavailable
-//   - 主密码 / 凭据错误（有 Mode）→ 200 + masterPasswordError JSON
-//     （前端读 action 弹 modal）
-//   - 其它 vault.Error（not_enabled 等）→ 200 + 简单 {success:false, error}
-//   - 非 vault.Error                     → 500
+//   - ErrBackupNotConfigured → 503 ServiceUnavailable
+//   - 其它 vault.Error（not_enabled / credentials_not_available 等）
+//     → 200 + {success:false, code, error}
+//   - 非 vault.Error → 500
+//
+// 去锁化（issue #13）后没有"弹主密码 modal"的响应形状，
+// 故不再有 masterPasswordError 分支。
 func respondBackupError(c *gin.Context, err error) {
 	var ve *vault.Error
 	if !errors.As(err, &ve) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
-	switch {
-	case ve.Code == vault.ErrBackupNotConfigured.Code:
+	if ve.Code == vault.ErrBackupNotConfigured.Code {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": ve.Message})
-	case ve.Mode != "":
-		c.JSON(http.StatusOK, masterPasswordError(ve.Code, ve.Message, ve.Mode))
-	default:
-		c.JSON(http.StatusOK, gin.H{"success": false, "code": ve.Code, "error": ve.Message})
+		return
 	}
+	c.JSON(http.StatusOK, gin.H{"success": false, "code": ve.Code, "error": ve.Message})
 }
 
 // mask 对非空 secret 返回 "******"，否则返回 ""。
@@ -321,22 +270,4 @@ func mask(s string) string {
 		return ""
 	}
 	return "******"
-}
-
-// masterPasswordError 构造 backup handler 使用的标准“需要主口令” JSON
-// 响应。
-func masterPasswordError(code, message, actionMode string) gin.H {
-	action := gin.H{
-		"type":   "show_modal",
-		"target": "master_password",
-	}
-	if actionMode != "" {
-		action["params"] = gin.H{"mode": actionMode}
-	}
-	return gin.H{
-		"success": false,
-		"error":   code,
-		"message": message,
-		"action":  action,
-	}
 }

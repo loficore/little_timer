@@ -13,6 +13,7 @@ import (
 
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/keystore/keystoretest"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
@@ -39,14 +40,6 @@ func newBackupTestApp(t *testing.T) (*app.App, string) {
 		t.Fatalf("settings: %v", err)
 	}
 
-	cfg := domain.NewDefaultBackupConfig()
-	cfg.Enabled = true
-	cfg.TargetType = domain.BackupTargetLocal
-	cfg.LocalPath = backupDir
-	if err := sm.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg)); err != nil {
-		t.Fatalf("update backup config: %v", err)
-	}
-
 	bm, err := backup.NewLocal(sqlite, dbPath, backupDir)
 	if err != nil {
 		t.Fatalf("backup manager: %v", err)
@@ -59,6 +52,19 @@ func newBackupTestApp(t *testing.T) (*app.App, string) {
 		bm,
 		dbPath,
 	)
+	// 去锁化(Task 5):UpdateBackupConfigFromJSON 需要已接线的凭据 store
+	// (即便 local target 空凭据也要显式建/删 secret),因此注入内存 keystore
+	// 并先 a.Secrets() 完成接线,再写配置。
+	a.Keystore = keystoretest.New("secret-service", true)
+	_ = a.Secrets()
+
+	cfg := domain.NewDefaultBackupConfig()
+	cfg.Enabled = true
+	cfg.TargetType = domain.BackupTargetLocal
+	cfg.LocalPath = backupDir
+	if err := sm.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg)); err != nil {
+		t.Fatalf("update backup config: %v", err)
+	}
 	return a, backupDir
 }
 
@@ -118,12 +124,15 @@ func TestHandleBackupConfigUpdate(t *testing.T) {
 	}
 }
 
-func TestHandleBackupConfigUpdate_CloudWithoutMasterPassword(t *testing.T) {
+// 去锁化（issue #13）：切换到云端 target 不再需要"先设主密码"的授权证明——
+// 凭据由平台 keystore 托管，保护边界是 OS 登录会话。带凭据的云端配置更新
+// 必须直接成功（回归：曾被 requireAuthForConfigUpdate 的 setup 闸门拦下）。
+func TestHandleBackupConfigUpdate_CloudWithCreds_NoMasterPassword(t *testing.T) {
 	a, _ := newBackupTestApp(t)
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	body := strings.NewReader(`{"enabled":true,"target_type":"webdav","webdav_url":"http://example.com"}`)
+	body := strings.NewReader(`{"enabled":true,"target_type":"webdav","webdav_url":"http://example.com","webdav_username":"u","webdav_password":"p"}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/config", body)
 	c.Set("app", a)
 
@@ -137,8 +146,8 @@ func TestHandleBackupConfigUpdate_CloudWithoutMasterPassword(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response not JSON: %v", err)
 	}
-	if got["error"] != "credentials_not_available" {
-		t.Errorf("error = %v, want credentials_not_available", got["error"])
+	if got["success"] != true {
+		t.Errorf("success = %v, want true (body=%s)", got["success"], w.Body.String())
 	}
 }
 
@@ -146,20 +155,12 @@ func TestHandleBackupConfigUpdate_S3(t *testing.T) {
 	a, _ := newBackupTestApp(t)
 	gin.SetMode(gin.TestMode)
 
-	// Given：S3 更新要求主口令已解锁。
+	// 去锁化(Task 5):凭据由注入的 keystore 托管,无需先设主密码;
+	// newBackupTestApp 已接线 store,S3 配置写入会把 access/secret key
+	// 分流进 secrets。
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	body := strings.NewReader(`{"password":"testpass123"}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/master-password", body)
-	c.Set("app", a)
-	MasterPasswordSet(c)
-	if w.Code != http.StatusOK {
-		t.Fatalf("master-password code = %d, body = %s", w.Code, w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	c, _ = gin.CreateTestContext(w)
-	body = strings.NewReader(`{"enabled":true,"target_type":"s3","s3_endpoint":"https://s3.example.com","s3_bucket":"my-bucket","s3_region":"us-east-1","s3_access_key":"AKIAEXAMPLE","s3_secret_key":"secret","s3_path_prefix":"backups"}`)
+	body := strings.NewReader(`{"enabled":true,"target_type":"s3","s3_endpoint":"https://s3.example.com","s3_bucket":"my-bucket","s3_region":"us-east-1","s3_access_key":"AKIAEXAMPLE","s3_secret_key":"secret","s3_path_prefix":"backups"}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/config", body)
 	c.Set("app", a)
 
@@ -198,7 +199,7 @@ func TestHandleBackupConfigUpdate_S3(t *testing.T) {
 	}
 }
 
-func TestHandleBackupConfigUpdate_S3WithoutMasterPassword(t *testing.T) {
+func TestHandleBackupConfigUpdate_S3WithCreds_NoMasterPassword(t *testing.T) {
 	a, _ := newBackupTestApp(t)
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -217,8 +218,8 @@ func TestHandleBackupConfigUpdate_S3WithoutMasterPassword(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response not JSON: %v", err)
 	}
-	if got["error"] != "credentials_not_available" {
-		t.Errorf("error = %v, want credentials_not_available", got["error"])
+	if got["success"] != true {
+		t.Errorf("success = %v, want true (body=%s)", got["success"], w.Body.String())
 	}
 }
 
@@ -511,135 +512,6 @@ func TestHandleBackupVerify(t *testing.T) {
 	}
 }
 
-func TestHandleBackupUnlock(t *testing.T) {
-	a, _ := newBackupTestApp(t)
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := strings.NewReader(`{"password":"testpass"}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/unlock", body)
-	c.Set("app", a)
-
-	BackupUnlock(c)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
-	}
-
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("response not JSON: %v", err)
-	}
-	if got["success"] != true {
-		t.Errorf("success = %v, want true", got["success"])
-	}
-}
-
-func TestHandleBackupUnlock_MissingPassword(t *testing.T) {
-	a, _ := newBackupTestApp(t)
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := strings.NewReader(`{}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/unlock", body)
-	c.Set("app", a)
-
-	BackupUnlock(c)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("code = %d, want 400", w.Code)
-	}
-}
-
-func TestHandleBackupLock(t *testing.T) {
-	a, _ := newBackupTestApp(t)
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/lock", nil)
-	c.Set("app", a)
-
-	BackupLock(c)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
-	}
-
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("response not JSON: %v", err)
-	}
-	if got["success"] != true {
-		t.Errorf("success = %v, want true", got["success"])
-	}
-}
-
-func TestHandleMasterPasswordGet(t *testing.T) {
-	a, _ := newBackupTestApp(t)
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/backup/master-password", nil)
-	c.Set("app", a)
-
-	MasterPasswordGet(c)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
-	}
-
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("response not JSON: %v", err)
-	}
-	if _, ok := got["has_password"]; !ok {
-		t.Errorf("missing has_password in response")
-	}
-	if _, ok := got["unlocked"]; !ok {
-		t.Errorf("missing unlocked in response")
-	}
-}
-
-func TestHandleMasterPasswordSet(t *testing.T) {
-	a, _ := newBackupTestApp(t)
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := strings.NewReader(`{"password":"testpass123"}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/master-password", body)
-	c.Set("app", a)
-
-	MasterPasswordSet(c)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
-	}
-
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("response not JSON: %v", err)
-	}
-	if got["success"] != true {
-		t.Errorf("success = %v, want true", got["success"])
-	}
-}
-
-func TestHandleMasterPasswordSet_TooShort(t *testing.T) {
-	a, _ := newBackupTestApp(t)
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	body := strings.NewReader(`{"password":"abc"}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/master-password", body)
-	c.Set("app", a)
-
-	MasterPasswordSet(c)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("code = %d, want 400", w.Code)
-	}
-}
-
 func TestHandleAuthStatus(t *testing.T) {
 	a, _ := newBackupTestApp(t)
 	gin.SetMode(gin.TestMode)
@@ -744,27 +616,6 @@ func TestMask(t *testing.T) {
 	}
 }
 
-func TestMasterPasswordError(t *testing.T) {
-	got := masterPasswordError("test_code", "test message", "setup")
-
-	if got["success"] != false {
-		t.Errorf("success = %v, want false", got["success"])
-	}
-	if got["error"] != "test_code" {
-		t.Errorf("error = %v, want test_code", got["error"])
-	}
-	if got["message"] != "test message" {
-		t.Errorf("message = %v, want 'test message'", got["message"])
-	}
-	action, _ := got["action"].(gin.H)
-	if action == nil {
-		t.Fatal("action should be a gin.H")
-	}
-	if action["target"] != "master_password" {
-		t.Errorf("action.target = %v, want master_password", action["target"])
-	}
-}
-
 func TestHandleBackupCreate_VerifiesSHA256(t *testing.T) {
 	a, backupDir := newBackupTestApp(t)
 	gin.SetMode(gin.TestMode)
@@ -829,14 +680,6 @@ func TestHandleBackupCreate_FailOnSHA256Mismatch(t *testing.T) {
 		t.Fatalf("settings: %v", err)
 	}
 
-	cfg := domain.NewDefaultBackupConfig()
-	cfg.Enabled = true
-	cfg.TargetType = domain.BackupTargetLocal
-	cfg.LocalPath = backupDir
-	if err := sm.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg)); err != nil {
-		t.Fatalf("update backup config: %v", err)
-	}
-
 	fake := backup.NewFakeLocalAdapter(backupDir)
 	fake.SetRestoreData([]byte("different-bytes-than-vacuum-output"))
 
@@ -848,6 +691,18 @@ func TestHandleBackupCreate_FailOnSHA256Mismatch(t *testing.T) {
 		bm,
 		dbPath,
 	)
+	// 去锁化(Task 5):UpdateBackupConfigFromJSON 需已接线的凭据 store,
+	// 注入内存 keystore 并先 a.Secrets() 接线,再写配置。
+	a.Keystore = keystoretest.New("secret-service", true)
+	_ = a.Secrets()
+
+	cfg := domain.NewDefaultBackupConfig()
+	cfg.Enabled = true
+	cfg.TargetType = domain.BackupTargetLocal
+	cfg.LocalPath = backupDir
+	if err := sm.UpdateBackupConfigFromJSON(backupConfigToJSON(cfg)); err != nil {
+		t.Fatalf("update backup config: %v", err)
+	}
 
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

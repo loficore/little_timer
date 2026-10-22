@@ -9,15 +9,14 @@
 // manager 在构造时接受一个 `*storage.SqliteManager`（已接好子模块）。
 // 若 SQLite 文件尚未打开，它会负责打开（创建父目录、chmod 0600、跑迁移）。
 //
-// 凭据加密：webdav_password / s3_access_key / s3_secret_key 用 AES-256-GCM
-// 静态加密，密钥由固定应用 secret + SQLite 文件路径派生（不依赖 OS
-// keychain —— 见 `deriveCredentialKey`）。这满足“磁盘上绝无明文凭据”的
-// 约束，同时让加密包端到端受测。TODO: 等 dbus / Windows 凭据库落地后接入
-// OS keychain。
+// 凭据托管：webdav_password / s3_access_key / s3_secret_key 不再写入
+// SQLite —— 由平台 keystore 托管的 *crypto.SecretStorage(经 SetSecretStore
+// 注入)保存,SQLite 只保留 has_* 布尔标记与非敏感的明文字段(url/bucket/
+// region/prefix 等)。旧的 deriveCredentialKey + AES-GCM 列加密方案已整体
+// 删除,历史密文列停止写入(NULL),清理由 keystore 迁移器负责。
 package settings
 
 import (
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -31,13 +30,25 @@ import (
 
 	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
+	"little-timer/internal/log"
 	"little-timer/internal/storage"
 )
+
+// SecretStorage 中三个凭据字段的 key 名 —— spec §6 约定,keystore 迁移器
+// (Task 8)按同样的名字写入。
+const (
+	SecretWebDAVPassword = "webdav_password"
+	SecretS3AccessKey    = "s3_access_key"
+	SecretS3SecretKey    = "s3_secret_key"
+)
+
+// errSecretStoreNotWired 在 SecretStorage 尚未接线时拒绝用户触发的保存
+// —— 防止调用方漏接 SetSecretStore 后静默清掉凭据。
+var errSecretStoreNotWired = errors.New("settings: secret store not wired")
 
 // SettingsManager 持有基于 SQLite 的内存 settings + backup 配置。
 type SettingsManager struct {
 	sqlite *storage.SqliteManager
-	dbPath string // 构造时捕获，用于凭据密钥派生
 
 	config       domain.SettingsConfig
 	backupConfig domain.BackupConfig
@@ -53,9 +64,10 @@ type SettingsManager struct {
 	// dirty 由变更器置位、由 Save() 消费。
 	dirty bool
 
-	// credentialUnlockPassword 跟踪凭据子系统的“主口令已解锁”状态。
-	// 锁定时为 nil。
-	credentialUnlockPassword []byte
+	// secretStore 托管三个凭据字段,由 SetSecretStore 注入(构造期不
+	// 接受,避免构造环)。nil = 未接线,用户触发的保存报
+	// errSecretStoreNotWired。
+	secretStore *crypto.SecretStorage
 }
 
 // BasicConfig 是 UpdateBasic 使用的小型强类型视图。
@@ -83,32 +95,55 @@ func New(dbPath string) (*SettingsManager, error) {
 		return nil, fmt.Errorf("settings: migrate: %w", err)
 	}
 
-	return newFromSqlite(mgr, resolved)
+	return newFromSqlite(mgr)
 }
 
 // NewFromSqliteManager 包装一个已打开的 SqliteManager。适用于测试框架
-// 已经开好 DB 的场景。`dbPath` 会被捕获用于凭据密钥派生；若底层 DB 在
-// 其他路径，请显式提供。
+// 已经开好 DB 的场景。`dbPath` 当前未被使用(凭据密钥派生已随
+// SecretStorage 接管而删除),保留形参只为调用方签名兼容。
 func NewFromSqliteManager(mgr *storage.SqliteManager, dbPath string) (*SettingsManager, error) {
 	if mgr == nil || !mgr.IsOpen() {
 		return nil, errors.New("settings: sqlite manager is nil or not open")
 	}
-	return newFromSqlite(mgr, dbPath)
+	return newFromSqlite(mgr)
 }
 
-func newFromSqlite(mgr *storage.SqliteManager, dbPath string) (*SettingsManager, error) {
+func newFromSqlite(mgr *storage.SqliteManager) (*SettingsManager, error) {
 	sm := &SettingsManager{
 		sqlite:  mgr,
-		dbPath:  dbPath,
 		presets: NewPresetsManager(),
 		viper:   viper.New(),
 		// config / backupConfig 由 Load() 填充；不先 Load 的调用方
 		// 会看到零值。
 	}
+	// SecretStorage 是 setter 注入(构造之后),has_* 标记列又由本文件
+	// 的裸 SQL 直接读写 —— 打开时先幂等补齐列,老库与新库共用一条路径。
+	if err := sm.ensureBackupConfigCredentialFlags(); err != nil {
+		return nil, err
+	}
 	if err := sm.loadAll(); err != nil {
 		return nil, err
 	}
 	return sm, nil
+}
+
+// SetSecretStore 注入 keystore envelope 凭据存储(Task 3 的
+// *crypto.SecretStorage)。接线即回填:非 nil 时立即复用既有读路径
+// (loadBackupConfigFromDB)重拉 backup_config,把 has_*=1 的凭据灌回内存
+// —— 消除构造窗口期(loadAll 未接线、凭据读成空串)里任何变更触发的 Save
+// 用空值对着健康 store 误删真实 secrets 的时序危害。调用方无需在接线后再
+// 手动 Load()。重拉失败时保留现有内存值并记 warn(与常规 Load 路径一致的
+// 尽力而为降级;日志只带错误文本,绝不带凭据值)。传 nil 解除接线,行为
+// 不变 —— 此后用户触发的保存返回 errSecretStoreNotWired。
+func (sm *SettingsManager) SetSecretStore(ss *crypto.SecretStorage) {
+	sm.secretStore = ss
+	if ss == nil {
+		return
+	}
+	if err := sm.loadBackupConfigFromDB(); err != nil {
+		log.Warn("settings: reload backup_config after wiring secret store failed, keeping in-memory values",
+			"error", err.Error())
+	}
 }
 
 // Load / Save。
@@ -118,7 +153,9 @@ func (sm *SettingsManager) Load() error {
 	return sm.loadAll()
 }
 
-// Save 把内存中的 config + backup 配置刷入 SQLite。
+// Save 把内存中的 config + backup 配置刷入 SQLite。凭据段经
+// SecretStorage 分流,因此要求已 SetSecretStore 接线,否则报
+// errSecretStoreNotWired。
 func (sm *SettingsManager) Save() error {
 	if err := sm.saveSettingsToDB(); err != nil {
 		return err
@@ -160,7 +197,14 @@ func (sm *SettingsManager) loadAll() error {
 func (sm *SettingsManager) initializeDefaultSettings(cfg domain.SettingsConfig) error {
 	sm.config = cfg
 	sm.backupConfig = domain.NewDefaultBackupConfig()
-	if err := sm.Save(); err != nil {
+	// 构造期播种不走 saveBackupConfigToDB:此时 SecretStorage 还没注入
+	// (setter 注入在构造之后),而默认凭据值全空,没有可分流的 secret;
+	// 直接落 has_*=0、凭据列 NULL 的行。store 若已接线则照常分流,见
+	// writeBackupConfigRow。
+	if err := sm.saveSettingsToDB(); err != nil {
+		return fmt.Errorf("settings: save defaults: %w", err)
+	}
+	if err := sm.writeBackupConfigRow(); err != nil {
 		return fmt.Errorf("settings: save defaults: %w", err)
 	}
 	sm.populateViper()
@@ -499,7 +543,12 @@ func (sm *SettingsManager) saveSettingsToDB() error {
 // SQLite 持久化 —— backup_config 行。
 //
 // 其他表的等价备份 SQL 住在 storage 层；这里托管本表是为了让
-// settings/crypto/backup 边界自包含。schema 列不变。
+// settings/crypto/backup 边界自包含。
+//
+// webdav_password_encrypted / s3_access_key_encrypted /
+// s3_secret_key_encrypted:凭据不再写入,恒写 NULL;列本身留待 keystore
+// 迁移器(Task 8)清理,本期不做破坏性 schema 变更。真正的凭据值经
+// SecretStorage 分流,SQLite 只记 has_* 标记。
 
 const backupConfigSQL = `INSERT OR REPLACE INTO backup_config (
     id, target_type, enabled, auto_backup, auto_backup_interval,
@@ -508,43 +557,81 @@ const backupConfigSQL = `INSERT OR REPLACE INTO backup_config (
     s3_access_key_encrypted, s3_secret_key_encrypted,
     s3_path_prefix,
     has_master_password, credentials_unlock_time,
-    credential_unlock_attempts, credential_locked_until
+    credential_unlock_attempts, credential_locked_until,
+    has_webdav_password, has_s3_access_key, has_s3_secret_key
 ) VALUES (
-    1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    1, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?
 );`
 
 const loadBackupConfigSQL = `SELECT
     target_type, enabled, auto_backup, auto_backup_interval,
     COALESCE(local_path, ''), COALESCE(webdav_url, ''), COALESCE(webdav_username, ''),
-    webdav_password_encrypted,
     COALESCE(s3_endpoint, ''), COALESCE(s3_bucket, ''), COALESCE(s3_region, ''),
-    s3_access_key_encrypted, s3_secret_key_encrypted,
     COALESCE(s3_path_prefix, 'little_timer/'),
     has_master_password, credentials_unlock_time,
-    credential_unlock_attempts, credential_locked_until
+    credential_unlock_attempts, credential_locked_until,
+    has_webdav_password, has_s3_access_key, has_s3_secret_key
 FROM backup_config WHERE id = 1;`
 
 func (sm *SettingsManager) saveBackupConfigToDB() error {
+	// 用户触发的保存一律要求已接线:即便当前凭据全空,漏接也必须显式
+	// 失败,否则会把 has_* 静默清零、Secrets 里的旧值变孤儿。
+	if sm.secretStore == nil {
+		return errSecretStoreNotWired
+	}
+	return sm.writeBackupConfigRow()
+}
+
+// credentialFlag 绑定 has_* 列名与对应的 secret key —— 写分流与
+// 打开时的列补齐共用这张表(顺序即 backupConfigSQL 末尾三列的顺序)。
+type credentialFlag struct {
+	column    string
+	secretKey string
+}
+
+var credentialFlags = []credentialFlag{
+	{column: "has_webdav_password", secretKey: SecretWebDAVPassword},
+	{column: "has_s3_access_key", secretKey: SecretS3AccessKey},
+	{column: "has_s3_secret_key", secretKey: SecretS3SecretKey},
+}
+
+// writeBackupConfigRow 透明分流(spec §6):凭据字段值非空 →
+// SecretStorage.Store + has_*=1;值空 → Delete + has_*=0(SecretStorage
+// 文档保证删不存在的 key 是 no-op)。secretStore 为 nil 时只允许全空的
+// 凭据值 —— 那是构造期播种;任何非空值直接报 errSecretStoreNotWired。
+// 日志只出现 has_* 布尔,绝不出现凭据值。
+func (sm *SettingsManager) writeBackupConfigRow() error {
 	db := sm.sqlite.DB()
 	if db == nil {
 		return errors.New("settings: sqlite not open")
 	}
-	key := sm.deriveCredentialKey()
 
-	webdavPwdBlob, err := sm.encryptOptional(key, []byte(sm.backupConfig.WebDAVPassword))
-	if err != nil {
-		return fmt.Errorf("settings: encrypt webdav_password: %w", err)
+	values := []string{
+		sm.backupConfig.WebDAVPassword,
+		sm.backupConfig.S3AccessKey,
+		sm.backupConfig.S3SecretKey,
 	}
-	s3AccessBlob, err := sm.encryptOptional(key, []byte(sm.backupConfig.S3AccessKey))
-	if err != nil {
-		return fmt.Errorf("settings: encrypt s3_access_key: %w", err)
-	}
-	s3SecretBlob, err := sm.encryptOptional(key, []byte(sm.backupConfig.S3SecretKey))
-	if err != nil {
-		return fmt.Errorf("settings: encrypt s3_secret_key: %w", err)
+	has := make([]int64, len(credentialFlags))
+	for i, c := range credentialFlags {
+		v := values[i]
+		if v == "" {
+			if sm.secretStore != nil {
+				if err := sm.secretStore.Delete([]byte(c.secretKey)); err != nil {
+					return fmt.Errorf("settings: delete secret %s: %w", c.secretKey, err)
+				}
+			}
+			continue
+		}
+		if sm.secretStore == nil {
+			return errSecretStoreNotWired
+		}
+		if err := sm.secretStore.Store([]byte(c.secretKey), []byte(v)); err != nil {
+			return fmt.Errorf("settings: store secret %s: %w", c.secretKey, err)
+		}
+		has[i] = 1
 	}
 
-	_, err = db.Exec(backupConfigSQL,
+	_, err := db.Exec(backupConfigSQL,
 		sm.backupConfig.TargetType.String(),
 		domain.BoolToInt(sm.backupConfig.Enabled),
 		domain.BoolToInt(sm.backupConfig.AutoBackup),
@@ -552,21 +639,24 @@ func (sm *SettingsManager) saveBackupConfigToDB() error {
 		nullable(sm.backupConfig.LocalPath),
 		nullable(sm.backupConfig.WebDAVURL),
 		nullable(sm.backupConfig.WebDAVUsername),
-		webdavPwdBlob,
 		nullable(sm.backupConfig.S3Endpoint),
 		nullable(sm.backupConfig.S3Bucket),
 		nullable(sm.backupConfig.S3Region),
-		s3AccessBlob,
-		s3SecretBlob,
 		nullable(sm.backupConfig.S3PathPrefix),
 		domain.BoolToInt(sm.backupConfig.HasMasterPassword),
 		sm.backupConfig.CredentialsUnlockTime,
 		int64(sm.backupConfig.CredentialUnlockAttempts),
 		sm.backupConfig.CredentialLockedUntil,
+		has[0], has[1], has[2],
 	)
 	if err != nil {
 		return fmt.Errorf("settings: save backup_config: %w", err)
 	}
+	log.Debug("settings: backup_config saved",
+		"has_webdav_password", has[0] == 1,
+		"has_s3_access_key", has[1] == 1,
+		"has_s3_secret_key", has[2] == 1,
+	)
 	return nil
 }
 
@@ -575,7 +665,6 @@ func (sm *SettingsManager) loadBackupConfigFromDB() error {
 	if db == nil {
 		return errors.New("settings: sqlite not open")
 	}
-	key := sm.deriveCredentialKey()
 
 	row := db.QueryRow(loadBackupConfigSQL)
 	var (
@@ -586,43 +675,31 @@ func (sm *SettingsManager) loadBackupConfigFromDB() error {
 		localPath             string
 		webdavURL             string
 		webdavUsername        string
-		webdavPwdBlob         []byte
 		s3Endpoint            string
 		s3Bucket              string
 		s3Region              string
-		s3AccessBlob          []byte
-		s3SecretBlob          []byte
 		s3PathPrefix          string
 		hasMasterRaw          bool
 		unlockTimeRaw         int64
 		unlockAttemptsRaw     int64
 		lockedUntilRaw        int64
+		hasWebdav             int64
+		hasS3Access           int64
+		hasS3Secret           int64
 	)
 	if err := row.Scan(
 		&targetTypeStr, &enabledRaw, &autoBackupRaw, &autoBackupIntervalRaw,
-		&localPath, &webdavURL, &webdavUsername, &webdavPwdBlob,
+		&localPath, &webdavURL, &webdavUsername,
 		&s3Endpoint, &s3Bucket, &s3Region,
-		&s3AccessBlob, &s3SecretBlob, &s3PathPrefix,
+		&s3PathPrefix,
 		&hasMasterRaw, &unlockTimeRaw, &unlockAttemptsRaw, &lockedUntilRaw,
+		&hasWebdav, &hasS3Access, &hasS3Secret,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			sm.backupConfig = domain.NewDefaultBackupConfig()
 			return nil
 		}
 		return fmt.Errorf("settings: load backup_config: %w", err)
-	}
-
-	webdavPwd, err := sm.decryptOptional(key, webdavPwdBlob)
-	if err != nil {
-		webdavPwd = ""
-	}
-	s3Access, err := sm.decryptOptional(key, s3AccessBlob)
-	if err != nil {
-		s3Access = ""
-	}
-	s3Secret, err := sm.decryptOptional(key, s3SecretBlob)
-	if err != nil {
-		s3Secret = ""
 	}
 
 	sm.backupConfig = domain.BackupConfig{
@@ -633,12 +710,12 @@ func (sm *SettingsManager) loadBackupConfigFromDB() error {
 		LocalPath:                localPath,
 		WebDAVURL:                webdavURL,
 		WebDAVUsername:           webdavUsername,
-		WebDAVPassword:           webdavPwd,
+		WebDAVPassword:           sm.credentialFromStore(SecretWebDAVPassword, hasWebdav != 0),
 		S3Endpoint:               s3Endpoint,
 		S3Bucket:                 s3Bucket,
 		S3Region:                 s3Region,
-		S3AccessKey:              s3Access,
-		S3SecretKey:              s3Secret,
+		S3AccessKey:              sm.credentialFromStore(SecretS3AccessKey, hasS3Access != 0),
+		S3SecretKey:              sm.credentialFromStore(SecretS3SecretKey, hasS3Secret != 0),
 		S3PathPrefix:             s3PathPrefix,
 		HasMasterPassword:        hasMasterRaw,
 		CredentialsUnlockTime:    unlockTimeRaw,
@@ -648,35 +725,71 @@ func (sm *SettingsManager) loadBackupConfigFromDB() error {
 	return nil
 }
 
-// 凭据加密（AES-256-GCM + 确定性密钥 —— 设计理由与 OS-keychain TODO
-// 见文件头）。
-
-func (sm *SettingsManager) deriveCredentialKey() []byte {
-	h := sha256.New()
-	h.Write([]byte("little-timer-credential-key-v1"))
-	h.Write([]byte(sm.dbPath))
-	return h.Sum(nil)
-}
-
-// encryptOptional 对空明文返回 nil。
-func (sm *SettingsManager) encryptOptional(key, plaintext []byte) ([]byte, error) {
-	if len(plaintext) == 0 {
-		return nil, nil
+// credentialFromStore 按 has_* 标记把凭据从 SecretStorage 拉回明文:
+// 标记 0 → "";标记 1 但 store 未接线(构造窗口期)或 key 缺失 → "" 且
+// 不报错。仅 keystore 不可用类错误记 warn —— 日志只带 key 名与错误文本,
+// 绝不带凭据值(读取失败的"不可用"语义由 App 层 CredentialStatus 透出,
+// spec §10)。
+func (sm *SettingsManager) credentialFromStore(secretKey string, hasFlag bool) string {
+	if !hasFlag {
+		return ""
 	}
-	nonce := crypto.GenerateNonce()
-	return crypto.Encrypt(plaintext, key, nonce)
-}
-
-// decryptOptional 在 blob 缺失或短到不可能是合法密文时返回 ""。
-func (sm *SettingsManager) decryptOptional(key, blob []byte) (string, error) {
-	if len(blob) < crypto.AES256GCMNonceSize+crypto.AES256GCMTagSize {
-		return "", nil
+	if sm.secretStore == nil {
+		return ""
 	}
-	pt, err := crypto.Decrypt(blob, key)
+	v, err := sm.secretStore.Retrieve([]byte(secretKey))
 	if err != nil {
-		return "", err
+		if !errors.Is(err, crypto.ErrSecretNotFound) {
+			log.Warn("settings: credential unreadable from secret store, degraded to empty",
+				"key", secretKey, "error", err.Error())
+		}
+		return ""
 	}
-	return string(pt), nil
+	return string(v)
+}
+
+// 凭据列补齐 —— backup_config 的 CREATE 在 storage/migration.go(本期不动
+// storage 层),三个 has_* 标记列由这里在每次打开时幂等 ALTER 补上,
+// 覆盖老库与 storage 旧 CREATE 产出的新库。
+
+func (sm *SettingsManager) ensureBackupConfigCredentialFlags() error {
+	db := sm.sqlite.DB()
+	if db == nil {
+		return errors.New("settings: sqlite not open")
+	}
+	for _, c := range credentialFlags {
+		if err := addColumnIfMissing(db, "backup_config", c.column, "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("settings: ensure column %s: %w", c.column, err)
+		}
+	}
+	return nil
+}
+
+// addColumnIfMissing 列已存在则 no-op;否则 ALTER TABLE ADD COLUMN。
+// SQLite 的 ADD COLUMN 没有 IF NOT EXISTS,须先查 PRAGMA table_info
+// (与 storage 层迁移助手的做法一致;table 名为固定字面量,无注入面)。
+func addColumnIfMissing(db *sql.DB, table, column, def string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `);`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s;`, table, column, def))
+	return err
 }
 
 // 辅助函数。

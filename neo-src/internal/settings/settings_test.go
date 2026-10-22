@@ -7,7 +7,6 @@ package settings
 import (
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -204,14 +203,7 @@ func TestSafeConversions(t *testing.T) {
 // SettingsManager —— 往返 + JSON 解析。
 
 func newTestManager(t *testing.T) *SettingsManager {
-	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "settings.db")
-	mgr, err := New(dbPath)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Close() })
+	mgr, _ := newWiredTestManager(t)
 	return mgr
 }
 
@@ -257,6 +249,11 @@ func TestManagerSaveAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New #1: %v", err)
 	}
+	// Task 4 起 Save 要求 SecretStorage 已接线:凭据值虽为空,漏接也必须
+	// 显式失败,防止静默清掉 has_* 标记。
+	h := newSecretHarness(t, dir)
+	mgr.SetSecretStore(h.store)
+
 	if err := mgr.UpdateBasic(BasicConfig{Timezone: -5, Language: "EN", DefaultMode: domain.DefaultModeStopwatch}); err != nil {
 		t.Fatalf("UpdateBasic: %v", err)
 	}
@@ -337,83 +334,6 @@ func TestManagerUpdateBackupConfigFromJSON(t *testing.T) {
 	}
 }
 
-// TestManagerUpdateBackupConfigFromJSON_ParsesCredentialFields 回归测试：
-// credential 三字段（credential_locked_until / credentials_unlock_time /
-// credential_unlock_attempts）必须被解析，不能静默丢弃。save/load 路径
-// 读写这三个字段，parser 漏了会造成字段永远为 0。
-func TestManagerUpdateBackupConfigFromJSON_ParsesCredentialFields(t *testing.T) {
-	mgr := newTestManager(t)
-
-	payload, _ := json.Marshal(map[string]any{
-		"credential_locked_until":    1111111111,
-		"credentials_unlock_time":    2222222222,
-		"credential_unlock_attempts": 3,
-	})
-	if err := mgr.UpdateBackupConfigFromJSON(string(payload)); err != nil {
-		t.Fatalf("UpdateBackupConfigFromJSON: %v", err)
-	}
-	bc := mgr.BackupConfig()
-	if bc.CredentialLockedUntil != 1111111111 {
-		t.Errorf("CredentialLockedUntil = %d, want 1111111111", bc.CredentialLockedUntil)
-	}
-	if bc.CredentialsUnlockTime != 2222222222 {
-		t.Errorf("CredentialsUnlockTime = %d, want 2222222222", bc.CredentialsUnlockTime)
-	}
-	if bc.CredentialUnlockAttempts != 3 {
-		t.Errorf("CredentialUnlockAttempts = %d, want 3", bc.CredentialUnlockAttempts)
-	}
-}
-
-func TestManagerBackupConfigCredentialsEncryptedAtRest(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "settings.db")
-	mgr, err := New(dbPath)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer mgr.Close()
-
-	payload, _ := json.Marshal(map[string]any{
-		"target_type":    "s3",
-		"s3_endpoint":    "https://s3.amazonaws.com",
-		"s3_bucket":      "mybucket",
-		"s3_region":      "us-east-1",
-		"s3_access_key":  "AKIA-PLAINTEXT-CANARY",
-		"s3_secret_key":  "secret-PLAINTEXT-CANARY",
-		"s3_path_prefix": "lt/",
-	})
-	if err := mgr.UpdateBackupConfigFromJSON(string(payload)); err != nil {
-		t.Fatalf("UpdateBackupConfigFromJSON: %v", err)
-	}
-
-	// 检查磁盘上的 SQLite blob —— access key 明文字符串绝不能出现在
-	// 加密 BLOB 列里。
-	data, err := os.ReadFile(dbPath)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if strings.Contains(string(data), "AKIA-PLAINTEXT-CANARY") {
-		t.Error("access key plaintext leaked into SQLite file")
-	}
-	if strings.Contains(string(data), "secret-PLAINTEXT-CANARY") {
-		t.Error("secret key plaintext leaked into SQLite file")
-	}
-
-	// 重载并确认解密能往返。
-	mgr2, err := New(dbPath)
-	if err != nil {
-		t.Fatalf("New #2: %v", err)
-	}
-	defer mgr2.Close()
-	bc := mgr2.BackupConfig()
-	if bc.S3AccessKey != "AKIA-PLAINTEXT-CANARY" {
-		t.Errorf("reloaded S3AccessKey = %q, want AKIA-PLAINTEXT-CANARY", bc.S3AccessKey)
-	}
-	if bc.S3SecretKey != "secret-PLAINTEXT-CANARY" {
-		t.Errorf("reloaded S3SecretKey = %q, want secret-PLAINTEXT-CANARY", bc.S3SecretKey)
-	}
-}
-
 func TestManagerHandleSettingsChangeEvent(t *testing.T) {
 	mgr := newTestManager(t)
 	payload := `{"basic":{"timezone":3,"language":"EN"}}`
@@ -475,5 +395,36 @@ func TestPresetsManagerIsNoop(t *testing.T) {
 	}
 	if p.MaxCount() != MaxPresetCount {
 		t.Errorf("MaxCount = %d, want %d", p.MaxCount(), MaxPresetCount)
+	}
+}
+
+// TestManagerUpdateBackupConfigFromJSON_ParsesCredentialFields 回归测试（#35）：
+// credential 三字段（credential_locked_until / credentials_unlock_time /
+// credential_unlock_attempts）必须被白名单解析，不能静默丢弃。save/load 路径
+// 读写这三个字段，parser 漏了会造成字段永远为 0。
+//
+// 去锁化（issue #13）后这四列不再有写入方、恒为默认值——保护边界改由平台
+// keystore 承担，DB 列按 Path B 保留以兼容存量 schema。但解析仍要正确，
+// 否则将来读存量库时无法还原其中残留的值。
+func TestManagerUpdateBackupConfigFromJSON_ParsesCredentialFields(t *testing.T) {
+	mgr := newTestManager(t)
+
+	payload, _ := json.Marshal(map[string]any{
+		"credential_locked_until":    1111111111,
+		"credentials_unlock_time":    2222222222,
+		"credential_unlock_attempts": 3,
+	})
+	if err := mgr.UpdateBackupConfigFromJSON(string(payload)); err != nil {
+		t.Fatalf("UpdateBackupConfigFromJSON: %v", err)
+	}
+	bc := mgr.BackupConfig()
+	if bc.CredentialLockedUntil != 1111111111 {
+		t.Errorf("CredentialLockedUntil = %d, want 1111111111", bc.CredentialLockedUntil)
+	}
+	if bc.CredentialsUnlockTime != 2222222222 {
+		t.Errorf("CredentialsUnlockTime = %d, want 2222222222", bc.CredentialsUnlockTime)
+	}
+	if bc.CredentialUnlockAttempts != 3 {
+		t.Errorf("CredentialUnlockAttempts = %d, want 3", bc.CredentialUnlockAttempts)
 	}
 }

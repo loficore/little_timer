@@ -338,18 +338,14 @@ func (b BackupTargetType) String() string {
 	}
 }
 
-// UnlockResult 是凭据解锁尝试的返回值。
-type UnlockResult struct {
-	Success     bool  `json:"success"`
-	LockedUntil int64 `json:"locked_until"`
-}
-
-// MasterPasswordStatus 概览凭据子系统状态。
-type MasterPasswordStatus struct {
-	HasPassword bool  `json:"has_password"`
-	Unlocked    bool  `json:"unlocked"`
-	LockedUntil int64 `json:"locked_until"`
-	UnlockTime  int64 `json:"unlock_time"`
+// CredentialStatus 概览凭据子系统的后端健康度(取代旧的主口令状态)。
+// Backend 取注入 keystore 的 Name(),或在"磁盘有 secret.db 但 master key
+// 缺失 / 解封失败"的降级态下取 "unavailable"(此时 Detail 必非空,绝不
+// 假装"没有凭据"——见 spec §10 Review Focus #2)。
+type CredentialStatus struct {
+	Backend   string `json:"backend"` // "secret-service" | "android-keystore" | "other" | "unavailable"
+	Detail    string `json:"detail"`
+	HasSecret bool   `json:"has_secret"`
 }
 
 // ApiAction 是跨层的 UI 触发器。放在这里以便下游包共享该契约；

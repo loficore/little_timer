@@ -124,7 +124,10 @@ jobs:
         working-directory: assets
       - run: pnpm run build
         working-directory: assets
-      - run: go build -o bin/server ./cmd/server
+      # test_keystore：e2e 验的是应用行为而非 keystore 正确性（后者由
+      # keystore-integration job 用真 daemon 覆盖）。该 build tag 让
+      # keystore.Current() 返回内存实现，编译期门禁，生产构建不含。
+      - run: go build -tags test_keystore -o bin/server ./cmd/server
         working-directory: neo-src
       - name: Ensure test_tmp exists for backend db path
         run: mkdir -p assets/test_tmp
@@ -136,6 +139,67 @@ jobs:
         run: pkill -9 -f "bin/server\|vite" 2>/dev/null || true
 
     # 视觉回归测试：仅在代码验证事件中运行
+  # keystore 集成测试：起一个真实的 Secret Service daemon，让
+  # internal/keystore 的 dbus 集成测试真正跑协议往返。
+  #
+  # 破坏性：该测试会创建/删除 keyring 里的 item，故带 integration_dbus tag，
+  # 默认构建不跑。无 daemon 环境下该 tag 的用例自行 skip。
+  keystore-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: neo-src/go.sum
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gnome-keyring \
+            dbus-x11 \
+            libsecret-1-dev \
+            libdbus-1-dev \
+            pkg-config \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            libsqlite3-dev
+      # gnome-keyring 的两段式初始化。**不要**改成 --daemonize：
+      #   1) `--unlock` 用管道里的口令物化 login 集合（daemon 尚不存在）；
+      #   2) `--start --components=secrets` 才 fork 出 daemon。
+      # 两段的 stdout 都是 shell export 语句（GNOME_KEYRING_* socket 路径），
+      # **必须 eval**，丢掉它们则 Secret Service 虽在 bus 上却无人能连 ——
+      # 症状是 "collection/login does not exist" 或集合始终 Locked=true。
+      # 整个 job 的测试都跑在这一个 dbus 会话里，故 bus 不会中途消失。
+      - name: 启动内存 keyring（仅本 job 生命周期）
+        run: |
+          dbus-run-session -- bash -c '
+            KEYRING_PW=lt-ci-keyring
+            eval "$(printf "%s\n" "$KEYRING_PW" | gnome-keyring-daemon --unlock)"
+            eval "$(printf "%s\n" "$KEYRING_PW" | gnome-keyring-daemon --start --components=secrets)"
+            # 打开 daemon 重启持久性测试的两道破坏性门：
+            #   LT_IT_KEYRING_PASSWORD   —— 与上面 KEYRING_PW 必须一致，测试要用它
+            #                                 把 pkill 掉的 daemon 原样拉回来；
+            #   LT_IT_DESTROY_MASTER_KEY—— 前置清理会删既有 master key。
+            # 在 CI 上开这两道门是安全的：runner 是一次性的，这个 keyring 由本
+            # job 上面的配方刚刚创建，不存在任何值得保护的既有凭据。
+            # 门本身保留 —— 它防的是「开发者在本机跑集成测试时误杀真实 keyring」，
+            # 那个场景与 CI 无关，所以门必须留着、由 CI 显式开。
+            export LT_IT_KEYRING_PASSWORD="$KEYRING_PW"
+            export LT_IT_DESTROY_MASTER_KEY=1
+            # -v 是必需的：这些测试在 daemon 不可用时会 t.Skip 而非失败，
+            # 不带 -v 的话「全跳过」和「全跑过」在 CI 输出里长得一模一样
+            # （都只打印一行 ok）。绿得有没有意义必须一眼可辨。
+            go test -v -tags "linux integration_dbus" ./internal/keystore/
+          '
+        working-directory: neo-src
+      - run: go mod tidy
+        working-directory: neo-src
+      - run: go build -o bin/server ./cmd/server
+        working-directory: neo-src
+
   vrt:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -173,6 +237,10 @@ jobs:
         run: bash scripts/generate-bindings.sh
       - name: Install Chinese fonts for VRT
         run: sudo apt-get install -y fonts-noto-cjk
+      # 与 e2e 同理：VRT 验的是渲染，不是 keystore 正确性。注入内存 keystore，
+      # 避免把 D-Bus / gnome-keyring 的脆弱性带进视觉回归。
+      - run: go build -tags test_keystore -o bin/server ./cmd/server
+        working-directory: neo-src
       - run: pnpm exec playwright install --with-deps chromium
         working-directory: assets
       - run: pnpm run test:vrt || true

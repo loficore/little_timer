@@ -1,7 +1,8 @@
 // Package handlers —— /api/settings/llm:LLM provider 配置读写。
 //
 // 非敏感字段(Provider/BaseURL/Model/MaxTokens/TimeoutSeconds)直接写在
-// `settings` 表的 llm_* 列;API Key 加密后存在 SecretStorage(受主密码保护)。
+// `settings` 表的 llm_* 列;API Key 加密后存在 SecretStorage(受平台 keystore
+// 托管,不再受主口令保护)。
 package handlers
 
 import (
@@ -92,8 +93,8 @@ func LLMSettingsUpdate(c *gin.Context) {
 		timeout = 30
 	}
 
-	// 先判定是否涉及秘钥字段(api_key / clear_key);锁定状态下整个请求
-	// 一并拒绝,避免非密字段已写入却报 423 造成部分写入的不一致体验。
+	// 判定是否涉及秘钥字段(api_key / clear_key)。去锁化(Task 5):不再有
+	// 锁定态,凭据由 keystore 托管,直接进入写入/删除分支。
 	hasAPIKey := false
 	bodyClearKey := false
 	if v, ok := body["api_key"].(string); ok && v != "" {
@@ -103,11 +104,7 @@ func LLMSettingsUpdate(c *gin.Context) {
 		bodyClearKey = true
 	}
 
-	secrets := a.Vault.Secrets()
-	if (hasAPIKey || bodyClearKey) && secrets.IsLocked() {
-		c.JSON(http.StatusLocked, gin.H{"success": false, "code": "auth.master_password_required", "error": "master password required"})
-		return
-	}
+	secrets := a.Secrets()
 
 	if _, err := a.SQLite.DB().Exec(
 		`UPDATE settings
@@ -146,12 +143,12 @@ func readLLMSettings(a *app.App) (*LLMSettingsDTO, error) {
 		return nil, err
 	}
 
-	secrets := a.Vault.Secrets()
-	if !secrets.IsLocked() {
-		if key, err := secrets.Retrieve([]byte(llmAPIKeySecret)); err == nil && len(key) > 0 {
-			d.APIKeySet = true
-			d.APIKeyMasked = maskAPIKey(string(key))
-		}
+	secrets := a.Secrets()
+	// 去锁化(Task 5):直接读取;未配置(ErrSecretNotFound)或 keystore 不可用
+	// (ErrKeystoreUnavailable)时保持默认未设置态,不谎报。
+	if key, err := secrets.Retrieve([]byte(llmAPIKeySecret)); err == nil && len(key) > 0 {
+		d.APIKeySet = true
+		d.APIKeyMasked = maskAPIKey(string(key))
 	}
 
 	if d.Provider == "" {

@@ -10,7 +10,6 @@ import { BackupTab } from "./components/settings/BackupTab";
 import { LLMSettings } from "./components/settings/LLMSettings";
 import { DailySweepSettings } from "./components/settings/DailySweepSettings";
 import { GalleryContent } from "./components/GalleryContent";
-import { MasterPasswordModal } from "./components/MasterPasswordModal";
 import { t, setLanguage } from "./utils/i18n";
 import { getAPIClient } from "./utils/apiClientSingleton";
 import type { BackupConfig } from "./types/api";
@@ -127,8 +126,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
-  const [masterPasswordModalOpen, setMasterPasswordModalOpen] = useState(false);
-  const [masterPasswordModalMode, setMasterPasswordModalMode] = useState<"setup" | "unlock">("setup");
   const animationsEnabled = !isWebViewRuntime();
   const pendingInteractionLabelRef = useRef<string | null>(null);
   const pendingInteractionStartRef = useRef<number>(0);
@@ -373,14 +370,9 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
       };
       void apiClientRef.current.updateBackupConfig(backupConfig)
         .catch((err: unknown) => {
-          const errObj = err as { action?: { type: string; target: string; params?: { mode: string } } };
-          if (errObj.action && errObj.action.type === "show_modal" && errObj.action.target === "master_password") {
-            const mode = errObj.action.params?.mode as "setup" | "unlock" || "setup";
-            setMasterPasswordModalMode(mode);
-            setMasterPasswordModalOpen(true);
-          } else {
-            console.error('Failed to save backup config:', String(err));
-          }
+          // 去锁化（issue #13）：后端不再返回 action/show_modal——
+          // 没有"要用户输主口令"这件事，失败就是普通失败。
+          console.error('Failed to save backup config:', String(err));
         });
     }
   };
@@ -585,17 +577,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
           }));
           onWallpaperChange?.(wallpaper);
         }}
-      />
-
-      <MasterPasswordModal
-        isOpen={masterPasswordModalOpen}
-        mode={masterPasswordModalMode}
-        onSuccess={() => {
-          setMasterPasswordModalOpen(false);
-          setSaveMessage(t("master_password.unlock_success"));
-          setTimeout(() => setSaveMessage(""), 3000);
-        }}
-        onClose={() => setMasterPasswordModalOpen(false)}
       />
     </div>
   );

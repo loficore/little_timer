@@ -35,3 +35,42 @@
 ## 本地（jj-colocated）
 - 用 jj bookmark 对应 GitHub 分支：`jj bookmark create <name> -r @`，推送用 `jj git push`。
 - 定期 `jj git fetch` 同步远程；删除已合并的 bookmark 用 `jj bookmark delete <name>`。
+
+## 一次性凭据迁移（issue #13）
+
+应用启动时会自动完成 v1 主口令 → 平台 keystore 的迁移（见 `internal/keystore/migrate.go`）。
+以下两种情况需要手动介入：
+
+- **headless 环境**（无桌面会话）：先跑 CLI 再起服务。
+- **磁盘上仍是 v1 数据且用户不知道当年那串主口令**：先 `--dry-run` 确认能读懂，
+  再正式执行。
+
+```bash
+# 只校验，不产生任何写（口令错误会被发现）
+LITTLE_TIMER_V1_PASSWORD='...' go run ./cmd/migrate-keystore \
+  --db-path /var/lib/little_timer.db --dry-run
+
+# 正式迁移
+LITTLE_TIMER_V1_PASSWORD='...' go run ./cmd/migrate-keystore \
+  --db-path /var/lib/little_timer.db
+```
+
+主口令优先走环境变量而非 `--password`：命令行参数会进 argv，同机其他用户可从
+`/proc/<pid>/cmdline` 读到。
+
+**幂等**：数据目录下的 `.keystore-migrated` 哨兵存在即跳过，重复执行无副作用。
+迁移的 v1 `secret.db` 不删除、改名为 `secret.db.v1.bak`——删掉就再也回不去了，
+确认新数据可用后可自行清理。
+
+**失败即无副作用**：迁移分两阶段，先把全部内容解密进内存，任一环节失败就在落盘前
+返回。口令错误时磁盘文件保持原样，可以放心重试。
+
+### 集成测试
+
+需要真实 Secret Service daemon（默认构建不跑，CI 的 `keystore-integration` job 会起一个）：
+
+```bash
+dbus-run-session -- \
+  sh -c 'echo -n "" | gnome-keyring-daemon --unlock --daemonize --components=secrets && \
+         go test -tags "linux integration_dbus" ./internal/keystore/'
+```

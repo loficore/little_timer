@@ -65,6 +65,7 @@ func writeSecretV1(t *testing.T, path string, password string, entries map[strin
 // const testDBPath 是测试用的“旧 settings DB 路径”——旧凭据密钥由它派生，
 // fixture 与 MigrateAll 必须用同一个值。
 const testDBPath = "/fake/dbpath"
+
 // fakeCreds 是 SettingsCreds 的测试替身：旧密文存内存，明文经 PutSecret 落进
 // 真实的 SecretStorage v2（fake keystore 驱动，磁盘 envelope 真跑一遍）。
 //

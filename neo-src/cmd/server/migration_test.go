@@ -24,13 +24,13 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"little-timer/internal/crypto"
+	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
 	"little-timer/internal/keystore"
 	"little-timer/internal/keystore/keystoretest"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
-	"little-timer/internal/domain"
 )
 
 // writeV1SecretForMigration 造一个 v1 secret.db（口令 old-pass，内含一条

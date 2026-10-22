@@ -17,7 +17,7 @@ import (
 
 	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
-"little-timer/internal/habits"
+	"little-timer/internal/habits"
 	"little-timer/internal/keystore"
 	"little-timer/internal/log"
 	"little-timer/internal/settings"
@@ -59,7 +59,7 @@ type App struct {
 	// CurrentTimerSessionID 是当前计时会话 ID。
 	CurrentTimerSessionID *int64
 
-// Habits 是 habit 域的用例层；Phase 1 转发到 storage，Phase 2 起
+	// Habits 是 habit 域的用例层；Phase 1 转发到 storage，Phase 2 起
 	// 接管 name 校验、唯一性、默认值、日期默认、进度计算。
 	Habits *habits.Operations
 	// Vault 是凭据 + 备份域的用例层。去锁化后（issue #13）它只保留备份用例，

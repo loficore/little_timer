@@ -308,4 +308,3 @@ func TestCredentialsMigrate_Success(t *testing.T) {
 		t.Errorf("llm_api_key = %q, want sk-key", got)
 	}
 }
-

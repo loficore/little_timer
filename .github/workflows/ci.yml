@@ -179,6 +179,16 @@ jobs:
             KEYRING_PW=lt-ci-keyring
             eval "$(printf "%s\n" "$KEYRING_PW" | gnome-keyring-daemon --unlock)"
             eval "$(printf "%s\n" "$KEYRING_PW" | gnome-keyring-daemon --start --components=secrets)"
+            # 打开 daemon 重启持久性测试的两道破坏性门：
+            #   LT_IT_KEYRING_PASSWORD   —— 与上面 KEYRING_PW 必须一致，测试要用它
+            #                                 把 pkill 掉的 daemon 原样拉回来；
+            #   LT_IT_DESTROY_MASTER_KEY—— 前置清理会删既有 master key。
+            # 在 CI 上开这两道门是安全的：runner 是一次性的，这个 keyring 由本
+            # job 上面的配方刚刚创建，不存在任何值得保护的既有凭据。
+            # 门本身保留 —— 它防的是「开发者在本机跑集成测试时误杀真实 keyring」，
+            # 那个场景与 CI 无关，所以门必须留着、由 CI 显式开。
+            export LT_IT_KEYRING_PASSWORD="$KEYRING_PW"
+            export LT_IT_DESTROY_MASTER_KEY=1
             # -v 是必需的：这些测试在 daemon 不可用时会 t.Skip 而非失败，
             # 不带 -v 的话「全跳过」和「全跑过」在 CI 输出里长得一模一样
             # （都只打印一行 ok）。绿得有没有意义必须一眼可辨。

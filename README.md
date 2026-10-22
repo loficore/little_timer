@@ -16,7 +16,7 @@ Little Timer 是一个基于 Go、Gin、SQLite 和 WebView 开发的跨平台定
 
 侧边栏点击 **AI GTD** 进入随手记页面：
 
-1. 设置 → **AI / LLM** 填写 API Key（先在备份设置解锁主密码，Key 才入加密存储）。
+1. 设置 → **AI / LLM** 填写 API Key。Key 由系统密钥环托管加密后落盘。
 2. 回到 AI GTD 页面，输入一句话按 `Cmd/Ctrl+Enter`。
 3. 后台 worker 异步调用 LLM，2 秒轮询刷新；卡片显示子任务进度，可勾选完成。
 
@@ -25,7 +25,18 @@ Little Timer 是一个基于 Go、Gin、SQLite 和 WebView 开发的跨平台定
 - **云端** — OpenAI 兼容（默认 DeepSeek，含 OpenAI / OpenRouter / Azure OpenAI…）+ Anthropic。
 - **本地** — 走 OpenAI 兼容端点：Ollama / LM Studio / vLLM / llama.cpp server / LocalAI / llamafile 等。
 
-API Key 通过主密码加密落本地 SQLite，**不上传、不入日志**。LLM 配置与数据全部本地化。
+API Key 经系统密钥环托管加密后落本地磁盘，**不上传、不入日志**。LLM 配置与数据全部本地化。
+
+### 凭据安全
+
+API Key、WebDAV / S3 备份凭据由**操作系统原生密钥服务**托管：Linux 走 Secret Service（D-Bus），Android 走 Keystore（优先 StrongBox 安全元件）。应用不再有主口令——保护边界是**你的操作系统登录会话**（桌面端）或**设备锁屏**（Android 端）。
+
+依赖与故障排查：
+
+- 桌面环境（GNOME / KDE / Cinnamon）通常自带密钥服务，开箱即用。
+- **sway / 最小化安装**可能没有。运行 `gnome-keyring-daemon --daemonize --components=secrets`，或安装 KWallet / KeePassXC。
+- 启动时检测不到密钥服务会**直接报错退出**并给出上述命令，而不是静默降级——带着不可解的凭据启动只会让人误以为凭据还在。
+- Windows 暂未接入（见 issue #13）。
 
 ## Scheduler + 智能调度
 

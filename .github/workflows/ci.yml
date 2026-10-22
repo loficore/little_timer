@@ -136,6 +136,38 @@ jobs:
         run: pkill -9 -f "bin/server\|vite" 2>/dev/null || true
 
     # 视觉回归测试：仅在代码验证事件中运行
+  # keystore 集成测试：起一个真实的 Secret Service daemon，让
+  # internal/keystore 的 dbus 集成测试真正跑协议往返。
+  #
+  # 破坏性：该测试会创建/删除 keyring 里的 item，故带 integration_dbus tag，
+  # 默认构建不跑。无 daemon 环境下该 tag 的用例自行 skip。
+  keystore-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: neo-src/go.sum
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y             gnome-keyring             dbus-x11             libsecret-1-dev             libdbus-1-dev             pkg-config             libgtk-4-dev             libwebkitgtk-6.0-dev             libsqlite3-dev
+      - name: 启动内存 keyring（仅本 job 生命周期）
+        run: |
+          # --unlock 让 collection 不需要交互口令；--components=secrets 只加载
+          # Secret Service 组件，不拉起 GNOME shell 依赖。
+          dbus-run-session -- \
+            sh -c 'echo -n "" | gnome-keyring-daemon --unlock --daemonize --components=secrets && \
+                   go test -tags "linux integration_dbus" ./internal/keystore/'
+        working-directory: neo-src
+      - run: go mod tidy
+        working-directory: neo-src
+      - run: go build -o bin/server ./cmd/server
+        working-directory: neo-src
+
   vrt:
     runs-on: ubuntu-latest
     timeout-minutes: 30

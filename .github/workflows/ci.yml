@@ -200,9 +200,11 @@ jobs:
       - run: go build -o bin/server ./cmd/server
         working-directory: neo-src
 
-  # DPAPI 可用性 spike（spec §6.2 待验证项）：证明 GitHub-hosted
-  # windows-latest 会话能否用 crypt32 DPAPI。真实往返断言只在此跑，
-  # Linux 侧仅交叉编译验证。job 名 test-windows 供后续任务扩展步骤。
+  # windows-dpapi 后端正式回归（spike 已完成使命并删除）：纯 windows tag
+  # 跑常量/no-op/往返/篡改负例；integration_dpapi tag 追加错 entropy 直接
+  # syscall 负例（review focus #2/#3）。真实断言只在 GitHub-hosted
+  # windows-latest 上跑，Linux 侧仅交叉编译 vet。job 名 test-windows 供
+  # 后续任务扩展步骤。
   test-windows:
     runs-on: windows-latest
     timeout-minutes: 15
@@ -211,9 +213,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: "1.25.0", cache-dependency-path: neo-src/go.sum }
-      - name: DPAPI spike
+      - name: Windows keystore tests
         working-directory: neo-src
-        run: go test -v -tags "windows integration_dpapi" ./internal/keystore/ -run DpapiSpike
+        run: go test -v -tags windows ./internal/keystore/
+      - name: DPAPI integration negative tests
+        working-directory: neo-src
+        run: go test -v -tags "windows integration_dpapi" ./internal/keystore/
 
   vrt:
     runs-on: ubuntu-latest

@@ -6,8 +6,10 @@
 // 覆盖两面:
 //   - no-op 面:master key 相关方法在 Windows 后端恒为成功(§4.3),
 //     Available 在 CI 会话应探测通过;
-//   - 往返面:Seal 产物经 Unseal 解回原文恒等(正例;篡改与错 entropy
-//     负例由后续任务的集成测试锁定)。
+//   - 往返面:Seal 产物经 Unseal 解回原文恒等(正例),以及 blob 被
+//     篡改任意一字节必拒(负例,review focus #2)。错 entropy 负例依赖
+//     直接 syscall,单独放在 integration_dpapi tag
+//     (见 integration_dpapi_test.go),不混入本文件的纯 windows 测试面。
 // 断言常量逐字值,防止 entropy/标志被无意改动(review focus #3)。
 // 凭据明文与 DPAPI blob 内容永不写日志:失败信息只含长度。
 
@@ -15,6 +17,7 @@ package keystore
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -80,5 +83,34 @@ func TestWindowsSealUnsealRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(got, plaintext) {
 		t.Fatalf("往返不恒等: 明文长度 %d, 解出长度 %d", len(plaintext), len(got))
+	}
+}
+
+// TestUnseal_TamperedBlob —— review focus #2:Seal 产物任意一字节
+// XOR 0xFF 后 Unseal 必须失败,且错误链 errors.Is(err, ErrUnseal)
+// 可匹配(DPAPI blob 的 HMAC 认证覆盖全文,上层据此拒绝写盘)。
+// 逐字节全扫:任意位置的单字节翻转都必须被拒。失败信息只含偏移与
+// 长度,不含 blob 内容。
+func TestUnseal_TamperedBlob(t *testing.T) {
+	ks := windowsStore{}
+
+	blob, err := ks.Seal([]byte("little-timer 篡改负例 payload"))
+	if err != nil {
+		t.Fatalf("Seal 失败: %v", err)
+	}
+	if len(blob) == 0 {
+		t.Fatal("Seal 返回空 blob")
+	}
+
+	for i := range blob {
+		tampered := bytes.Clone(blob)
+		tampered[i] ^= 0xFF
+		got, err := ks.Unseal(tampered)
+		if err == nil {
+			t.Fatalf("偏移 %d 字节翻转(XOR 0xFF)竟被解出 %d 字节 —— blob 未受篡改保护", i, len(got))
+		}
+		if !errors.Is(err, ErrUnseal) {
+			t.Fatalf("偏移 %d 字节翻转的失败未透出 ErrUnseal 链: %v", i, err)
+		}
 	}
 }

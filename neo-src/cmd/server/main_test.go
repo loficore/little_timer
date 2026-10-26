@@ -1,12 +1,13 @@
 // Package main —— Task 6 启动 fail-fast 的单元测试。
 //
-// 覆盖 spec §9 的决策函数 bootstrapKeystore:
-//   - keystore 可用 → EnsureMasterKey 成功,返回 nil;
+// 覆盖 spec §9 的决策函数 bootstrapKeystore(v1 与迁移链删除后的新语义:
+// 没有任何迁移等待分支):
+//   - keystore 可用 → EnsureMasterKey 成功,返回 nil;磁盘上是 v1 文件时
+//     只记一行 warn,不退出、不删文件(TestBootstrap_V1FileWarnsWithoutExiting);
 //   - keystore 可用但 EnsureMasterKey 失败 → fail-fast 错误(同 ErrUnavailable 链);
-//   - keystore 不可用且磁盘上有 v1("LTMSECv1")secret 文件 → errMigrationPending
-//     (main 进入迁移等待模式,Task 8/9 接管);
-//   - keystore 不可用且无 v1 文件 → 错误链保持 keystore.ErrUnavailable,
-//     且错误文案原样透出 §9 的 gnome-keyring 指引(Review Focus #5)。
+//   - keystore 不可用(无论磁盘上有没有 v1 文件)→ 错误链保持
+//     keystore.ErrUnavailable,且错误文案原样透出 §9 的 gnome-keyring 指引
+//     (Review Focus #5)。
 //
 // 不触碰 DB/HTTP:纯决策函数,全部用本地可控 fake 驱动。
 package main
@@ -20,6 +21,7 @@ import (
 	"testing"
 
 	"little-timer/internal/keystore"
+	"little-timer/internal/log"
 )
 
 // keyringGuidanceSubstring —— spec §9 指引中必须透出的可操作命令片段
@@ -93,17 +95,20 @@ func TestBootstrapKeystore(t *testing.T) {
 			},
 		},
 		{
-			name: "available-fail + v1 文件 → errMigrationPending",
+			name: "available-fail + v1 文件 → 同样 fail-fast(迁移链已删除)",
 			ks:   &fakeKeystore{availableErr: unavailableWithGuidance("会话总线上没有密钥服务")},
 			secretPath: func(t *testing.T) string {
 				return writeSecretFile(t, append([]byte("LTMSECv1"), make([]byte, 64)...))
 			},
 			check: func(t *testing.T, err error, ks *fakeKeystore) {
-				if !errors.Is(err, errMigrationPending) {
-					t.Fatalf("期望 errMigrationPending,实际 %v", err)
+				if err == nil {
+					t.Fatal("期望非 nil 错误:v1 文件不再触发迁移等待")
+				}
+				if !errors.Is(err, keystore.ErrUnavailable) {
+					t.Errorf("错误链应可 errors.Is 到 keystore.ErrUnavailable: %v", err)
 				}
 				if ks.ensureCalls != 0 {
-					t.Errorf("迁移等待不应调用 EnsureMasterKey,实际 %d 次", ks.ensureCalls)
+					t.Errorf("Available 失败不应调用 EnsureMasterKey,实际 %d 次", ks.ensureCalls)
 				}
 			},
 		},
@@ -116,9 +121,6 @@ func TestBootstrapKeystore(t *testing.T) {
 				if err == nil {
 					t.Fatal("期望非 nil 错误")
 				}
-				if errors.Is(err, errMigrationPending) {
-					t.Fatalf("无 v1 文件不应进入迁移等待模式: %v", err)
-				}
 				if !errors.Is(err, keystore.ErrUnavailable) {
 					t.Errorf("错误链应可 errors.Is 到 keystore.ErrUnavailable: %v", err)
 				}
@@ -128,14 +130,14 @@ func TestBootstrapKeystore(t *testing.T) {
 			},
 		},
 		{
-			name: "available-fail + v2 文件(非 v1)→ 仍 fail-fast,不进迁移等待",
+			name: "available-fail + v2 文件(非 v1)→ 仍 fail-fast",
 			ks:   &fakeKeystore{availableErr: unavailableWithGuidance("密钥服务未运行")},
 			secretPath: func(t *testing.T) string {
 				return writeSecretFile(t, append([]byte("LTMSEKv2"), make([]byte, 64)...))
 			},
 			check: func(t *testing.T, err error, ks *fakeKeystore) {
-				if err == nil || errors.Is(err, errMigrationPending) {
-					t.Fatalf("v2 文件不构成迁移等待理由,期望 fail-fast 错误,实际 %v", err)
+				if err == nil {
+					t.Fatal("期望 fail-fast 错误")
 				}
 				if !errors.Is(err, keystore.ErrUnavailable) {
 					t.Errorf("错误链应可 errors.Is 到 keystore.ErrUnavailable: %v", err)
@@ -152,8 +154,8 @@ func TestBootstrapKeystore(t *testing.T) {
 				return writeSecretFile(t, []byte("not an envelope at all"))
 			},
 			check: func(t *testing.T, err error, ks *fakeKeystore) {
-				if err == nil || errors.Is(err, errMigrationPending) {
-					t.Fatalf("垃圾前缀不构成迁移等待理由,期望 fail-fast 错误,实际 %v", err)
+				if err == nil {
+					t.Fatal("垃圾前缀不构成豁免理由,期望 fail-fast 错误")
 				}
 			},
 		},
@@ -164,8 +166,8 @@ func TestBootstrapKeystore(t *testing.T) {
 				return writeSecretFile(t, []byte("LTM"))
 			},
 			check: func(t *testing.T, err error, ks *fakeKeystore) {
-				if err == nil || errors.Is(err, errMigrationPending) {
-					t.Fatalf("截断文件不构成迁移等待理由,期望 fail-fast 错误,实际 %v", err)
+				if err == nil {
+					t.Fatal("截断文件不构成豁免理由,期望 fail-fast 错误")
 				}
 			},
 		},
@@ -179,9 +181,6 @@ func TestBootstrapKeystore(t *testing.T) {
 				if err == nil {
 					t.Fatal("期望非 nil 错误")
 				}
-				if errors.Is(err, errMigrationPending) {
-					t.Fatalf("EnsureMasterKey 失败不应转入迁移等待模式: %v", err)
-				}
 				if !errors.Is(err, keystore.ErrUnavailable) {
 					t.Errorf("错误链应保留 keystore.ErrUnavailable: %v", err)
 				}
@@ -194,7 +193,7 @@ func TestBootstrapKeystore(t *testing.T) {
 			},
 		},
 		{
-			name: "v1 文件存在但 keystore 可用 → 正常模式(迁移器 Task 8 处理)",
+			name: "v1 文件存在但 keystore 可用 → 正常模式(仅警告,见专用用例)",
 			ks:   &fakeKeystore{},
 			secretPath: func(t *testing.T) string {
 				return writeSecretFile(t, append([]byte("LTMSECv1"), make([]byte, 64)...))
@@ -226,9 +225,6 @@ func TestBootstrapKeystoreNilKeystore(t *testing.T) {
 	if err == nil {
 		t.Fatal("平台 keystore 未注册必须 fail-fast")
 	}
-	if errors.Is(err, errMigrationPending) {
-		t.Errorf("nil keystore 不应转入迁移等待: %v", err)
-	}
 	if !errors.Is(err, keystore.ErrUnavailable) {
 		t.Errorf("错误链应可 errors.Is 到 keystore.ErrUnavailable: %v", err)
 	}
@@ -257,5 +253,57 @@ func TestCurrentKeystoreUnavailableErrorCarriesGuidance(t *testing.T) {
 	if got := bootstrapKeystore(ks, filepath.Join(t.TempDir(), "secret.db")); got == nil ||
 		!strings.Contains(got.Error(), keyringGuidanceSubstring) {
 		t.Errorf("bootstrapKeystore 应透传指引文案,实际: %v", got)
+	}
+}
+
+// TestBootstrap_V1FileWarnsWithoutExiting —— Review Focus #4:keystore 就绪但
+// 磁盘上仍躺着 v1("LTMSECv1")凭据文件(macOS/Linux 上古数据)时,
+// bootstrapKeystore 必须正常返回 nil、只打一行可操作的 warn 提示,
+// 不退出、不删文件(清除交给用户在设置里做 reset)。
+func TestBootstrap_V1FileWarnsWithoutExiting(t *testing.T) {
+	const wantWarn = "server: 检测到不再支持的 v1 凭据文件,请在设置中重置凭据"
+
+	// internal/log 没有注入点,log.Init(临时目录) 是把日志落到可读文件的
+	// 既有通道(与 internal/log/logger_test.go 走同一 initSink 路径)。
+	logDir := t.TempDir()
+	if err := log.Init(logDir); err != nil {
+		t.Fatalf("log.Init: %v", err)
+	}
+	secretPath := writeSecretFile(t, append([]byte("LTMSECv1"), make([]byte, 64)...))
+
+	ks := &fakeKeystore{}
+	if err := bootstrapKeystore(ks, secretPath); err != nil {
+		t.Fatalf("keystore 可用 + v1 文件应返回 nil(仅警告不退出),实际 %v", err)
+	}
+	if ks.ensureCalls != 1 {
+		t.Errorf("EnsureMasterKey 应恰好调用 1 次,实际 %d 次", ks.ensureCalls)
+	}
+
+	// 文件必须原样在盘:引导路径绝不替用户删数据。
+	raw, err := os.ReadFile(secretPath)
+	if err != nil {
+		t.Fatalf("v1 文件不应被删除: %v", err)
+	}
+	if !strings.HasPrefix(string(raw), "LTMSECv1") {
+		t.Errorf("v1 文件内容被改写: %.8q, want LTMSECv1", raw)
+	}
+
+	// warn 行逐字断言。
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("读日志目录: %v", err)
+	}
+	var captured strings.Builder
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".log") {
+			b, err := os.ReadFile(filepath.Join(logDir, e.Name()))
+			if err != nil {
+				t.Fatalf("读日志文件 %s: %v", e.Name(), err)
+			}
+			captured.Write(b)
+		}
+	}
+	if !strings.Contains(captured.String(), wantWarn) {
+		t.Errorf("日志必须含逐字 warn %q,实际捕获:\n%s", wantWarn, captured.String())
 	}
 }

@@ -362,30 +362,8 @@ func (a *App) Secrets() *crypto.SecretStorage {
 	return a.ensureSecrets()
 }
 
-// MigrateLegacySecrets 用用户补输的 v1 主口令完成一次性凭据迁移。
-//
-// 迁移器的两阶段语义（先解密完再落盘、口令错则零副作用）都在
-// internal/keystore 里；本方法只负责把 App 的接线凑齐 MigrateOptions：
-// secret.db 路径、哨兵位置、DB 路径（v1 凭据密钥由它派生），以及作为
-// SettingsCreds 适配器的 SettingsManager。
-//
-// 错误语义透传给调用方：ErrUnseal = 口令错/文件损坏，ErrUnavailable =
-// keystore 不可用。credentials 端点据此返回 403 / 409。
-func (a *App) MigrateLegacySecrets(password string) error {
-	ks := a.ActiveKeystore()
-	secretPath := secretStorePath(a.DBPath)
-	_, err := keystore.MigrateAll(ks, keystore.MigrateOptions{
-		DBPath:       a.DBPath,
-		SecretPath:   secretPath,
-		SentinelPath: filepath.Join(filepath.Dir(secretPath), keystore.SentinelName),
-		Password:     []byte(password),
-		Creds:        a.Settings,
-	})
-	return err
-}
-
 // ActiveKeystore 返回当前生效的 keystore：注入优先，否则回退平台实现。
-// 导出是因为跨包消费——handlers 的 credentials 端点要拿它做 reset/migrate。
+// 导出是因为跨包消费——handlers 的 credentials 端点要拿它做 reset。
 func (a *App) ActiveKeystore() keystore.Keystore {
 	if a.Keystore != nil {
 		return a.Keystore

@@ -8,8 +8,8 @@
 //   - GenerateKey / GenerateNonce / GenerateSalt —— 随机字节生成。
 //
 // v1 主口令时代的 PBKDF2 派生与口令加密组合
-// (DeriveKey / EncryptWithPassword / DecryptWithPassword)已标
-// Deprecated 并移入 legacy_v1.go;SecretStorage 的 v2 实现见 secret.go。
+// (DeriveKey / EncryptWithPassword / DecryptWithPassword)已随一次性迁移链
+// 整体删除;SecretStorage 的 v2 实现见 secret.go。
 package crypto
 
 import (

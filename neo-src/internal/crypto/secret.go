@@ -4,7 +4,7 @@
 // (消费侧最小接口 Keystore,由 internal/keystore 的平台实现以结构类型
 // 满足),本包只负责"内存明文 cache + JSON 序列化 + 带 magic 前缀的
 // envelope 落盘"。明文只在 Seal/Unseal 前后短暂存在,口令 → 密钥派生
-// 路径已整体删除(见 legacy_v1.go 的 Deprecated 说明)。
+// 路径已整体删除。
 //
 // 磁盘 blob 的 wire format:
 //

@@ -13,7 +13,8 @@
 // SQLite —— 由平台 keystore 托管的 *crypto.SecretStorage(经 SetSecretStore
 // 注入)保存,SQLite 只保留 has_* 布尔标记与非敏感的明文字段(url/bucket/
 // region/prefix 等)。旧的 deriveCredentialKey + AES-GCM 列加密方案已整体
-// 删除,历史密文列停止写入(NULL),清理由 keystore 迁移器负责。
+// 删除,历史密文列停止写入(NULL),残留值由凭据重置(ClearCredentialState)
+// 清理。
 package settings
 
 import (

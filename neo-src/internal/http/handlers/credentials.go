@@ -1,11 +1,11 @@
 // Package handlers —— 凭据端点（取代 v1 的主口令端点，issue #13）。
 //
-// 主口令时代的三件事在这里重新表达，但语义完全不同：
+// 主口令时代的端点在这里重新表达，但语义完全不同：
 //
 //	旧                                  新
 //	GET  /api/backup/master-password    GET  /api/credentials/status
 //	POST /api/backup/master-password    POST /api/credentials/reset
-//	POST /api/backup/unlock             POST /api/credentials/migrate
+//	POST /api/backup/unlock             （无对应物——v1 迁移链已整体删除）
 //	POST /api/backup/lock               （无对应物——没有"锁"这个概念）
 //
 // reset 是破坏性的：它删掉 keystore 里的 master key 并清空全部凭据，
@@ -14,14 +14,11 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
-	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
-	"little-timer/internal/keystore"
 	"little-timer/internal/log"
 )
 
@@ -99,69 +96,6 @@ func CredentialsReset(c *gin.Context) {
 
 	log.Info("credentials.reset ok", "method", "credentials.reset")
 	c.Status(http.StatusNoContent)
-}
-
-// CredentialsMigrate 接收用户补输的 v1 主口令，完成 secret.db 的迁移。
-//
-// 用于"keystore 可用但磁盘上仍是 v1 secret.db"的启动等待态：应用先起、
-// 凭据端点可达，用户输一次口令，迁移完成后凭据即刻可用。
-//
-// 状态码刻意区分三类失败，让前端能给出不同指引：
-//
-//	204 —— 迁移完成（含"本来就是 v2 / 已迁移过"）。
-//	403 —— 主口令错误或 v1 blob 损坏。磁盘未改动，可安全重试。
-//	409 —— keystore 不可用。换个口令没用，得先修环境。
-//	400 —— 请求体缺 password。
-func CredentialsMigrate(c *gin.Context) {
-	a := appFromCtx(c)
-
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false, "error": "missing password",
-		})
-		return
-	}
-
-	ks := a.ActiveKeystore()
-	if err := ks.Available(); err != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"success": false, "error": "系统密钥服务不可用，无法完成迁移",
-		})
-		return
-	}
-
-	err := a.MigrateLegacySecrets(req.Password)
-	switch {
-	case err == nil:
-		log.Info("credentials.migrate ok", "method", "credentials.migrate")
-		c.Status(http.StatusNoContent)
-
-	case errors.Is(err, keystore.ErrUnseal):
-		// 口令错 / blob 损坏。不区分两者（GCM tag 校验失败即两者皆可能），
-		// 对用户而言都是"再输一次"，但明确说清磁盘没被动过。
-		c.JSON(http.StatusForbidden, gin.H{
-			"success": false,
-			"code":    "invalid_legacy_password",
-			"error":   "主口令错误或凭据文件已损坏，未做任何改动",
-		})
-
-	case errors.Is(err, keystore.ErrUnavailable), errors.Is(err, crypto.ErrKeystoreUnavailable):
-		c.JSON(http.StatusConflict, gin.H{
-			"success": false,
-			"code":    "keystore_unavailable",
-			"error":   "系统密钥服务不可用，无法完成迁移",
-		})
-
-	default:
-		log.Error("credentials.migrate failed",
-			"method", "credentials.migrate", "error", err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false, "error": "迁移失败",
-		})
-	}
 }
 
 var _ = domain.CredentialStatus{}

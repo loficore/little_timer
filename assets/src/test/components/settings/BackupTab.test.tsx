@@ -391,7 +391,7 @@ describe("BackupTab", () => {
     await waitFor(() => {
       expect(screen.getByText(t("credentials.backend.windowsDpapi"))).toBeTruthy();
     });
-    expect(screen.getByText(t("credentials.backend.windowsDpapi"))).not.toBe(t("credentials.backend.other"));
+    expect(screen.queryByText(t("credentials.backend.other"))).toBeNull();
   });
 
   it("surfaces backend=unavailable detail instead of prompting to re-enter credentials", async () => {

@@ -1,9 +1,9 @@
-//go:build !linux && !android
+//go:build !linux && !android && !windows && !darwin
 
 // keystore_other_test.go —— other 占位实现的行为测试。
 //
-// 仅在非 linux/android 平台构建运行(在其他平台执行本测试;Linux 本机
-// 因 build tag 跳过,仅断言包可编译)。
+// 仅在非 linux/android/windows/darwin 平台构建运行(在其他平台执行本测试;
+// Linux 本机因 build tag 跳过,仅断言包可编译)。
 
 package keystore
 
@@ -25,7 +25,7 @@ func TestOtherCurrentName(t *testing.T) {
 }
 
 // TestOtherAvailable 断言 Available() 返回 errors.Is(ErrUnavailable) 的错误,
-// 且错误文案含 "Windows/macOS 见 issue #13"。
+// 且错误文案含 "macOS 见后续 issue"。
 func TestOtherAvailable(t *testing.T) {
 	err := Current().Available()
 	if err == nil {
@@ -34,7 +34,7 @@ func TestOtherAvailable(t *testing.T) {
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("Available() err = %v, want errors.Is(ErrUnavailable)", err)
 	}
-	const wantSub = "Windows/macOS 见 issue #13"
+	const wantSub = "macOS 见后续 issue"
 	if !strings.Contains(err.Error(), wantSub) {
 		t.Fatalf("err text = %q, want contains %q", err, wantSub)
 	}

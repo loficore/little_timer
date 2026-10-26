@@ -128,14 +128,15 @@ You can read/update settings via API:
 
 ## Credential Security
 
-API keys and WebDAV / S3 backup credentials are held by the **operating system's native key service**: Secret Service (D-Bus) on Linux, Android Keystore (StrongBox-backed when available) on Android. There is no master password — the protection boundary is your **OS login session** on desktop, or the **device lock screen** on Android.
+API keys and WebDAV / S3 backup credentials are held by the **operating system's native key service**: Secret Service (D-Bus) on Linux, Android Keystore (StrongBox-backed when available) on Android, DPAPI (`CryptProtectData`, bound to the current Windows account, zero configuration) on Windows. There is no master password — the protection boundary is your **OS login account** on desktop, or the **device lock screen** on Android. We make **no hardware-backed promise** (no TPM attestation).
 
 Requirements and troubleshooting:
 
 - Desktop environments (GNOME / KDE / Cinnamon) ship a key service; nothing to do.
 - **sway / minimal installs** often do not. Run `gnome-keyring-daemon --daemonize --components=secrets`, or install KWallet / KeePassXC.
 - If no key service is available at startup, the app **fails fast** with that command in the error message rather than starting with unusable credentials.
-- Windows is not supported yet (see issue #13).
+- **Windows (DPAPI)** needs no service or daemon — it works as soon as you are logged in. DPAPI blobs **cannot be used across accounts or machines**: after switching Windows accounts or moving the install to another machine the existing credentials are guaranteed unreadable (a platform property, not a defect). Use "Reset credentials" in Settings and re-enter your keys to recover.
+- Tamper resistance: flipping any byte of the stored credential blob makes the app either reject it with an error or return content byte-identical to the original plaintext — **credential plaintext can never be silently altered**. Any flip inside the ciphertext/MAC tail (the last 16 bytes of the blob) is always rejected.
 
 ## Tooling
 

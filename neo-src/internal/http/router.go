@@ -216,7 +216,6 @@ func registerBackup(g *gin.RouterGroup) {
 func registerCredentials(g *gin.RouterGroup) {
 	g.GET("/credentials/status", handlers.CredentialsStatus)
 	g.POST("/credentials/reset", handlers.CredentialsReset)
-	g.POST("/credentials/migrate", handlers.CredentialsMigrate)
 }
 
 // 壁纸路由。

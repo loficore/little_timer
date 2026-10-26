@@ -117,7 +117,7 @@ export class APIClient {
     /**
      * 只关心状态码、不解析 body 的请求。
      *
-     * reset / migrate 成功时返回 204 No Content，走 fetchJson 会在
+     * reset 成功时返回 204 No Content，走 fetchJson 会在
      * res.json() 上抛"Unexpected end of JSON input"，把成功报成失败。
      */
     private async request(url: string, options?: RequestInit): Promise<void> {
@@ -488,16 +488,6 @@ export class APIClient {
         await this.request(`${this.baseUrl}/api/credentials/reset`, { method: "POST" });
     }
 
-    /**
-     * 用 v1 主口令完成一次性凭据迁移（启动等待态用）。
-     */
-    async migrateCredentials(password: string): Promise<void> {
-        await this.request(`${this.baseUrl}/api/credentials/migrate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password }),
-        });
-    }
     /**
      * 锁定凭证
      * @returns 返回含成功状态的 Promise

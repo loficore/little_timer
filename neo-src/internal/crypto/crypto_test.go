@@ -1,9 +1,8 @@
-// Package crypto —— 加密原语测试(encryption.go + legacy_v1.go)。
+// Package crypto —— 加密原语测试(encryption.go)。
 //
-// 只测公开接口:往返一致性、篡改检测、错误密钥拒绝、密钥派生的确定性。
-// v1 口令派生原语(DeriveKey / EncryptWithPassword / DecryptWithPassword)
-// 的测试随函数迁移保留在此;SecretStorage v2 的行为测试见同目录
-// secret_v2_test.go(外部测试包)。
+// 只测公开接口:往返一致性、篡改检测、错误密钥拒绝。
+// v1 口令派生原语已随迁移链整体删除,对应测试一并移除;SecretStorage v2
+// 的行为测试见同目录 secret_v2_test.go(外部测试包)。
 package crypto
 
 import (
@@ -89,63 +88,6 @@ func TestDecryptRejectsShortBlob(t *testing.T) {
 	_, err := Decrypt([]byte{0x01, 0x02}, GenerateKey())
 	if !errors.Is(err, ErrAuthenticationFailed) {
 		t.Fatalf("err = %v, want ErrAuthenticationFailed", err)
-	}
-}
-
-// EncryptWithPassword / DecryptWithPassword。
-
-func TestPasswordRoundTrip(t *testing.T) {
-	plaintext := []byte("the cake is a lie")
-	password := []byte("hunter2")
-
-	blob, err := EncryptWithPassword(plaintext, password)
-	if err != nil {
-		t.Fatalf("EncryptWithPassword: %v", err)
-	}
-	got, err := DecryptWithPassword(blob, password)
-	if err != nil {
-		t.Fatalf("DecryptWithPassword: %v", err)
-	}
-	if !bytes.Equal(got, plaintext) {
-		t.Fatalf("plaintext mismatch")
-	}
-}
-
-func TestPasswordRoundTripWrongPassword(t *testing.T) {
-	blob, err := EncryptWithPassword([]byte("x"), []byte("hunter2"))
-	if err != nil {
-		t.Fatalf("EncryptWithPassword: %v", err)
-	}
-	if _, err := DecryptWithPassword(blob, []byte("hunter3")); !errors.Is(err, ErrAuthenticationFailed) {
-		t.Fatalf("err = %v, want ErrAuthenticationFailed", err)
-	}
-}
-
-// DeriveKey。
-
-func TestDeriveKeyDeterministic(t *testing.T) {
-	password := []byte("password")
-	salt := GenerateSalt()
-
-	k1, err := DeriveKey(password, salt)
-	if err != nil {
-		t.Fatalf("DeriveKey #1: %v", err)
-	}
-	k2, err := DeriveKey(password, salt)
-	if err != nil {
-		t.Fatalf("DeriveKey #2: %v", err)
-	}
-	if !bytes.Equal(k1, k2) {
-		t.Fatalf("DeriveKey not deterministic: %x vs %x", k1, k2)
-	}
-	if len(k1) != AES256GCMKeySize {
-		t.Fatalf("key length = %d, want %d", len(k1), AES256GCMKeySize)
-	}
-}
-
-func TestDeriveKeyWrongSaltSize(t *testing.T) {
-	if _, err := DeriveKey([]byte("x"), []byte("short")); !errors.Is(err, ErrInvalidKeyLength) {
-		t.Fatalf("err = %v, want ErrInvalidKeyLength", err)
 	}
 }
 

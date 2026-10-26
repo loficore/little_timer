@@ -13,7 +13,8 @@
 // SQLite —— 由平台 keystore 托管的 *crypto.SecretStorage(经 SetSecretStore
 // 注入)保存,SQLite 只保留 has_* 布尔标记与非敏感的明文字段(url/bucket/
 // region/prefix 等)。旧的 deriveCredentialKey + AES-GCM 列加密方案已整体
-// 删除,历史密文列停止写入(NULL),清理由 keystore 迁移器负责。
+// 删除,历史密文列停止写入(NULL),残留值由凭据重置(ClearCredentialState)
+// 清理。
 package settings
 
 import (
@@ -34,8 +35,8 @@ import (
 	"little-timer/internal/storage"
 )
 
-// SecretStorage 中三个凭据字段的 key 名 —— spec §6 约定,keystore 迁移器
-// (Task 8)按同样的名字写入。
+// SecretStorage 中三个凭据字段的 key 名 —— spec §6 约定,settings 与
+// SecretStorage 之间的凭据条目一律按这三个名字读写。
 const (
 	SecretWebDAVPassword = "webdav_password"
 	SecretS3AccessKey    = "s3_access_key"
@@ -127,8 +128,8 @@ func newFromSqlite(mgr *storage.SqliteManager) (*SettingsManager, error) {
 	return sm, nil
 }
 
-// SetSecretStore 注入 keystore envelope 凭据存储(Task 3 的
-// *crypto.SecretStorage)。接线即回填:非 nil 时立即复用既有读路径
+// SetSecretStore 注入 keystore envelope 凭据存储
+// (*crypto.SecretStorage)。接线即回填:非 nil 时立即复用既有读路径
 // (loadBackupConfigFromDB)重拉 backup_config,把 has_*=1 的凭据灌回内存
 // —— 消除构造窗口期(loadAll 未接线、凭据读成空串)里任何变更触发的 Save
 // 用空值对着健康 store 误删真实 secrets 的时序危害。调用方无需在接线后再
@@ -546,9 +547,9 @@ func (sm *SettingsManager) saveSettingsToDB() error {
 // settings/crypto/backup 边界自包含。
 //
 // webdav_password_encrypted / s3_access_key_encrypted /
-// s3_secret_key_encrypted:凭据不再写入,恒写 NULL;列本身留待 keystore
-// 迁移器(Task 8)清理,本期不做破坏性 schema 变更。真正的凭据值经
-// SecretStorage 分流,SQLite 只记 has_* 标记。
+// s3_secret_key_encrypted:凭据不再写入,恒写 NULL;列本身保留(Path B,
+// 不做破坏性 schema 变更),重置路径(ClearLegacyState)把残值清零。真正的
+// 凭据值经 SecretStorage 分流,SQLite 只记 has_* 标记。
 
 const backupConfigSQL = `INSERT OR REPLACE INTO backup_config (
     id, target_type, enabled, auto_backup, auto_backup_interval,

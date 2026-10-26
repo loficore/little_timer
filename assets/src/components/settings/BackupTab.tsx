@@ -76,6 +76,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
   const credentialBackendKey = (backend: string): string => {
     if (backend === "secret-service") return "secretService";
     if (backend === "android-keystore") return "androidKeystore";
+    if (backend === "windows-dpapi") return "windowsDpapi";
     return "other";
   };
 

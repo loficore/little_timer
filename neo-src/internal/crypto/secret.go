@@ -4,7 +4,7 @@
 // (消费侧最小接口 Keystore,由 internal/keystore 的平台实现以结构类型
 // 满足),本包只负责"内存明文 cache + JSON 序列化 + 带 magic 前缀的
 // envelope 落盘"。明文只在 Seal/Unseal 前后短暂存在,口令 → 密钥派生
-// 路径已整体删除(见 legacy_v1.go 的 Deprecated 说明)。
+// 路径已整体删除。
 //
 // 磁盘 blob 的 wire format:
 //
@@ -12,7 +12,8 @@
 //
 // Seal 的明文载荷为 `{"key": base64(value), …}`(与 v1 相同);Seal 产物
 // 的布局由平台实现决定(Linux 后端为 nonce(12) || ciphertext || tag(16))。
-// v1 文件("LTMSECv1")由 keystore 迁移器一次性处理,本薄壳不读取。
+// v1 文件("LTMSECv1")不再支持读取(迁移链已整体删除);盘上遗留的 v1
+// 文件由用户在设置中触发重置(Reset)物理清理。
 //
 // 依赖边界:本包不 import internal/keystore —— keystore 的平台实现文件
 // 反向使用本包的 AES-GCM 原语,直接 import 会构成编译环;因此这里声明
@@ -46,7 +47,7 @@ const (
 
 	// ErrKeystoreUnavailable —— master key 托管不可用:key 缺失、
 	// Seal/Unseal 失败(如 keyring 被重置)时透出。语义 =「现有凭据
-	// 读不出来,需要走重置/迁移流程」,调用方不得当成"用户没设置过
+	// 读不出来,需要走重置流程」,调用方不得当成"用户没设置过
 	// secret"静默处理(spec §10;Review Focus #2)。
 	ErrKeystoreUnavailable SecretError = "keystore unavailable"
 )
@@ -93,7 +94,9 @@ type SecretStorage struct {
 	//     防止调用方把 keyring 被重置误读成"用户没设过凭据";
 	//   - 写操作(Store/Delete/Clear)必须拒绝 —— Seal 可能仍成功,放行
 	//     会让原子替换用"内存子集"覆盖磁盘 blob,既有凭据永久丢失;
-	//   - LoadFailure() 供启动流程(spec §9)显式查询。
+	//   - LoadFailure() 供启动流程(spec §9)显式查询;
+	//   - 例外:Reset() 是设计好的逃生通道(spec W5),不受本拒绝约束 ——
+	//     它承载"解不开的文件本就该丢弃"的语义,见 Reset 注释。
 	loadFailure error
 }
 
@@ -132,7 +135,8 @@ func NewSecretStorage(filePath string, ks Keystore) *SecretStorage {
 	if !has {
 		s.loadFailure = fmt.Errorf("%w: master key 不在托管中,既有 secret 不可读",
 			ErrKeystoreUnavailable)
-		// 不 fail 构造:让启动流程/迁移器(Task 8)决定退出还是重建。
+		// 不 fail 构造:失败态经 LoadFailure 透出,去留由启动流程与用户
+		// (设置中重置凭据)决定。
 		log.Warn("crypto: keystore key missing, secrets unusable")
 		return s
 	}
@@ -210,7 +214,35 @@ func (s *SecretStorage) Clear() error {
 	return s.persistLocked()
 }
 
-// Items 返回当前 cache 中的全部 key(按字典序升序),供迁移器与 settings
+// Reset 强制清空并清盘:载入失败态下唯一的写路径逃生通道(spec W5)。
+// Clear 在失败态会拒绝 —— 那是为了保护磁盘上的既有凭据;而"重置"的语义
+// 恰恰是宣告这些凭据可以丢弃(blob 解不开,如被拷到另一 Windows 账户),
+// 所以 Reset 有意绕过 refuseLoadFailedLocked,否则用户将被 500 锁死。
+//
+// 锁内动作:逐值 zeroBytes 擦除明文 cache 后 delete(与 Clear 同法);
+// loadFailure 置 nil;filePath != "" 时 os.Remove 删除磁盘文件,
+// os.IsNotExist 视为成功,其他错误透出。不落盘 —— 重置后不存在"空 blob",
+// 首次 Store 时再创建,等价于新装。幂等:干净态下重复调用仍返回 nil;
+// 纯内存模式(filePath=="")只清 cache。
+func (s *SecretStorage) Reset() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for k, v := range s.secrets {
+		zeroBytes(v)
+		delete(s.secrets, k)
+	}
+	s.loadFailure = nil
+	if s.filePath == "" {
+		return nil // 纯内存模式:无盘可清。
+	}
+	if err := os.Remove(s.filePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("%w: 删除 secret 文件失败: %v", ErrSecretIO, err)
+	}
+	return nil
+}
+
+// Items 返回当前 cache 中的全部 key(按字典序升序),供 settings
 // 反查 has_* 标记使用。载入失败态一律透出 loadFailure 而不是空列表
 // (写路径已被拒绝,cache 在失败态下必为空)。
 func (s *SecretStorage) Items() ([]string, error) {
@@ -229,7 +261,7 @@ func (s *SecretStorage) Items() ([]string, error) {
 }
 
 // LoadFailure 返回构造时磁盘 secret 加载失败的原因,干净时为 nil。启动
-// 流程(spec §9,Task 6/8)以此区分"磁盘 store 读不出来(需重置/迁移)"
+// 流程(spec §9)以此区分"磁盘 store 读不出来(需重置)"
 // 与"新装(从未有过 secret)"。返回的错误链保留 crypto 与 keystore 两侧
 // 哨兵,可用 errors.Is 匹配。
 func (s *SecretStorage) LoadFailure() error {
@@ -262,7 +294,7 @@ func (s *SecretStorage) loadV2() error {
 		return fmt.Errorf("%w: 读取 secret 文件失败: %v", ErrSecretIO, err)
 	}
 	if !bytes.HasPrefix(data, secretMagic) {
-		return fmt.Errorf("%w: 文件前缀不是 %q(未加密或 v1 遗留文件,需迁移)",
+		return fmt.Errorf("%w: 文件前缀不是 %q(未加密或 v1 遗留文件,请在设置中重置凭据)",
 			ErrSecretDecryptionFailed, secretMagic)
 	}
 

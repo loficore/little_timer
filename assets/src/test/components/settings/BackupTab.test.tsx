@@ -376,6 +376,24 @@ describe("BackupTab", () => {
     expect(screen.queryByTestId("master-password-modal")).toBeNull();
   });
 
+  it("renders the Windows DPAPI backend label for backend=windows-dpapi", async () => {
+    mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.getCredentialStatus.mockResolvedValue({
+      backend: "windows-dpapi",
+      detail: "",
+      has_secret: false
+    });
+
+    render(<BackupTab config={{ backup_target_type: "webdav", backup_webdav_url: "http://x" }} onChange={vi.fn()} />);
+
+    // 未识别的后端会兜底成 "其他"；新增 windows-dpapi 映射后
+    // 必须渲染专属文案，不能裸奔原始标识也不兜底。
+    await waitFor(() => {
+      expect(screen.getByText(t("credentials.backend.windowsDpapi"))).toBeTruthy();
+    });
+    expect(screen.queryByText(t("credentials.backend.other"))).toBeNull();
+  });
+
   it("surfaces backend=unavailable detail instead of prompting to re-enter credentials", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
     mockApiClient.getCredentialStatus.mockResolvedValue({

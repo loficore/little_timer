@@ -29,14 +29,15 @@ API Key 经系统密钥环托管加密后落本地磁盘，**不上传、不入�
 
 ### 凭据安全
 
-API Key、WebDAV / S3 备份凭据由**操作系统原生密钥服务**托管：Linux 走 Secret Service（D-Bus），Android 走 Keystore（优先 StrongBox 安全元件）。应用不再有主口令——保护边界是**你的操作系统登录会话**（桌面端）或**设备锁屏**（Android 端）。
+API Key、WebDAV / S3 备份凭据由**操作系统原生密钥服务**托管：Linux 走 Secret Service（D-Bus），Android 走 Keystore（优先 StrongBox 安全元件），Windows 走 DPAPI（`CryptProtectData`，绑定当前登录账户，零配置）。应用不再有主口令——保护边界是**你的操作系统登录账户**（桌面端）或**设备锁屏**（Android 端）。**不承诺硬件背书**（无 TPM 背书承诺）。
 
 依赖与故障排查：
 
 - 桌面环境（GNOME / KDE / Cinnamon）通常自带密钥服务，开箱即用。
 - **sway / 最小化安装**可能没有。运行 `gnome-keyring-daemon --daemonize --components=secrets`，或安装 KWallet / KeePassXC。
 - 启动时检测不到密钥服务会**直接报错退出**并给出上述命令，而不是静默降级——带着不可解的凭据启动只会让人误以为凭据还在。
-- Windows 暂未接入（见 issue #13）。
+- **Windows（DPAPI）** 无需任何服务或守护进程，登录即用。DPAPI blob **无法跨账户/跨机使用**：换了 Windows 账户或搬了机器后既有凭据必然解不开（这是平台特性而非缺陷），在设置中执行"重置凭据"后重新填写即可恢复。
+- 篡改防护口径：对磁盘上凭据 blob 的任意单字节翻转，应用要么报错拒读、要么返回与原明文逐字节相同的结果——**凭据明文内容不可能被静默改写**；密文/MAC 尾部（blob 末 16 字节）的任意翻转必拒。
 
 ## Scheduler + 智能调度
 

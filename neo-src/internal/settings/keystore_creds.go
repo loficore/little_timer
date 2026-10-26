@@ -76,6 +76,7 @@ func (sm *SettingsManager) ClearLegacyState() error {
 	return nil
 }
 
-// sm.secretStore 的类型来自 crypto.SecretStorage —— 显式标注一句，
-// 避免将来 crypto 侧重构时这里静默失配。
-var _ *crypto.SecretStorage
+// 编译期绑定：sm.secretStore 必须保持 *crypto.SecretStorage 类型 ——
+// crypto 侧重构改类型时这里直接编译失败（原 `var _ *crypto.SecretStorage`
+// 不引用字段，是假断言，已替换）。
+var _ = func(sm *SettingsManager) *crypto.SecretStorage { return sm.secretStore }

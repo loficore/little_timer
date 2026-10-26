@@ -320,7 +320,7 @@ func TestV2StoreRefusesWhenLoadFailed(t *testing.T) {
 	broken.unsealErr = fmt.Errorf("%w: 模拟 keyring 重置", keystore.ErrUnseal)
 	reloaded := crypto.NewSecretStorage(path, broken)
 
-	// 失败态必须可显式查询(启动门禁 Task 6/8 的信号源)。
+	// 失败态必须可显式查询(启动门禁与重置路径的信号源)。
 	if lf := reloaded.LoadFailure(); !errors.Is(lf, crypto.ErrKeystoreUnavailable) {
 		t.Fatalf("LoadFailure() = %v, want 可链到 ErrKeystoreUnavailable", lf)
 	}
@@ -434,7 +434,7 @@ func TestV2ErrKeystoreUnavailableIsChainable(t *testing.T) {
 func TestV2CorruptFileIsNotSilentlyEmpty(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secret.db")
-	// 模拟 v1 遗留文件:前缀 LTMSECv1 —— v2 薄壳拒绝读取(迁移归 Task 8)。
+	// 模拟 v1 遗留文件:前缀 LTMSECv1 —— v2 薄壳拒绝读取(只能由用户在设置中重置清盘)。
 	if err := os.WriteFile(path, []byte("LTMSECv1-some-legacy-bytes"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

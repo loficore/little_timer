@@ -47,7 +47,7 @@ const (
 
 	// ErrKeystoreUnavailable —— master key 托管不可用:key 缺失、
 	// Seal/Unseal 失败(如 keyring 被重置)时透出。语义 =「现有凭据
-	// 读不出来,需要走重置/迁移流程」,调用方不得当成"用户没设置过
+	// 读不出来,需要走重置流程」,调用方不得当成"用户没设置过
 	// secret"静默处理(spec §10;Review Focus #2)。
 	ErrKeystoreUnavailable SecretError = "keystore unavailable"
 )
@@ -135,7 +135,8 @@ func NewSecretStorage(filePath string, ks Keystore) *SecretStorage {
 	if !has {
 		s.loadFailure = fmt.Errorf("%w: master key 不在托管中,既有 secret 不可读",
 			ErrKeystoreUnavailable)
-		// 不 fail 构造:让启动流程/迁移器(Task 8)决定退出还是重建。
+		// 不 fail 构造:失败态经 LoadFailure 透出,去留由启动流程与用户
+		// (设置中重置凭据)决定。
 		log.Warn("crypto: keystore key missing, secrets unusable")
 		return s
 	}
@@ -241,7 +242,7 @@ func (s *SecretStorage) Reset() error {
 	return nil
 }
 
-// Items 返回当前 cache 中的全部 key(按字典序升序),供迁移器与 settings
+// Items 返回当前 cache 中的全部 key(按字典序升序),供 settings
 // 反查 has_* 标记使用。载入失败态一律透出 loadFailure 而不是空列表
 // (写路径已被拒绝,cache 在失败态下必为空)。
 func (s *SecretStorage) Items() ([]string, error) {
@@ -260,7 +261,7 @@ func (s *SecretStorage) Items() ([]string, error) {
 }
 
 // LoadFailure 返回构造时磁盘 secret 加载失败的原因,干净时为 nil。启动
-// 流程(spec §9,Task 6/8)以此区分"磁盘 store 读不出来(需重置/迁移)"
+// 流程(spec §9)以此区分"磁盘 store 读不出来(需重置)"
 // 与"新装(从未有过 secret)"。返回的错误链保留 crypto 与 keystore 两侧
 // 哨兵,可用 errors.Is 匹配。
 func (s *SecretStorage) LoadFailure() error {
@@ -293,7 +294,7 @@ func (s *SecretStorage) loadV2() error {
 		return fmt.Errorf("%w: 读取 secret 文件失败: %v", ErrSecretIO, err)
 	}
 	if !bytes.HasPrefix(data, secretMagic) {
-		return fmt.Errorf("%w: 文件前缀不是 %q(未加密或 v1 遗留文件,需迁移)",
+		return fmt.Errorf("%w: 文件前缀不是 %q(未加密或 v1 遗留文件,请在设置中重置凭据)",
 			ErrSecretDecryptionFailed, secretMagic)
 	}
 

@@ -83,6 +83,12 @@ jobs:
         working-directory: neo-src
       - run: go vet ./...
         working-directory: neo-src
+      # Windows 交叉门禁:Linux 侧只做交叉编译 + vet(真实 DPAPI 断言由下方
+      # test-windows job 在 windows-latest 上跑)。CGO_ENABLED=0 同时钉住
+      # keystore Windows 后端"无 cgo、直调 crypt32"的约束(spec 决策 W1)。
+      - name: Windows cross-compile gate
+        run: CGO_ENABLED=0 GOOS=windows go build ./... && CGO_ENABLED=0 GOOS=windows go vet ./...
+        working-directory: neo-src
 
     # 端到端测试：构建前后端后运行真实用户旅程
   e2e:
@@ -203,8 +209,8 @@ jobs:
   # windows-dpapi 后端正式回归（spike 已完成使命并删除）：纯 windows tag
   # 跑常量/no-op/往返/篡改负例；integration_dpapi tag 追加错 entropy 直接
   # syscall 负例（review focus #2/#3）。真实断言只在 GitHub-hosted
-  # windows-latest 上跑，Linux 侧仅交叉编译 vet。job 名 test-windows 供
-  # 后续任务扩展步骤。
+  # windows-latest 上跑；Linux 侧的交叉编译 build+vet 门禁由上方 backend
+  # job 的 "Windows cross-compile gate" 步骤承担。
   test-windows:
     runs-on: windows-latest
     timeout-minutes: 15

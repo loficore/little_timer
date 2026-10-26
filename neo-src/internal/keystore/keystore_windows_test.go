@@ -7,7 +7,10 @@
 //   - no-op 面:master key 相关方法在 Windows 后端恒为成功(§4.3),
 //     Available 在 CI 会话应探测通过;
 //   - 往返面:Seal 产物经 Unseal 解回原文恒等(正例),以及 blob 被
-//     篡改任意一字节必拒(负例,review focus #2)。错 entropy 负例依赖
+//     篡改后的完整性负例(review focus #2):逐字节翻转断言"拒绝或
+//     明文不变"(DPAPI 头部元数据不受外层 HMAC 覆盖,翻转后仍可安全
+//     解回原文,详见 TestUnseal_TamperedBlob_NoSilentContentChange),
+//     并对尾部密文/MAC 区单独断言必拒。错 entropy 负例依赖
 //     直接 syscall,单独放在 integration_dpapi tag
 //     (见 integration_dpapi_test.go),不混入本文件的纯 windows 测试面。
 // 断言常量逐字值,防止 entropy/标志被无意改动(review focus #3)。
@@ -86,15 +89,33 @@ func TestWindowsSealUnsealRoundTrip(t *testing.T) {
 	}
 }
 
-// TestUnseal_TamperedBlob —— review focus #2:Seal 产物任意一字节
-// XOR 0xFF 后 Unseal 必须失败,且错误链 errors.Is(err, ErrUnseal)
-// 可匹配(DPAPI blob 的 HMAC 认证覆盖全文,上层据此拒绝写盘)。
-// 逐字节全扫:任意位置的单字节翻转都必须被拒。失败信息只含偏移与
-// 长度,不含 blob 内容。
-func TestUnseal_TamperedBlob(t *testing.T) {
+// TestUnseal_TamperedBlob_NoSilentContentChange —— review focus #2 的真实
+// 完整性不变量(替代早期"任意一字节翻转必拒"的错误前提,后者在真实
+// Windows CI run 40306855467 上被证伪):
+//
+// DPAPI blob 头部(version dword + provider GUID,偏移约 0-19)是元数据,
+// 不被外层 HMAC 覆盖;CURRENT_USER 作用域用默认 provider 解 blob 时
+// CryptUnprotectData 忽略这些字节,翻转后照常解回完全相同的原文。因此
+// 对 Seal 产物的每一个字节偏移,翻转(XOR 0xFF)后 Unseal 必须满足其一:
+//
+//	(a) 返回错误且 errors.Is(err, ErrUnseal)(篡改被 HMAC 检出而拒绝),或
+//	(b) 解回的明文与 Seal 输入 bytes.Equal 恒等(惰性元数据,内容未变)。
+//
+// 成功且明文改变是唯一的真实违规(静默内容篡改),收集并列出全部违规
+// 偏移。另断言至少存在一个 (a) 类拒绝:若所有偏移都走 (b) 直通,
+// HMAC 完整性不可观测,测试必须变红(防止整段假绿)。
+//
+// 聚焦子断言:blob 末尾 16 字节(密文/MAC 尾区,不依赖头部精确布局)
+// 的每个偏移翻转后必须得到 (a) 类拒绝 —— "密文区篡改必拒"。若未来 CI
+// 显示尾区也能直通,那是真实的完整性红灯,保持断言让其暴露。
+//
+// 每个偏移翻转前 bytes.Clone,避免翻转叠加。失败信息只含偏移与长度,
+// 不含明文与 blob 内容。
+func TestUnseal_TamperedBlob_NoSilentContentChange(t *testing.T) {
 	ks := windowsStore{}
 
-	blob, err := ks.Seal([]byte("little-timer 篡改负例 payload"))
+	plaintext := []byte("little-timer 篡改负例 payload")
+	blob, err := ks.Seal(plaintext)
 	if err != nil {
 		t.Fatalf("Seal 失败: %v", err)
 	}
@@ -102,15 +123,51 @@ func TestUnseal_TamperedBlob(t *testing.T) {
 		t.Fatal("Seal 返回空 blob")
 	}
 
+	var silentChanges []int
+	rejections := 0
 	for i := range blob {
 		tampered := bytes.Clone(blob)
 		tampered[i] ^= 0xFF
 		got, err := ks.Unseal(tampered)
+		switch {
+		case err != nil:
+			if !errors.Is(err, ErrUnseal) {
+				t.Fatalf("偏移 %d 字节翻转的失败未透出 ErrUnseal 链: %v", i, err)
+			}
+			rejections++
+		case bytes.Equal(got, plaintext):
+			// 惰性元数据字节:篡改未被 HMAC 覆盖但内容原样解回,允许
+		default:
+			silentChanges = append(silentChanges, i)
+		}
+	}
+	if len(silentChanges) > 0 {
+		t.Fatalf("偏移 %v 字节翻转(XOR 0xFF)后成功解出与原文不同的明文(原文长度 %d)—— 静默内容篡改,完整性不变量被破坏",
+			silentChanges, len(plaintext))
+	}
+	if rejections == 0 {
+		t.Fatalf("blob 长度 %d 的全部偏移翻转均直通(0 次拒绝)—— HMAC 完整性不可观测", len(blob))
+	}
+
+	tailStart := len(blob) - 16
+	if tailStart < 0 {
+		tailStart = 0
+	}
+	var tailPass []int
+	for i := tailStart; i < len(blob); i++ {
+		tampered := bytes.Clone(blob)
+		tampered[i] ^= 0xFF
+		_, err := ks.Unseal(tampered)
 		if err == nil {
-			t.Fatalf("偏移 %d 字节翻转(XOR 0xFF)竟被解出 %d 字节 —— blob 未受篡改保护", i, len(got))
+			tailPass = append(tailPass, i)
+			continue
 		}
 		if !errors.Is(err, ErrUnseal) {
-			t.Fatalf("偏移 %d 字节翻转的失败未透出 ErrUnseal 链: %v", i, err)
+			t.Fatalf("尾区偏移 %d 字节翻转的失败未透出 ErrUnseal 链: %v", i, err)
 		}
+	}
+	if len(tailPass) > 0 {
+		t.Fatalf("密文/MAC 尾区(末 %d 字节,偏移 %v 起,blob 长度 %d)中偏移 %v 翻转后竟被成功解出 —— 密文区篡改必拒",
+			len(blob)-tailStart, tailStart, len(blob), tailPass)
 	}
 }

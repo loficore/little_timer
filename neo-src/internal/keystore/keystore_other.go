@@ -1,6 +1,6 @@
-//go:build !linux && !android
+//go:build !linux && !android && !windows && !darwin
 
-// keystore_other.go —— `!linux && !android` 平台的占位实现:
+// keystore_other.go —— `!linux && !android && !windows && !darwin` 平台的占位实现:
 // 除 Name 外所有方法返回 ErrUnavailable(包文档见 keystore.go)。
 
 package keystore
@@ -9,7 +9,7 @@ import "fmt"
 
 // errOtherUnavailable 是占位实现的固定错误文案。
 var errOtherUnavailable = fmt.Errorf(
-	"%w: 本平台暂未实现原生密钥托管(Windows/macOS 见 issue #13 后续)",
+	"%w: 本平台暂未实现原生密钥托管(macOS 见后续 issue)",
 	ErrUnavailable,
 )
 

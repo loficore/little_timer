@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-// Version 是人可读的发布 tag。每次发布递增；与 cliff.toml 的 `version`
-// 字段保持一致。
-var Version = "1.1.0"
+// Version 是人可读的发布 tag。每次发布递增，与发布时打的 git tag 保持一致
+// （打包时 release.yml 会用 ldflags 覆盖它，源码里的值是无 flag 构建的兜底）。
+var Version = "2.0.0"
 
 // BuildTime 在包初始化时捕获。它实际是二进制被加载的时间 —— 对于
 // “这个二进制是什么时候组装的”这一目的，足够接近构建时间了。

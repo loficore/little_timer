@@ -198,3 +198,45 @@ func TestCredentialsReset_ClearsSecretsAndFlags(t *testing.T) {
 		t.Errorf("has_webdav_password = %d, want 0（重置后必须清标记）", has)
 	}
 }
+
+// TestCredentialsReset_WithLoadFailurePurgesFile 覆盖 Review Focus #1：
+// secret.db 拷自另一台机器/账户（master key 不在托管中而磁盘 blob 仍在）
+// 的损坏对状态下，reset 原先返回 500，用户被永久锁死。现在必须走 Reset
+// 逃生通道返回 **204**，且 secret.db 被物理清盘、store 回到干净态。
+func TestCredentialsReset_WithLoadFailurePurgesFile(t *testing.T) {
+	a, tmpDir := newCredentialsTestApp(t, true)
+	if err := a.Secrets().Store([]byte("llm_api_key"), []byte("sk-x")); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	secretPath := filepath.Join(tmpDir, "secret.db")
+	if _, err := os.Stat(secretPath); err != nil {
+		t.Fatalf("前提不成立：store 后应有 secret.db: %v", err)
+	}
+
+	// 构造损坏对：master key 不托管（hasKey=false）但磁盘 blob 仍在。
+	// 换 App 重建以绕过 Secrets() 的 sync.Once（与 status 侧同款手法）。
+	a2 := app.NewApp(a.Clock, a.Settings, a.SQLite, a.Backup, a.DBPath)
+	a2.Keystore = keystoretest.New("secret-service", false)
+	_ = a2.Secrets()
+	if lf := a2.Secrets().LoadFailure(); lf == nil {
+		t.Fatal("前提不成立：期望载入失败态，LoadFailure() 却为 nil")
+	}
+
+	w := doJSON(t, setupCredentialsRouter(t, a2), http.MethodPost, "/api/credentials/reset", nil)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("载入失败态下 reset = %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(secretPath); !os.IsNotExist(err) {
+		t.Errorf("reset 后 secret.db 仍在盘上: stat = %v", err)
+	}
+	if lf := a2.Secrets().LoadFailure(); lf != nil {
+		t.Errorf("reset 后 LoadFailure() = %v, want nil（失败态已被逃生通道清除）", lf)
+	}
+	names, err := a2.Secrets().Items()
+	if err != nil {
+		t.Fatalf("reset 后 Items: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("reset 后 Items = %v, want 空", names)
+	}
+}

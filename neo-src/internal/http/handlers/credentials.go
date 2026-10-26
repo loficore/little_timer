@@ -38,7 +38,13 @@ func CredentialsStatus(c *gin.Context) {
 // 副作用（顺序固定）：
 //  1. DeleteMasterKey + EnsureMasterKey —— 换一把全新的 master key；
 //     旧 key 加密的一切都再也解不开，这是"重置"的本质。
-//  2. Secrets().Clear() —— 落一份空的 v2 envelope，确认新 key 的读写链路通。
+//     （Windows DPAPI 后端两方法均 no-op，链路由第 2 步的 store 写入兜底。）
+//  2. 干净态：Secrets().Clear() —— 落一份空的 v2 envelope，确认新 key 的
+//     读写链路通。载入失败态（磁盘 blob 解不开，如拷自另一台机器/账户）：
+//     改走 Secrets().Reset() —— 绕过写路径拒绝，擦除 cache、清掉
+//     loadFailure 并物理删除 secret 文件（spec W5）。此处不能再 Clear：
+//     失败态下 Clear 会被拒绝而把用户 500 锁死，Reset 清盘才是逃生通道，
+//     重置后首次 Store 重新落盘，等价于新装。
 //  3. 清 SQLite 侧的 has_* 标记与旧 * _encrypted / 主口令标记列 ——
 //     否则重置后 settings 仍声称"有凭据"，下次保存会把凭据写进一个
 //     与 master key 无关的 store。
@@ -66,15 +72,20 @@ func CredentialsReset(c *gin.Context) {
 	}
 
 	// Secrets() 会惰性建 store 并接线 SettingsManager；此处必须取到那一个
-	// 实例再 Clear，否则清的是另一个 cache，磁盘上仍是旧内容。
+	// 实例再操作，否则清的是另一个 cache，磁盘上仍是旧内容。
 	store := a.Secrets()
 	if lf := store.LoadFailure(); lf != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false, "error": "重置失败：凭据存储不可用",
-		})
-		return
-	}
-	if err := store.Clear(); err != nil {
+		// 载入失败态（损坏对）：Clear 会被写路径拒绝，原样放行只会把
+		// 用户锁死在 500。Reset 是逃生通道 —— 直接物理清盘回到干净态。
+		if err := store.Reset(); err != nil {
+			log.Error("credentials.reset: 载入失败态清盘失败",
+				"method", "credentials.reset", "error", err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false, "error": "重置失败：凭据存储不可用",
+			})
+			return
+		}
+	} else if err := store.Clear(); err != nil {
 		log.Error("credentials.reset: 清空 secret store 失败",
 			"method", "credentials.reset", "error", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{

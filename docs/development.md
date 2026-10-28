@@ -10,6 +10,12 @@
 - 描述用中文；scope 可选，按目录/模块（`ci`、`vrt`、`aigtd`、`docs` 等）。
 - 历史提交（`git log --oneline`）均已遵守此约定。
 
+## 对外文案与缺口跟踪
+
+- 用户可见字符串与错误文案禁止出现内部路线词(Plan N / v3 / not implemented / 内部文档路径)。
+- 功能缺口一律走 GitHub issue 跟踪;代码注释引用 issue 号,不引用计划文档名。
+- 平台能力差异用能力探测隐藏入口,不展示「暂不可用」类提示页。
+
 ## 必需检查
 - 合并到 `main` 前必须通过：`frontend`、`backend`、`e2e`。
 - `vrt`（视觉回归）目前为 advisory（`continue-on-error`），不阻断合并。

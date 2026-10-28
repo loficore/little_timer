@@ -12,8 +12,8 @@
 //     (Task 4 的 updateWithVersion 中心函数),事务/非事务路径共享 SQL,
 //     0 行受影响 → storage.ErrVersionConflict,handler 据此返 409。
 //
-//   - habit_schedules 表属于 Plan 3("习惯融合"),spec §7.2 明确 v1 不在范围;
-//     loadHabitSlotsForDate 直接返回空切片,留 TODO(plan-3) 锚点。
+//   - habit_schedules 表未落地,loadHabitSlotsForDate 恒返回空切片;
+//     缺口跟踪见 GitHub issue #40。
 package handlers
 
 import (
@@ -208,9 +208,7 @@ func loadCandidateTasks(a *app.App, date string) ([]scheduler.Task, error) {
 
 // loadHabitSlotsForDate 返回某天的习惯时段。
 //
-// TODO(plan-3): habit_schedules 表尚未在 v11 落地(spec §7.2 明确"习惯融合"
-// 属于 Plan 3,v1 不在范围)。这里返回空切片,调度引擎会跳过 habit 占位;
-// Plan 3 实现时按 DayOfWeek 过滤 habits 后填进 HabitSlot。
+// GitHub issue #40: habit_schedules 表未落地前,本函数恒返回空切片。
 func loadHabitSlotsForDate(a *app.App, date string) []scheduler.HabitSlot {
 	return []scheduler.HabitSlot{}
 }

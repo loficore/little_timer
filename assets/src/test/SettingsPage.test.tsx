@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/preact";
 import { SettingsPage } from "../Settings";
 
 vi.mock("../utils/apiClientSingleton", () => ({
+  supportsDailySweep: false,
   getAPIClient: vi.fn(() => ({
     getSettings: vi.fn().mockResolvedValue({
       basic: {
@@ -164,6 +165,16 @@ describe("SettingsPage", () => {
       expect(screen.getByTestId("tab-countdown")).toBeTruthy();
       expect(screen.getByTestId("tab-stopwatch")).toBeTruthy();
     });
+  });
+
+  it("supportsDailySweep 为 false 时隐藏每日梳理标签页", async () => {
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-basic")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("tab-daily-sweep")).toBeNull();
+    expect(screen.queryByText("dailySweep.settings.title")).toBeNull();
   });
 
   it("点击返回按钮应该调用 onBackClick", async () => {

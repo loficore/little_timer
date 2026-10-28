@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/preact";
 import { Sidebar } from "../../components/Sidebar";
 
+vi.mock("../../utils/apiClientSingleton", () => ({ supportsDailySweep: false }));
+
 vi.mock("../../utils/i18n", () => ({
   t: (key: string) => {
     const translations: Record<string, string> = {
@@ -52,5 +54,15 @@ describe("Sidebar 组件", () => {
 
     const nav = container.querySelector("nav");
     expect(nav).toBeTruthy();
+  });
+
+  it("supportsDailySweep 为 false 时隐藏每日梳理入口,其余项照常", () => {
+    render(<Sidebar currentPage="timer" onNavigate={mockOnNavigate} />);
+
+    expect(screen.queryByTestId("nav-dailySweep")).toBeNull();
+    expect(screen.getByText("专注")).toBeTruthy();
+    expect(screen.getByText("习惯")).toBeTruthy();
+    expect(screen.getByText("统计")).toBeTruthy();
+    expect(screen.getByText("设置")).toBeTruthy();
   });
 });

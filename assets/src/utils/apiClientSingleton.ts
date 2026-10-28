@@ -8,6 +8,11 @@
  *
  * Rollup 动态导入：仅在 isAndroid === true 时才导入 WailsAPIClient，
  * 桌面构建永远不会解析 ../bindings/... 路径。
+ *
+ * supportsDailySweep：Android 平台能力探测——每日梳理的后端绑定尚未
+ * 在 Wails 移动端落地（GitHub issue #41），UI 以此模块级标志隐藏全部入口。
+ * 注意：必须保持为模块级导出，不能做成 getAPIClient() 实例属性，
+ * 因为 Wails 客户端 Proxy 会把任意属性读取包装成恒 truthy 的函数。
  */
 
 import { APIClient } from "./apiClient";
@@ -15,6 +20,7 @@ import { DEFAULT_API_URL } from "../utils/constants";
 import type { TimerState, Settings } from "../types/api";
 
 const isAndroid = typeof window !== "undefined" && !!(window as any).wails;
+export const supportsDailySweep = !isAndroid;
 
 type APIClientInterface = any;
 

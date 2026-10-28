@@ -12,6 +12,7 @@ import { ToastContainer, showToast } from "./components/common/Toast";
 import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, logLifecycle, logPerf } from "./utils/logger";
 import { useAppSettings, logWallpaperDebug } from "./hooks/useAppSettings";
 import { resolveWallpaperUrl, WALLPAPER_FALLBACK_GRADIENT } from "./utils/constants";
+import { supportsDailySweep } from "./utils/apiClientSingleton";
 import { t } from "./utils/i18n";
 import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, SparklesIconComponent, CalendarIcon, DailySweepIcon } from "./utils/icons";
 
@@ -310,6 +311,7 @@ export const App = () => {
           <CalendarIcon className="h-5 w-5" />
           <span className="btm-nav-label">{t("schedule.nav_label_short")}</span>
         </button>
+        {supportsDailySweep && (
         <button
           type="button"
           data-testid="nav-dailySweep"
@@ -320,6 +322,7 @@ export const App = () => {
           <DailySweepIcon className="h-5 w-5" />
           <span className="btm-nav-label">{t("dailySweep.nav_label_short")}</span>
         </button>
+        )}
       </nav>
     </>
   );

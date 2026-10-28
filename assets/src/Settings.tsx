@@ -11,7 +11,7 @@ import { LLMSettings } from "./components/settings/LLMSettings";
 import { DailySweepSettings } from "./components/settings/DailySweepSettings";
 import { GalleryContent } from "./components/GalleryContent";
 import { t, setLanguage } from "./utils/i18n";
-import { getAPIClient } from "./utils/apiClientSingleton";
+import { getAPIClient, supportsDailySweep } from "./utils/apiClientSingleton";
 import type { BackupConfig } from "./types/api";
 import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
 import { ClockIconComponent, CheckIconComponent, ResetIcon, SettingsIcon, BackupIcon, PhotoIconComponent, SparklesIconComponent } from "./utils/icons";
@@ -34,6 +34,9 @@ const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "backup", labelKey: "settings.tabs.backup", icon: <BackupIcon /> },
   { id: "gallery", labelKey: "gallery.title", icon: <PhotoIconComponent /> },
 ];
+
+// Android 每日梳理后端绑定未落地(GitHub issue #41),能力探测为 false 时隐藏标签页
+const visibleTabs = supportsDailySweep ? TABS : TABS.filter((tab) => tab.id !== "daily-sweep");
 
 interface BasicSettingsConfig {
   timezone: number;
@@ -460,7 +463,7 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
         />
 
         <TabPanel
-          tabs={TABS.map((tab) => ({ ...tab, label: t(tab.labelKey) }))}
+          tabs={visibleTabs.map((tab) => ({ ...tab, label: t(tab.labelKey) }))}
           activeTab={activeTab}
           onTabChange={handleTabChange}
           isAnimated={animationsEnabled}

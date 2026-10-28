@@ -25,7 +25,7 @@ func TestOtherCurrentName(t *testing.T) {
 }
 
 // TestOtherAvailable 断言 Available() 返回 errors.Is(ErrUnavailable) 的错误,
-// 且错误文案含 "Windows/macOS 见 issue #13"。
+// 且错误文案含 "当前平台不支持系统密钥托管"。
 func TestOtherAvailable(t *testing.T) {
 	err := Current().Available()
 	if err == nil {
@@ -34,7 +34,7 @@ func TestOtherAvailable(t *testing.T) {
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("Available() err = %v, want errors.Is(ErrUnavailable)", err)
 	}
-	const wantSub = "Windows/macOS 见 issue #13"
+	const wantSub = "当前平台不支持系统密钥托管"
 	if !strings.Contains(err.Error(), wantSub) {
 		t.Fatalf("err text = %q, want contains %q", err, wantSub)
 	}

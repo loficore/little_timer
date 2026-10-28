@@ -7,9 +7,9 @@ package keystore
 
 import "fmt"
 
-// errOtherUnavailable 是占位实现的固定错误文案。
+// macOS Keychain 适配跟踪见 GitHub issue #13;本文件仅覆盖无原生托管的平台占位。
 var errOtherUnavailable = fmt.Errorf(
-	"%w: 本平台暂未实现原生密钥托管(Windows/macOS 见 issue #13 后续)",
+	"%w: 当前平台不支持系统密钥托管",
 	ErrUnavailable,
 )
 

@@ -5,7 +5,7 @@
 //   - keystore_android.go(tag `android`):Android Keystore,经 JNI 调用,
 //     硬件 key 不可导出
 //   - keystore_other.go(tag `!linux && !android`):占位实现,全部操作返回
-//     ErrUnavailable(Windows/macOS 见 issue #13 后续)
+//     ErrUnavailable(macOS Keychain 见 GitHub issue #13)
 //
 // 平台实现文件在 init() 中把自身实例注册给 Current();调用方只与
 // Keystore 接口交互,不感知后端差异。

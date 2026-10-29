@@ -390,6 +390,7 @@ func TestMasterPasswordRoutesRemoved(t *testing.T) {
 		{http.MethodPost, "/api/backup/master-password"},
 		{http.MethodPost, "/api/backup/unlock"},
 		{http.MethodPost, "/api/backup/lock"},
+		{http.MethodPost, "/api/credentials/migrate"}, // v1 迁移链已整体删除
 	} {
 		if routeExists(r, tc.method, tc.path) {
 			t.Errorf("%s %s 仍可路由，主口令端点未删除", tc.method, tc.path)
@@ -397,15 +398,14 @@ func TestMasterPasswordRoutesRemoved(t *testing.T) {
 	}
 }
 
-// TestCredentialsRoutesRegistered 三条新凭据端点确实注册了
-// （取代上面的四个）。这里只验"路由在"，语义断言在 handlers 包。
+// TestCredentialsRoutesRegistered 两条凭据端点确实注册了
+// （取代上面那组旧端点）。这里只验"路由在"，语义断言在 handlers 包。
 func TestCredentialsRoutesRegistered(t *testing.T) {
 	r, _ := newTestRouter(t)
 
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/api/credentials/status"},
 		{http.MethodPost, "/api/credentials/reset"},
-		{http.MethodPost, "/api/credentials/migrate"},
 	} {
 		if !routeExists(r, tc.method, tc.path) {
 			t.Errorf("%s %s 未注册", tc.method, tc.path)

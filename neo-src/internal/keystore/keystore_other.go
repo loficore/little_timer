@@ -1,6 +1,6 @@
-//go:build !linux && !android
+//go:build !linux && !android && !windows && !darwin
 
-// keystore_other.go —— `!linux && !android` 平台的占位实现:
+// keystore_other.go —— `!linux && !android && !windows && !darwin` 平台的占位实现:
 // 除 Name 外所有方法返回 ErrUnavailable(包文档见 keystore.go)。
 
 package keystore

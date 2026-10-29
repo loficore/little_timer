@@ -1,9 +1,9 @@
-//go:build !linux && !android
+//go:build !linux && !android && !windows && !darwin
 
 // keystore_other_test.go —— other 占位实现的行为测试。
 //
-// 仅在非 linux/android 平台构建运行(在其他平台执行本测试;Linux 本机
-// 因 build tag 跳过,仅断言包可编译)。
+// 仅在非 linux/android/windows/darwin 平台构建运行(在其他平台执行本测试;
+// Linux 本机因 build tag 跳过,仅断言包可编译)。
 
 package keystore
 

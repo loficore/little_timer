@@ -1,11 +1,11 @@
 // Package handlers —— 凭据端点（取代 v1 的主口令端点，issue #13）。
 //
-// 主口令时代的三件事在这里重新表达，但语义完全不同：
+// 主口令时代的端点在这里重新表达，但语义完全不同：
 //
 //	旧                                  新
 //	GET  /api/backup/master-password    GET  /api/credentials/status
 //	POST /api/backup/master-password    POST /api/credentials/reset
-//	POST /api/backup/unlock             POST /api/credentials/migrate
+//	POST /api/backup/unlock             （无对应物——v1 迁移链已整体删除）
 //	POST /api/backup/lock               （无对应物——没有"锁"这个概念）
 //
 // reset 是破坏性的：它删掉 keystore 里的 master key 并清空全部凭据，
@@ -14,14 +14,11 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
-	"little-timer/internal/crypto"
 	"little-timer/internal/domain"
-	"little-timer/internal/keystore"
 	"little-timer/internal/log"
 )
 
@@ -41,7 +38,13 @@ func CredentialsStatus(c *gin.Context) {
 // 副作用（顺序固定）：
 //  1. DeleteMasterKey + EnsureMasterKey —— 换一把全新的 master key；
 //     旧 key 加密的一切都再也解不开，这是"重置"的本质。
-//  2. Secrets().Clear() —— 落一份空的 v2 envelope，确认新 key 的读写链路通。
+//     （Windows DPAPI 后端两方法均 no-op，链路由第 2 步的 store 写入兜底。）
+//  2. 干净态：Secrets().Clear() —— 落一份空的 v2 envelope，确认新 key 的
+//     读写链路通。载入失败态（磁盘 blob 解不开，如拷自另一台机器/账户）：
+//     改走 Secrets().Reset() —— 绕过写路径拒绝，擦除 cache、清掉
+//     loadFailure 并物理删除 secret 文件（spec W5）。此处不能再 Clear：
+//     失败态下 Clear 会被拒绝而把用户 500 锁死，Reset 清盘才是逃生通道，
+//     重置后首次 Store 重新落盘，等价于新装。
 //  3. 清 SQLite 侧的 has_* 标记与旧 * _encrypted / 主口令标记列 ——
 //     否则重置后 settings 仍声称"有凭据"，下次保存会把凭据写进一个
 //     与 master key 无关的 store。
@@ -69,15 +72,20 @@ func CredentialsReset(c *gin.Context) {
 	}
 
 	// Secrets() 会惰性建 store 并接线 SettingsManager；此处必须取到那一个
-	// 实例再 Clear，否则清的是另一个 cache，磁盘上仍是旧内容。
+	// 实例再操作，否则清的是另一个 cache，磁盘上仍是旧内容。
 	store := a.Secrets()
 	if lf := store.LoadFailure(); lf != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false, "error": "重置失败：凭据存储不可用",
-		})
-		return
-	}
-	if err := store.Clear(); err != nil {
+		// 载入失败态（损坏对）：Clear 会被写路径拒绝，原样放行只会把
+		// 用户锁死在 500。Reset 是逃生通道 —— 直接物理清盘回到干净态。
+		if err := store.Reset(); err != nil {
+			log.Error("credentials.reset: 载入失败态清盘失败",
+				"method", "credentials.reset", "error", err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false, "error": "重置失败：凭据存储不可用",
+			})
+			return
+		}
+	} else if err := store.Clear(); err != nil {
 		log.Error("credentials.reset: 清空 secret store 失败",
 			"method", "credentials.reset", "error", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -99,69 +107,6 @@ func CredentialsReset(c *gin.Context) {
 
 	log.Info("credentials.reset ok", "method", "credentials.reset")
 	c.Status(http.StatusNoContent)
-}
-
-// CredentialsMigrate 接收用户补输的 v1 主口令，完成 secret.db 的迁移。
-//
-// 用于"keystore 可用但磁盘上仍是 v1 secret.db"的启动等待态：应用先起、
-// 凭据端点可达，用户输一次口令，迁移完成后凭据即刻可用。
-//
-// 状态码刻意区分三类失败，让前端能给出不同指引：
-//
-//	204 —— 迁移完成（含"本来就是 v2 / 已迁移过"）。
-//	403 —— 主口令错误或 v1 blob 损坏。磁盘未改动，可安全重试。
-//	409 —— keystore 不可用。换个口令没用，得先修环境。
-//	400 —— 请求体缺 password。
-func CredentialsMigrate(c *gin.Context) {
-	a := appFromCtx(c)
-
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false, "error": "missing password",
-		})
-		return
-	}
-
-	ks := a.ActiveKeystore()
-	if err := ks.Available(); err != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"success": false, "error": "系统密钥服务不可用，无法完成迁移",
-		})
-		return
-	}
-
-	err := a.MigrateLegacySecrets(req.Password)
-	switch {
-	case err == nil:
-		log.Info("credentials.migrate ok", "method", "credentials.migrate")
-		c.Status(http.StatusNoContent)
-
-	case errors.Is(err, keystore.ErrUnseal):
-		// 口令错 / blob 损坏。不区分两者（GCM tag 校验失败即两者皆可能），
-		// 对用户而言都是"再输一次"，但明确说清磁盘没被动过。
-		c.JSON(http.StatusForbidden, gin.H{
-			"success": false,
-			"code":    "invalid_legacy_password",
-			"error":   "主口令错误或凭据文件已损坏，未做任何改动",
-		})
-
-	case errors.Is(err, keystore.ErrUnavailable), errors.Is(err, crypto.ErrKeystoreUnavailable):
-		c.JSON(http.StatusConflict, gin.H{
-			"success": false,
-			"code":    "keystore_unavailable",
-			"error":   "系统密钥服务不可用，无法完成迁移",
-		})
-
-	default:
-		log.Error("credentials.migrate failed",
-			"method", "credentials.migrate", "error", err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false, "error": "迁移失败",
-		})
-	}
 }
 
 var _ = domain.CredentialStatus{}

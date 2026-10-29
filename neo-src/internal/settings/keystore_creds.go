@@ -1,87 +1,24 @@
-// SettingsCreds 适配层：把 SettingsManager 接到 keystore.SettingsCreds 接口上，
-// 供一次性迁移器（internal/keystore）读写 v1 时代的旧凭据密文列。
+// 凭据状态清理层：重置路径（handlers.CredentialsReset）经本文件把 v1 时代的
+// 遗留密文列与标记列复位，避免重置后 settings 仍声称"有凭据"。
 //
-// 接口定义在 keystore 侧而非本包，是因为依赖方向已成
-// settings → crypto → keystore；反着声明会成环。
-//
-// 本文件只服务于迁移窗口。迁移完成（哨兵落盘）后这些列恒为 NULL/0，
-// 跨过两个 release 后可整体删除——与 crypto/legacy_v1.go 同期。
+// SettingsCreds 迁移适配层（LegacyCiphertext / PutSecret / 列名映射）已随
+// v1 与一次性迁移链整体删除；backup_config 的旧密文列不再有写入方，
+// 仅剩本文件的清理逻辑把它们归零。
 
 package settings
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 
 	"little-timer/internal/crypto"
-	"little-timer/internal/keystore"
 )
-
-// 编译期断言：本管理器满足迁移器要求的接口。
-var _ keystore.SettingsCreds = (*SettingsManager)(nil)
-
-// 编译期断言：两侧凭据 key 常量逐字一致。迁移器（keystore 包）不能 import
-// 本包，只能自带一份字面量；legacyCipherColumn 按 keystore 常量分派即是
-// 两条常量表的对齐点——改任一侧的字符串，另一侧立刻编译不过。
-
-// legacyCipherColumn 把 secret key 映射到 v1 密文列名。
-// 键取自 keystore 包的常量而非本包的 SecretXxx —— 迁移器按 key 取列，
-// 两侧必须用同一套名字。
-func legacyCipherColumn(secretKey string) (string, bool) {
-	switch secretKey {
-	case keystore.CredWebDAVPassword:
-		return "webdav_password_encrypted", true
-	case keystore.CredS3AccessKey:
-		return "s3_access_key_encrypted", true
-	case keystore.CredS3SecretKey:
-		return "s3_secret_key_encrypted", true
-	default:
-		return "", false
-	}
-}
-
-// LegacyCiphertext 返回该 key 对应的 v1 密文。未配置时返回 (nil, nil)，
-// 调用方据此跳过——新装用户本就没有旧凭据，不该报错。
-func (sm *SettingsManager) LegacyCiphertext(key string) ([]byte, error) {
-	col, ok := legacyCipherColumn(key)
-	if !ok {
-		return nil, fmt.Errorf("settings: 未知的凭据 key %q", key)
-	}
-	db := sm.sqlite.DB()
-	if db == nil {
-		return nil, errors.New("settings: sqlite not open")
-	}
-	// 列名来自上面的白名单常量，不含用户输入，故可安全拼进 SQL。
-	var blob []byte
-	err := db.QueryRow(
-		`SELECT ` + col + ` FROM backup_config WHERE id = 1;`).Scan(&blob)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		// NULL 扫描进 []byte 会得到 nil 而非报错，这里显式判一次以便
-		// 与"扫描失败"区分开。
-		return nil, fmt.Errorf("settings: 读取旧凭据列 %s 失败: %w", col, err)
-	}
-	return blob, nil
-}
-
-// PutSecret 把解密后的明文写进 keystore 托管的 SecretStorage。
-// 未接线时返回明确错误——绝不静默丢弃凭据。
-func (sm *SettingsManager) PutSecret(key string, value []byte) error {
-	if sm.secretStore == nil {
-		return errors.New("settings: secret store not wired, 无法写入迁移凭据")
-	}
-	return sm.secretStore.Store([]byte(key), value)
-}
 
 // ClearCredentialState 是"重置"路径用的清理：比 ClearLegacyState 多清三个
 // has_* 标记列，把内存态一并复位。
 //
-// 与 ClearLegacyState 的语义差别是关键：迁移刚把凭据搬进 secrets，此时
-// has_* 必须**保持 1**——它是"secret store 里有这个凭据"的信号，清零会让
-// 下次 Load 认为该凭据未配置。而重置是真把凭据删了，has_* 就该归 0。
+// 与 ClearLegacyState 的语义差别是关键：迁移时代 has_* 必须**保持 1**——它
+// 是"secret store 里有这个凭据"的信号。而重置是真把凭据删了，has_* 就该归 0。
 func (sm *SettingsManager) ClearCredentialState() error {
 	db := sm.sqlite.DB()
 	if db == nil {
@@ -110,7 +47,7 @@ func (sm *SettingsManager) ClearCredentialState() error {
 //
 // 注意这**不是**删列：Path B 决定保留 backup_config 表的存量 schema
 // （cmd/migrate 的 expected columns 也列了它们），只是把值清成"没有"。
-// 迁移后这些列再无写入方，恒为默认值。
+// 迁移链删除后这些列再无写入方，恒为默认值。
 func (sm *SettingsManager) ClearLegacyState() error {
 	db := sm.sqlite.DB()
 	if db == nil {
@@ -139,6 +76,7 @@ func (sm *SettingsManager) ClearLegacyState() error {
 	return nil
 }
 
-// sm.secretStore 的类型来自 crypto.SecretStorage —— 显式标注一句，
-// 避免将来 crypto 侧重构时这里静默失配。
-var _ *crypto.SecretStorage
+// 编译期绑定：sm.secretStore 必须保持 *crypto.SecretStorage 类型 ——
+// crypto 侧重构改类型时这里直接编译失败（原 `var _ *crypto.SecretStorage`
+// 不引用字段，是假断言，已替换）。
+var _ = func(sm *SettingsManager) *crypto.SecretStorage { return sm.secretStore }

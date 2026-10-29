@@ -3,8 +3,8 @@
 // 覆盖 brief Step 1 的场景矩阵:Store/Retrieve/Delete/Clear/Items 往返
 // (含跨实例重新加载,即真实 Unseal 路径)、文件不存在→空 cache 且首次
 // Store 落盘、magic 前缀逐字节 "LTMSEKv2"、落盘权限 0o600、Unseal 失败
-// 透出 ErrKeystoreUnavailable、master key 缺失时的不可用行为,以及
-// "假 Unseal 不校验 tag" 的铁证测试。
+// 透出 ErrKeystoreUnavailable、master key 缺失时的不可用行为、"假 Unseal
+// 不校验 tag" 的铁证测试,以及 Reset 在载入失败态下的清盘逃生通道(spec W5)。
 package crypto_test
 
 import (
@@ -320,7 +320,7 @@ func TestV2StoreRefusesWhenLoadFailed(t *testing.T) {
 	broken.unsealErr = fmt.Errorf("%w: 模拟 keyring 重置", keystore.ErrUnseal)
 	reloaded := crypto.NewSecretStorage(path, broken)
 
-	// 失败态必须可显式查询(启动门禁 Task 6/8 的信号源)。
+	// 失败态必须可显式查询(启动门禁与重置路径的信号源)。
 	if lf := reloaded.LoadFailure(); !errors.Is(lf, crypto.ErrKeystoreUnavailable) {
 		t.Fatalf("LoadFailure() = %v, want 可链到 ErrKeystoreUnavailable", lf)
 	}
@@ -434,7 +434,7 @@ func TestV2ErrKeystoreUnavailableIsChainable(t *testing.T) {
 func TestV2CorruptFileIsNotSilentlyEmpty(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secret.db")
-	// 模拟 v1 遗留文件:前缀 LTMSECv1 —— v2 薄壳拒绝读取(迁移归 Task 8)。
+	// 模拟 v1 遗留文件:前缀 LTMSECv1 —— v2 薄壳拒绝读取(只能由用户在设置中重置清盘)。
 	if err := os.WriteFile(path, []byte("LTMSECv1-some-legacy-bytes"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -543,4 +543,113 @@ func TestSecretStorage_ConcurrentStoreRetrieve(t *testing.T) {
 			t.Fatalf("reloaded value out of range: %q", got)
 		}
 	}
+}
+
+// TestReset_WithLoadFailurePurgesFile —— Review Focus #1:secret.db 被拷到
+// 另一 Windows 账户/机器(DPAPI 必解不开)时,用户不能被载入失败态锁死。
+// Reset 是逃生通道:绕过写路径拒绝,擦除明文 cache、清掉 loadFailure 并把
+// secret 文件物理删除。断言:文件消失、LoadFailure()==nil、Items() 空、
+// 再调幂等(os.IsNotExist 吞掉)、随后 Store 成功落盘 —— 等价于新装。
+func TestReset_WithLoadFailurePurgesFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.db")
+	writer := newFakeKeystore(t)
+	store := crypto.NewSecretStorage(path, writer)
+	if err := store.Store([]byte("api_key"), []byte("sk-old")); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	// 载入失败态:fake 的 Unseal 恒返回包装 ErrUnseal 的错误,模拟
+	// DPAPI 拒绝解开来自另一账户的 blob(走 NewSecretStorage 的
+	// loadV2→Unseal 失败分支,而非 HasMasterKey 分支)。
+	broken := newFakeKeystore(t)
+	broken.unsealErr = fmt.Errorf("%w: 模拟跨账户拷贝的 blob", keystore.ErrUnseal)
+	reloaded := crypto.NewSecretStorage(path, broken)
+	if lf := reloaded.LoadFailure(); !errors.Is(lf, crypto.ErrKeystoreUnavailable) {
+		t.Fatalf("前提不成立:LoadFailure() = %v, want 可链到 ErrKeystoreUnavailable", lf)
+	}
+
+	if err := reloaded.Reset(); err != nil {
+		t.Fatalf("载入失败态下 Reset = %v, want nil", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("Reset 后 secret 文件未物理清盘:stat = %v", err)
+	}
+	if lf := reloaded.LoadFailure(); lf != nil {
+		t.Fatalf("Reset 后 LoadFailure() = %v, want nil", lf)
+	}
+	// 明文 cache 已逐值擦除并清空(外部可观测面:Items 空、Retrieve 不再
+	// 透出 loadFailure 而是如实 not-found)。
+	names, err := reloaded.Items()
+	if err != nil {
+		t.Fatalf("Reset 后 Items: %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("Reset 后 Items = %v, want 空", names)
+	}
+	if _, err := reloaded.Retrieve([]byte("api_key")); !errors.Is(err, crypto.ErrSecretNotFound) {
+		t.Fatalf("Reset 后 Retrieve = %v, want ErrSecretNotFound", err)
+	}
+
+	// 幂等:文件已不存在,第二次 Reset 必须吞掉 IsNotExist 并返回 nil。
+	if err := reloaded.Reset(); err != nil {
+		t.Fatalf("第二次 Reset(文件已消失)= %v, want nil", err)
+	}
+
+	// 重置后必须可以正常 Store(等价于新装),且真的落盘。
+	if err := reloaded.Store([]byte("api_key"), []byte("sk-new")); err != nil {
+		t.Fatalf("Reset 后 Store = %v, want 成功", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Reset 后 Store 未落盘:ReadFile = %v", err)
+	}
+	if !bytes.HasPrefix(data, []byte(wantMagic)) {
+		t.Fatalf("磁盘 blob 前缀 = %q, want %q", data[:8], wantMagic)
+	}
+	// 撤掉失败钩子后用同一个 fake 重载:证明 Store 的密封盘可被自己的
+	// key 解开,而非内存错觉。
+	broken.unsealErr = nil
+	reloaded2 := crypto.NewSecretStorage(path, broken)
+	if got, err := reloaded2.Retrieve([]byte("api_key")); err != nil || string(got) != "sk-new" {
+		t.Fatalf("Reset+Store 后重载 = %q, %v, want \"sk-new\", nil", got, err)
+	}
+}
+
+// TestReset_IdempotentAndInMemoryMode —— Reset 的边界:纯内存模式
+// (filePath=="")只清 cache 不报错、可重复调;干净态且文件从未存在时
+// Reset 是 no-op(IsNotExist 吞掉)且不会创建文件,之后 Store 照常。
+func TestReset_IdempotentAndInMemoryMode(t *testing.T) {
+	t.Run("InMemoryOnly", func(t *testing.T) {
+		f := newFakeKeystore(t)
+		store := crypto.NewSecretStorage("", f)
+		if err := store.Store([]byte("k"), []byte("v")); err != nil {
+			t.Fatalf("纯内存 Store: %v", err)
+		}
+		if err := store.Reset(); err != nil {
+			t.Fatalf("纯内存 Reset = %v, want nil", err)
+		}
+		if _, err := store.Retrieve([]byte("k")); !errors.Is(err, crypto.ErrSecretNotFound) {
+			t.Fatalf("Reset 后 Retrieve = %v, want ErrSecretNotFound", err)
+		}
+		if err := store.Reset(); err != nil {
+			t.Fatalf("纯内存二次 Reset = %v, want nil(幂等)", err)
+		}
+	})
+
+	t.Run("FreshInstallNoFile", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "secret.db")
+		f := newFakeKeystore(t)
+		store := crypto.NewSecretStorage(path, f)
+		if err := store.Reset(); err != nil {
+			t.Fatalf("干净态无文件 Reset = %v, want 吞掉 IsNotExist 返回 nil", err)
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("Reset 不应创建文件:stat = %v", err)
+		}
+		if err := store.Store([]byte("k"), []byte("v")); err != nil {
+			t.Fatalf("Reset 后 Store = %v, want 成功", err)
+		}
+	})
 }

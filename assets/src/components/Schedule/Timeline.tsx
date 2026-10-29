@@ -4,7 +4,6 @@
  * 结构:
  *  - 上方轴:dayStartHour..dayEndHour(默认 6..23)的整点 tick 标签
  *  - 中间轨:绝对定位的 TaskBlock;左右/宽度百分比按窗口换算
- *  - 下方习惯轨:HabitBlock 占位(habit_schedules 属于 Plan 3,v1 空白)
  *
  * 注意:
  *  - 入参 `scheduled_start`/`scheduled_end` 是 unix 秒,需用本地时区解析到「当日
@@ -15,7 +14,6 @@
  */
 
 import { TaskBlock } from "./TaskBlock";
-import { HabitBlock } from "./HabitBlock";
 import type { TimelineTask } from "./types";
 import { t } from "../../utils/i18n";
 
@@ -87,9 +85,6 @@ export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23 }: TimelineP
           </div>
         )}
       </div>
-
-      {/* Habit 轨(Plan 3 之前留空占位) */}
-      <HabitBlock />
     </div>
   );
 }

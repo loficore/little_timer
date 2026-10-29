@@ -130,6 +130,17 @@ go-dev-webview:
         echo "按 Ctrl+C 停止所有服务"
         wait
 
+# 两个变量缺一不可 —— LT_WEBKIT_DEBUG 开 developer extras,WEBKIT_INSPECTOR_SERVER 给监听地址。
+# 需要本机有 gtk/webkit 开发包(EL9 没有,在调试机上跑)。
+# 带 WebKit 远程 inspector 的 webview 开发运行:profile/timeline/memory 都在浏览器里看。
+webview-inspect:
+        #!/usr/bin/env bash
+        set -e
+        export LT_WEBKIT_DEBUG=1
+        export WEBKIT_INSPECTOR_SERVER="${WEBKIT_INSPECTOR_SERVER:-127.0.0.1:2222}"
+        echo "inspector: http://${WEBKIT_INSPECTOR_SERVER} —— 在同机浏览器打开,列表里选 Little Timer 目标"
+        just go-dev-webview
+
 go-run: go-build
         @{{go_src}}/bin/server serve
 

@@ -4,8 +4,6 @@ import { Header } from "./components/Header";
 import { TabPanel } from "./components/TabPanel";
 import { BasicSettings } from "./components/BasicSettings";
 import { WallpaperModal } from "./components/WallpaperModal";
-import { CountdownSettings } from "./components/CountdownSettings";
-import { StopwatchSettings } from "./components/StopwatchSettings";
 import { BackupTab } from "./components/settings/BackupTab";
 import { LLMSettings } from "./components/settings/LLMSettings";
 import { DailySweepSettings } from "./components/settings/DailySweepSettings";
@@ -14,7 +12,7 @@ import { t, setLanguage } from "./utils/i18n";
 import { getAPIClient, supportsDailySweep } from "./utils/apiClientSingleton";
 import type { BackupConfig } from "./types/api";
 import { isPerfDebugEnabled, isWebViewRuntime, logPerf } from "./utils/logger";
-import { ClockIconComponent, CheckIconComponent, ResetIcon, SettingsIcon, BackupIcon, PhotoIconComponent, SparklesIconComponent } from "./utils/icons";
+import { CheckIconComponent, ResetIcon, SettingsIcon, BackupIcon, PhotoIconComponent, SparklesIconComponent } from "./utils/icons";
 import { loadAudioPreferences, normalizeAudioPreferences, saveAudioPreferences, DEFAULT_AUDIO_PREFERENCES } from "./utils/audio";
 import { STORAGE_KEYS } from "./utils/constants";
 import { applyTheme, applyLightStyle } from "./hooks/useAppSettings";
@@ -27,8 +25,6 @@ interface SettingsPageProps {
 
 const TABS: { id: string; labelKey: string; icon?: VNode }[] = [
   { id: "basic", labelKey: "settings.tabs.basic", icon: <SettingsIcon /> },
-  { id: "countdown", labelKey: "settings.tabs.countdown", icon: <ClockIconComponent /> },
-  { id: "stopwatch", labelKey: "settings.tabs.stopwatch", icon: <ClockIconComponent /> },
   { id: "llm", labelKey: "llm_settings.title", icon: <SparklesIconComponent /> },
   { id: "daily-sweep", labelKey: "dailySweep.settings.title", icon: <SparklesIconComponent /> },
   { id: "backup", labelKey: "settings.tabs.backup", icon: <BackupIcon /> },
@@ -147,11 +143,6 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
   useEffect(() => {
     apiClientRef.current = getAPIClient();
   }, []);
-
-  useEffect(() => {
-    const modeTab = config.basic.default_mode === "countdown" ? "countdown" : "stopwatch";
-    setActiveTab(modeTab);
-  }, [config.basic.default_mode]);
 
   const loadSettings = async () => {
     const startAt = performance.now();
@@ -475,61 +466,11 @@ export const SettingsPage: FunctionalComponent<SettingsPageProps> = ({
               onWallpaperClick={() => setShowWallpaperModal(true)}
               onChange={(newBasic) => {
                 markInteraction("basic.config.change");
-                setConfig((prev) => {
-                  const next = { ...prev, basic: newBasic };
-
-                  if (newBasic.default_mode !== "countdown") {
-                    next.clock_defaults = {
-                      ...prev.clock_defaults,
-                      countdown: {
-                        ...prev.clock_defaults.countdown,
-                        loop: false,
-                        loop_count: 0,
-                        loop_interval_seconds: 0,
-                      },
-                    };
-                  }
-
-                  return next;
-                });
+                setConfig((prev) => ({ ...prev, basic: newBasic }));
               }}
             />
           )}
 
-          {activeTab === "countdown" && (
-            <CountdownSettings
-              config={config.clock_defaults.countdown}
-              showLoopControls={config.basic.default_mode === "countdown"}
-              isAnimated={animationsEnabled}
-              onChange={(newCountdown) => {
-                markInteraction("countdown.config.change");
-                setConfig({
-                  ...config,
-                  clock_defaults: {
-                    ...config.clock_defaults,
-                    countdown: newCountdown,
-                  },
-                });
-              }}
-            />
-          )}
-
-          {activeTab === "stopwatch" && (
-            <StopwatchSettings
-              config={config.clock_defaults.stopwatch}
-              isAnimated={animationsEnabled}
-              onChange={(newStopwatch) => {
-                markInteraction("stopwatch.config.change");
-                setConfig({
-                  ...config,
-                  clock_defaults: {
-                    ...config.clock_defaults,
-                    stopwatch: newStopwatch,
-                  },
-                });
-              }}
-            />
-          )}
           {activeTab === "backup" && (
             <BackupTab
               config={config}

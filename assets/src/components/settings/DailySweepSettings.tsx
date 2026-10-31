@@ -11,7 +11,7 @@ import { t } from "../../utils/i18n";
  * 后端正则 `^(?:[01]\d|2[0-3]):[0-5]\d$` 接受(HH:MM 任意,非仅 5 分倍),
  * 但前端限制为 5 分步进以贴合用户预期。
  *
- * 布局沿用 BasicSettings/CountdownSettings 的 SettingItem 模式(左标签 + 右控件),
+ * 布局沿用 BasicSettings 的 SettingItem 模式(左标签 + 右控件),
  * 与其他设置子选项保持一致。
  */
 export function DailySweepSettings() {

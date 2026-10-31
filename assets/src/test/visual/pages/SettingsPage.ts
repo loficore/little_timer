@@ -3,8 +3,6 @@ import { BasePage } from "./BasePage";
 
 export class SettingsPage extends BasePage {
   readonly basicTab: string;
-  readonly countdownTab: string;
-  readonly stopwatchTab: string;
   readonly themeToggle: string;
   readonly languageSelect: string;
   readonly saveButton: string;
@@ -14,8 +12,6 @@ export class SettingsPage extends BasePage {
   constructor(page: Page) {
     super(page);
     this.basicTab = '[data-testid="tab-basic"]';
-    this.countdownTab = '[data-testid="settings-tab-countdown"]';
-    this.stopwatchTab = '[data-testid="settings-tab-stopwatch"]';
     this.themeToggle = '[data-testid="theme-toggle"]';
     this.languageSelect = '[data-testid="language-select"]';
     this.saveButton = '[data-testid="settings-save"]';
@@ -29,16 +25,6 @@ export class SettingsPage extends BasePage {
 
   async clickBasicTab() {
     await this.click(this.basicTab);
-    await this.page.waitForTimeout(300);
-  }
-
-  async clickCountdownTab() {
-    await this.click(this.countdownTab);
-    await this.page.waitForTimeout(300);
-  }
-
-  async clickStopwatchTab() {
-    await this.click(this.stopwatchTab);
     await this.page.waitForTimeout(300);
   }
 

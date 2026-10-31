@@ -10,5 +10,5 @@ package webview
 import "fmt"
 
 func run() error {
-	return fmt.Errorf("webview support not compiled in — rebuild with `-tags webview` (requires gtk+-3.0+webkit2gtk-4.0 dev packages)")
+	return fmt.Errorf("webview support not compiled in — rebuild with `-tags webview` (gtk+-3.0 + webkit2gtk-4.0) or `-tags \"webview,webkit41\"` (gtk+-3.0 + webkit2gtk-4.1)")
 }

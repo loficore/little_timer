@@ -1,0 +1,28 @@
+#!/bin/sh
+# 默认桌面形态（D6）：起 HTTP-only 服务，再用系统浏览器打开。
+# WebView 窗口保留为桌面菜单里的独立 action。
+set -eu
+
+PORT="${LITTLE_TIMER_PORT:-8080}"
+URL="http://127.0.0.1:${PORT}/"
+
+if ! command -v xdg-open >/dev/null 2>&1; then
+    echo "xdg-open not found; open $URL manually" >&2
+    exec little-timer serve --port "$PORT"
+fi
+
+# 已有实例时第二次 serve 会因端口占用退出；打开浏览器仍然成立。
+little-timer serve --port "$PORT" >/dev/null 2>&1 &
+pid=$!
+
+i=0
+while [ "$i" -lt 50 ]; do
+    if command -v curl >/dev/null 2>&1 && curl -fsS "$URL" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.1
+    i=$((i + 1))
+done
+
+xdg-open "$URL" >/dev/null 2>&1 || true
+wait "$pid" 2>/dev/null || true

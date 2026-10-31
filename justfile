@@ -7,6 +7,11 @@ SSH_TARGET := env_var_or_default("MY_ACT_SSH_TARGET", "")
 REMOTE_PATH := env_var_or_default("MY_ACT_REMOTE_PATH", "")
 ROOT := justfile_directory()
 
+# WebView 构建标签：默认链 webkit2gtk-4.0。只有 4.1 开发包的机器
+# （Fedora 43+、Ubuntu 24.04）在 justfile.local 里设
+# WEBVIEW_TAGS=webview,webkit41。
+webview_tags := env_var_or_default("WEBVIEW_TAGS", "webview")
+
 ci-run: go-build-check frontend-check
 
 act:
@@ -120,8 +125,9 @@ go-dev-webview:
 
         echo "=== 启动 Go 后端 (webview) ==="
         # webview 由 build tag 门控(internal/webview/native.go),不带 -tags webview
-        # 编出来的是桩,窗口永远起不来;需要 gtk3-devel + webkit2gtk3-devel。
-        cd {{go_src}} && go build -tags webview -o bin/server ./cmd/server && bin/server serve --webview --port $GO_PORT &
+        # 编出来的是桩,窗口永远起不来。默认链 gtk3+webkit2gtk-4.0;
+        # 只有 4.1 开发包的机器设 WEBVIEW_TAGS=webview,webkit41。
+        cd {{go_src}} && go build -tags {{webview_tags}} -o bin/server ./cmd/server && bin/server serve --webview --port $GO_PORT &
         GO_PID=$!
 
         echo ""
@@ -170,7 +176,7 @@ webview-cadence:
         PREVIEW_PID=$!
         until ss -tln | grep -q ':5173 '; do sleep 0.2; done
         trap 'kill $PREVIEW_PID 2>/dev/null; pkill -f "vite preview --port 5173" 2>/dev/null' EXIT INT TERM
-        cd {{go_src}} && go build -tags webview -o bin/server ./cmd/server
+        cd {{go_src}} && go build -tags {{webview_tags}} -o bin/server ./cmd/server
         bin/server serve --webview --port $BACKEND_PORT 2>&1 | tee "$LOGF"
 
 go-run: go-build
@@ -179,7 +185,15 @@ go-run: go-build
 go-clean:
         @rm -rf {{go_src}}/bin
 
-go-build-embed:
+stage-ui:
+        #!/usr/bin/env bash
+        set -euo pipefail
+        cd {{ROOT}}/assets
+        [ -d node_modules ] || pnpm install
+        pnpm run build
+        {{ROOT}}/scripts/stage-embedded-ui.sh
+
+go-build-embed: stage-ui
         @cd {{go_src}} && go build -tags embed_ui -o bin/server ./cmd/server
 
 apk:
@@ -200,32 +214,43 @@ webview-image:
                 .
 
 webview-build:
-        @podman run --rm --network=host -v "{{ROOT}}:/workspace:Z" -v little-timer-gomod:/root/go/pkg/mod -v little-timer-gocache:/root/.cache/go-build -w /workspace little-timer-webview:latest bash -c 'mkdir -p neo-src/bin && cd neo-src && go build -tags "webview,embed_ui" -o bin/server ./cmd/server && cd .. && bash scripts/generate-bindings.sh'
+        @podman run --rm --network=host -v "{{ROOT}}:/workspace:Z" -v little-timer-gomod:/root/go/pkg/mod -v little-timer-gocache:/root/.cache/go-build -w /workspace little-timer-webview:latest bash -c 'mkdir -p neo-src/bin && cd neo-src && go build -tags "{{webview_tags}},embed_ui" -o bin/server ./cmd/server && cd .. && bash scripts/generate-bindings.sh'
 
 # 打包发布产物：前端 build + go build (embed_ui) + tar.gz 到 dist/
 # 用法: just package [version] [embed_ui]
 #   version   默认值 = 今天日期 (YYYYMMDD)
-#   embed_ui  默认值 = true；传 false 关闭
+#   embed_ui  默认值 = true；传 false 关闭（产物无界面）
 package version="" embed_ui="true":
         #!/usr/bin/env bash
         set -euo pipefail
         ver="{{version}}"
         if [ -z "$ver" ]; then ver="$(date +%Y%m%d)"; fi
         if [ "{{embed_ui}}" = "true" ]; then tag="embed_ui"; else tag=""; fi
-        cd {{ROOT}}/assets
-        [ -d node_modules ] || pnpm install
-        pnpm run build
-        mkdir -p dist/i18n
-        cp -f {{ROOT}}/assets/i18n/*.toml dist/i18n/
+        if [ "{{embed_ui}}" = "true" ]; then
+            cd {{ROOT}}/assets
+            [ -d node_modules ] || pnpm install
+            pnpm run build
+            {{ROOT}}/scripts/stage-embedded-ui.sh
+        fi
         cd {{ROOT}}/neo-src
-        go build -tags "$tag" -ldflags="-s -w -X little-timer/internal/app.Version=$ver" -o bin/server ./cmd/server
+        go build -tags "$tag" -ldflags="-s -w -X little-timer/internal/app.Version=$ver" -o bin/little-timer ./cmd/server
         stage={{ROOT}}/dist/stage
         rm -rf "$stage"
         mkdir -p "$stage"
-        cp bin/server "$stage/"
+        cp bin/little-timer "$stage/"
         sanitized="$(echo "$ver" | sed -E 's/[^A-Za-z0-9._-]/_/g')"
         mkdir -p {{ROOT}}/dist
         tar -czf {{ROOT}}/dist/little_timer-${sanitized}-linux-x64.tar.gz -C "$stage" .
         echo "✅ {{ROOT}}/dist/little_timer-${sanitized}-linux-x64.tar.gz"
+
+# 本地 rpm / deb 打包。依赖检查与构建细节见 docs/linux-packaging.md。
+package-rpm version="":
+        @{{ROOT}}/scripts/package-linux.sh rpm {{version}}
+
+package-deb version="":
+        @{{ROOT}}/scripts/package-linux.sh deb {{version}}
+
+package-linux version="":
+        @{{ROOT}}/scripts/package-linux.sh all {{version}}
 
 default: go-dev

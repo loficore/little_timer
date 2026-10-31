@@ -90,7 +90,7 @@ func runServer(opts *cli.ServeOptions) error {
 	}
 	defer cleanup()
 
-	router := httpx.NewRouter(app, opts.CORSOrigin)
+	router := httpx.NewRouterWithUI(app, opts.CORSOrigin, embeddedUIFS())
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", opts.Port),
 		Handler:           router,

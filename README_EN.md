@@ -50,7 +50,7 @@ cd neo-src
 go run ./cmd/server serve --http-only
 ```
 
-Use `just go-dev-webview` when you need a desktop WebView window. Linux WebView mode requires the `webkit2gtk-4.1` or `webkitgtk-6.0` system libraries.
+Use `just go-dev-webview` when you need a desktop WebView window. Linux WebView mode uses the system WebKitGTK: `webkit2gtk-4.0` on EL8/EL9, `webkit2gtk-4.1` on Ubuntu 22.04+ / Debian 12+. Source builds link 4.0 by default; on 4.1-only machines set `WEBVIEW_TAGS=webview,webkit41` in `justfile.local`. Packages are split accordingly.
 
 ### Android
 
@@ -60,7 +60,7 @@ Use `just go-dev-webview` when you need a desktop WebView window. Linux WebView 
 
 - **Go**: Use Go **1.25.0**, as declared in `neo-src/go.mod`
 - **Node.js + pnpm**: For frontend development and builds (frontend is under assets/)
-- **System Libraries**: Desktop WebView mode on Linux requires `webkit2gtk-4.1` or `webkitgtk-6.0`
+- **System Libraries**: Desktop WebView mode on Linux requires GTK3 plus the distro's WebKitGTK (`webkit2gtk-4.0` on EL8/EL9, `webkit2gtk-4.1` on Ubuntu 22.04+ / Debian 12+). Builds link 4.0 by default; use `WEBVIEW_TAGS=webview,webkit41` for 4.1.
 
 > If you only run the HTTP backend, existing frontend assets can be used directly. If you modify the UI, follow the “Frontend Development & Build” section below.
 

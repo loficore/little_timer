@@ -37,6 +37,7 @@ API Key、WebDAV / S3 备份凭据由**操作系统原生密钥服务**托管：
 - **sway / 最小化安装**可能没有。运行 `gnome-keyring-daemon --daemonize --components=secrets`，或安装 KWallet / KeePassXC。
 - 启动时检测不到密钥服务会**直接报错退出**并给出上述命令，而不是静默降级——带着不可解的凭据启动只会让人误以为凭据还在。
 - **Windows（DPAPI）** 无需任何服务或守护进程，登录即用。DPAPI blob **无法跨账户/跨机使用**：换了 Windows 账户或搬了机器后既有凭据必然解不开（这是平台特性而非缺陷），在设置中执行"重置凭据"后重新填写即可恢复。
+- **v1 遗留凭据文件**：落盘 envelope 的前缀是 `LTMSEKv2`，v1 文件（`LTMSECv1`）不再被读取——v1→v2 的迁移链已整体删除，v1 的主密钥派生方式不再受信任。从 v1 升级的机器上，既有 LLM API Key 与 WebDAV / S3 备份凭据一律不可用，启动日志会给出「检测到不再支持的 v1 凭据文件」告警。**这不是密钥服务故障**，装 keyring、查 KWallet 都不解决问题：唯一出路是在设置中执行一次"重置凭据"清掉旧文件，再重新填写凭据。
 - 篡改防护口径：对磁盘上凭据 blob 的任意单字节翻转，应用要么报错拒读、要么返回与原明文逐字节相同的结果——**凭据明文内容不可能被静默改写**；密文/MAC 尾部（blob 末 16 字节）的任意翻转必拒。
 
 ## Scheduler + 智能调度
@@ -77,7 +78,7 @@ cd neo-src
 CC="zig cc" CGO_ENABLED=1 go run ./cmd/server serve --http-only
 ```
 
-需要桌面 WebView 窗口时，使用 `just go-dev-webview`。Linux WebView 运行需要 `webkit2gtk-4.1` 或 `webkitgtk-6.0` 系统库。
+需要桌面 WebView 窗口时，使用 `just go-dev-webview`。Linux WebView 运行时依赖系统提供的 WebKitGTK：EL8/EL9 是 `webkit2gtk-4.0`，Ubuntu 22.04+ / Debian 12+ 是 `webkit2gtk-4.1`。源码构建默认链 4.0；只有 4.1 开发包的机器在 `justfile.local` 里设 `WEBVIEW_TAGS=webview,webkit41`。安装包已按此分变体，见下文「脚本构建与打包」。
 
 ### Android
 
@@ -88,7 +89,7 @@ CC="zig cc" CGO_ENABLED=1 go run ./cmd/server serve --http-only
 - **Go**：使用 `neo-src/go.mod` 声明的 Go 1.25.0
 - **Node.js + pnpm**：用于前端开发与构建（前端代码位于 assets/）
 - **C 编译器**：`just go-build` / `just go-dev` 需要 gcc、clang、cc 或 `zig cc`（自动探测，优先级递减）。go-sqlite3 需要 cgo，无 C 编译器会导致运行时 "go-sqlite3 requires cgo" 错误。`just` 配方在文件顶部以 `export CC := …` + `export CGO_ENABLED := "1"` 自动设置 cgo 环境并选择编译器。
-- **系统库**（仅桌面 WebView 模式）：`webkit2gtk-4.1` 或 `webkitgtk-6.0`（+ `libgtk-4-dev` 构建依赖）。缺少此库时 WebView 窗口模式运行时 panic，HTTP-only 模式不受影响。
+- **系统库**（仅桌面 WebView 模式）：GTK3 + 对应发行版的 WebKitGTK（EL8/EL9 为 `webkit2gtk-4.0`，Ubuntu 22.04+ / Debian 12+ 为 `webkit2gtk-4.1`）；构建包还需要各自的 `-devel` / `-dev`。源码构建默认链 4.0，4.1 用 `WEBVIEW_TAGS=webview,webkit41`。缺少此库时 WebView 窗口模式运行时 panic，HTTP-only 模式不受影响。
 
 > 若你只运行后端，HTTP-only 模式默认使用已存在的前端产物；需要修改 UI 时请看下方“前端开发与构建流程”。
 
@@ -138,12 +139,15 @@ go build -o bin/server ./cmd/server/
 打包脚本：
 
 ```bash
-just package 1.0.0
+just package 1.0.0        # tar.gz（embed_ui，无 webview 依赖）
+just package-linux 1.0.0  # rpm + deb；也可分开跑 package-rpm / package-deb
 ```
+
+Linux 安装包按系统 WebKit 分两个变体，不能互换：rpm 链 `webkit2gtk-4.0`（EL8/EL9），deb 链 `webkit2gtk-4.1`（Ubuntu 22.04+ / Debian 12+）。宿主机没有对应开发包时脚本自动进容器构建（需要 docker）。包依赖里带 `gnome-keyring` 推荐项，没有 Secret Service 的机器首启会按 `README` 的凭据口径报错退出。
 
 ## 桌面 WebView 容器构建 (podman)
 
-**为什么需要容器构建**：AlmaLinux/RHEL9 缺少 GTK4 / `webkitgtk-6.0` 开发包，无法在本地直接编译 `-tags webview` 的桌面 WebView 版本，因此借助 podman 容器提供完整的构建环境。
+**为什么需要容器构建**：AlmaLinux/RHEL9 缺少 GTK3 / WebKitGTK 开发包，无法在本地直接编译 `-tags webview` 的桌面 WebView 版本，因此借助 podman 容器提供完整的构建环境。
 
 **如何使用**：
 

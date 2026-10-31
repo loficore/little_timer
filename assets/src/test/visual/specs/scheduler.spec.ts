@@ -22,7 +22,7 @@ const baseURL = "http://127.0.0.1:5173";
 const apiURL = "http://127.0.0.1:8080";
 
 /** 桌面与移动的导航按钮分别落在 <aside> 和 <nav data-testid="bottom-nav">。 */
-async function clickNav(page: Page, name: "nav-aigtd" | "nav-schedule") {
+async function clickNav(page: Page, name: "nav-aigtd" | "nav-plan") {
   const sidebarBtn = page.locator(`aside [data-testid="${name}"]`);
   const bottomBtn = page.locator(`nav[data-testid="bottom-nav"] [data-testid="${name}"]`);
   if (await sidebarBtn.first().isVisible().catch(() => false)) {
@@ -107,7 +107,7 @@ test.describe("Scheduler E2E", () => {
     await expect(panel).toBeHidden({ timeout: 3000 });
 
     // 5) 跳到 /s,确认侧栏「本次任务」评分面板同步。
-    await clickNav(page, "nav-schedule");
+    await clickNav(page, "nav-plan");
     const sidebar = page.getByTestId("schedule-tasks");
     await expect(sidebar).toBeVisible({ timeout: 5000 });
     // 定位本次任务的 li(scope 到 taskTitle 行),保证不被历史任务混淆。

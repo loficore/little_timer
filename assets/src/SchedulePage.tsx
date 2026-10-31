@@ -68,9 +68,7 @@ export function SchedulePage() {
   const unscheduledCount = plan?.Unscheduled.length ?? 0;
 
   return (
-    <div className="container mx-auto max-w-5xl space-y-3 p-4" data-testid="schedule-page">
-      <h1 className="text-2xl font-bold">{t("schedule.title")}</h1>
-
+    <div className="flex flex-col gap-3" data-testid="plan-panel-schedule">
       <div className="flex flex-wrap items-center gap-2" data-testid="schedule-toolbar">
         <button
           type="button"

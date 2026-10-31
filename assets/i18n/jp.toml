@@ -172,7 +172,6 @@ timer = "集中"
 habits = "習慣"
 stats = "統計"
 settings = "設定"
-daily_sweep = "毎日の見直し"
 
 [gallery]
 title = "壁紙ギャラリー"
@@ -341,10 +340,14 @@ save_fail = "保存に失敗しました"
 conflict = "バージョン競合 — 最新のデータを再読み込みしました。再編集してから保存してください"
 conflict_refresh_failed = "バージョン競合 — 最新の再読み込みに失敗しました:{error}。編集内容はそのまま保存されています。しばらくしてから再試行してください"
 
-[schedule]
-title = "スケジュール"
-nav_label = "スケジュール"
+[plan]
+title = "計画"
+nav_label = "計画"
 nav_label_short = "計画"
+tab_schedule = "スケジュール"
+tab_review = "見直し"
+
+[schedule]
 run = "スケジュール実行"
 applyAll = "すべて適用"
 empty = "タスクがありません"
@@ -356,8 +359,6 @@ next_day = "翌日"
 summary = "{placed} 配置済 · {unscheduled} 未配置"
 
 [dailySweep]
-nav_label_short = "見直し"
-title = "毎日の見直し"
 start = "今すぐ実行"
 adopt = "採用"
 reject = "拒否"

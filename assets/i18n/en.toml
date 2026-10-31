@@ -73,7 +73,6 @@ timer = "Focus"
 habits = "Habits"
 stats = "Stats"
 settings = "Settings"
-daily_sweep = "Daily Review"
 
 [gallery]
 title = "Wallpaper Gallery"
@@ -340,10 +339,14 @@ save_fail = "Save failed"
 conflict = "Version conflict — latest data loaded, please re-edit and save"
 conflict_refresh_failed = "Version conflict — failed to refresh latest data: {error}. Your edits are preserved, please retry later"
 
-[schedule]
-title = "Schedule"
-nav_label = "Schedule"
+[plan]
+title = "Plan"
+nav_label = "Plan"
 nav_label_short = "Plan"
+tab_schedule = "Schedule"
+tab_review = "Review"
+
+[schedule]
 run = "Run Scheduler"
 applyAll = "Apply All"
 empty = "No tasks yet"
@@ -355,8 +358,6 @@ next_day = "Next day"
 summary = "{placed} placed · {unscheduled} unscheduled"
 
 [dailySweep]
-nav_label_short = "Review"
-title = "Daily Review"
 start = "Run Review Now"
 adopt = "Adopt"
 reject = "Reject"

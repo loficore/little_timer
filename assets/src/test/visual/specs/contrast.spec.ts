@@ -4,13 +4,13 @@ import { expectButtonContrast } from "../helpers/contrast";
 
 const baseURL = "http://127.0.0.1:5173";
 
-type PageId = "timer" | "habits" | "schedule" | "settings" | "aigtd";
+type PageId = "timer" | "habits" | "plan" | "settings" | "aigtd";
 
 const CASES: Array<[name: string, page: PageId, testid: string, min: number]> = [
   ["timer 开始", "timer", "timer-start", 4.5],
   ["timer 重置", "timer", "timer-reset", 4.5],
   ["习惯集添加", "habits", "create-habit-set", 4.5],
-  ["调度运行", "schedule", "run-scheduler", 4.5],
+  ["调度运行", "plan", "run-scheduler", 4.5],
   ["壁纸入口", "settings", "wallpaper-entry", 3.0],
   ["AIGTD 提交", "aigtd", "aigtd-submit", 3.0],
 ];

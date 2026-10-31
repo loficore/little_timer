@@ -26,9 +26,8 @@ export function DailySweepPage() {
   const actionable = proposals.filter((p) => !p.is_adopted);
 
   return (
-    <div className="container mx-auto max-w-3xl space-y-3 p-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t("dailySweep.title")}</h1>
+    <div className="flex flex-col gap-3" data-testid="plan-panel-review">
+      <div className="flex items-center justify-end">
         <div className="flex gap-2">
           <button
             className="btn btn-sm btn-ghost"

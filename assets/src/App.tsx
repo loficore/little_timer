@@ -5,18 +5,16 @@ import { HabitsPage } from "./HabitsPage";
 import { SettingsPage } from "./Settings.tsx";
 import { StatsPage } from "./Stats.tsx";
 import { AIGtdPage } from "./AIGtdPage";
-import { SchedulePage } from "./SchedulePage";
-import { DailySweepPage } from "./DailySweepPage";
+import { PlanPage } from "./PlanPage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastContainer, showToast } from "./components/common/Toast";
 import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, logLifecycle, logPerf } from "./utils/logger";
 import { useAppSettings, logWallpaperDebug } from "./hooks/useAppSettings";
 import { resolveWallpaperUrl, WALLPAPER_FALLBACK_GRADIENT } from "./utils/constants";
-import { supportsDailySweep } from "./utils/apiClientSingleton";
 import { t } from "./utils/i18n";
-import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, SparklesIconComponent, CalendarIcon, DailySweepIcon } from "./utils/icons";
+import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, SparklesIconComponent, CalendarIcon } from "./utils/icons";
 
-type Page = "timer" | "habits" | "aigtd" | "schedule" | "stats" | "settings" | "dailySweep";
+type Page = "timer" | "habits" | "aigtd" | "plan" | "stats" | "settings";
 
 const formatUnknownError = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -250,8 +248,7 @@ export const App = () => {
               <StatsPage onBackClick={() => navigateTo("timer")} />
             )}
             {page === "aigtd" && <AIGtdPage />}
-            {page === "schedule" && <SchedulePage />}
-            {page === "dailySweep" && <DailySweepPage />}
+            {page === "plan" && <PlanPage />}
             {page === "settings" && (
               <SettingsPage
                 onBackClick={() => navigateTo("timer")}
@@ -303,26 +300,14 @@ export const App = () => {
         </button>
         <button
           type="button"
-          data-testid="nav-schedule"
-          aria-current={page === "schedule" ? "page" : undefined}
-          className={`my-bottom-nav-item ${page === "schedule" ? "active" : ""}`}
-          onClick={() => navigateTo("schedule")}
+          data-testid="nav-plan"
+          aria-current={page === "plan" ? "page" : undefined}
+          className={`my-bottom-nav-item ${page === "plan" ? "active" : ""}`}
+          onClick={() => navigateTo("plan")}
         >
           <CalendarIcon className="h-5 w-5" />
-          <span className="btm-nav-label">{t("schedule.nav_label_short")}</span>
+          <span className="btm-nav-label">{t("plan.nav_label_short")}</span>
         </button>
-        {supportsDailySweep && (
-        <button
-          type="button"
-          data-testid="nav-dailySweep"
-          aria-current={page === "dailySweep" ? "page" : undefined}
-          className={`my-bottom-nav-item ${page === "dailySweep" ? "active" : ""}`}
-          onClick={() => navigateTo("dailySweep")}
-        >
-          <DailySweepIcon className="h-5 w-5" />
-          <span className="btm-nav-label">{t("dailySweep.nav_label_short")}</span>
-        </button>
-        )}
       </nav>
     </>
   );

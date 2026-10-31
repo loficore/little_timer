@@ -140,7 +140,8 @@ webview-inspect:
         set -e
         export LT_WEBKIT_DEBUG=1
         export WEBKIT_INSPECTOR_SERVER="${WEBKIT_INSPECTOR_SERVER:-127.0.0.1:2222}"
-        echo "inspector: http://${WEBKIT_INSPECTOR_SERVER} —— 在同机浏览器打开,列表里选 Little Timer 目标"
+        export WEBKIT_INSPECTOR_HTTP_SERVER="${WEBKIT_INSPECTOR_HTTP_SERVER:-127.0.0.1:2224}"
+        echo "inspector 列表页: http://${WEBKIT_INSPECTOR_HTTP_SERVER} (旧版 WebKit 用 http://${WEBKIT_INSPECTOR_SERVER}) —— 同机浏览器打开,选 Little Timer → Inspect"
         just go-dev-webview
 
 # 持续帧率计贴进真前端产物:构建 dist → 注入 assets/devprobe/cadence.js → vite preview 顶住 :5173 → 起 -tags webview 二进制。

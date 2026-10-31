@@ -16,13 +16,13 @@
 
 ```bash
 just webview-inspect
-# 然后在同机浏览器打开 http://127.0.0.1:2222,列表里选 Little Timer 目标
+# 然后在同机浏览器打开列表页 http://127.0.0.1:2224,选 Little Timer → Inspect
 ```
 
-两个环境变量缺一不可,各管一半:
+两个环境变量各管一半,缺一不可:
 
-- `LT_WEBKIT_DEBUG`(取值 `1` / `true` / `on`)打开 developer extras。上游 `webview.h` 只在 `debug == true` 时才调用 `webkit_settings_set_enable_developer_extras`——不设它,页面右键没有 Inspect Element,inspector 服务也不会起。
-- `WEBKIT_INSPECTOR_SERVER` 只决定监听地址。设了它而没设 `LT_WEBKIT_DEBUG` 时,服务照样连不上。
+- `LT_WEBKIT_DEBUG`(取值 `1` / `true` / `on`)打开 developer extras。上游 `webview.h` 只在 `debug == true` 时才调用 `webkit_settings_set_enable_developer_extras`——不设它,页面右键没有 Inspect Element,列表里也不会有目标。
+- `WEBKIT_INSPECTOR_SERVER` 与 `WEBKIT_INSPECTOR_HTTP_SERVER` 分别是**协议 socket** 和 **HTTP 列表页**:实测 webkit2gtk 2.52.1 上 SERVER 口(2222)不是网页,curl 只得 Empty reply、浏览器显示空白页;列表页在 HTTP_SERVER 口(2224)。旧版 WebKit 直接把 SERVER 当 HTTP 前端用,拿不准时两个地址都开一次,看哪个出列表。
 
 **反例对照**(最容易让人对同一现象重复花一小时的组合):
 
@@ -30,9 +30,10 @@ just webview-inspect
 WEBKIT_INSPECTOR_SERVER=127.0.0.1:2223 just go-dev-webview   # 不带 LT_WEBKIT_DEBUG
 ```
 
-现象:窗口正常,但 `http://127.0.0.1:2223` 连不上,终端里**没有** `webview: devtools 已开` 那行提示;两个变量都设齐时该行出现,列表里出现 Little Timer 目标,可切到 Timeline / Profiler / Memory 面板。
+实测记录(2026-10-31,Fedora_Jiaolong / fc44 / webkit2gtk4.1-2.52.1):
 
-> 调试机(Fedora_Jiaolong)上的两组带日期实跑输出(正例与反例)按采集纪律贴在本小节,当前待补。
+- 正例(两变量齐,`just webview-inspect`):终端出现 `webview: devtools 已开…` 提示行;列表页出现 Little Timer 条目(指向 `http://localhost:5173/?runtime=webview`);窗口内右键 → Inspect Element 可直接弹出 Web Inspector。
+- 反例(不带 `LT_WEBKIT_DEBUG`):2223 同样「能连上但回空白」(SERVER socket 照常在听),终端**没有**提示行。判定「devtools 开没开」以**提示行 + 列表页里有没有目标**为准,端口在不在监听不算。
 
 ## 第二层:`perf` 采原生栈
 
@@ -85,6 +86,7 @@ valgrind --tool=massif --pages-as-heap=yes --massif-out-file=perf-out/massif.out
 | 装饰层 `backdrop-filter: blur(18px/8px/呼吸动画)` 对间隔的影响 | 无(四阶段均 32 ms) | 本机实验 2026-10-30 |
 | `Settings.interaction.frame`(dev / prod / X11 / 关掉 DMABUF 开关) | 215–382 ms,四组同量级 | [linux-packaging.md](linux-packaging.md) 已知问题 7 |
 | 浏览器同页面 | 主观流畅(`[CAD]` 数字待补) | `just webview-cadence` |
+| webview 同页面 2026-10-31 复访 | 主观不卡(无 `[PERF]`/`[CAD]` 数字;疑与 `WEBKIT_DISABLE_DMABUF_RENDERER` 的投放状态或 webkitgtk 升级到 2.52.1 有关) | 调试机实跑,待量化 |
 
 持续帧率计已正式化:`assets/devprobe/cadence.js` 由 `just webview-cadence` 注入生产构建产物,终端输出 `[CAD] idle …` / `[CAD] click …` 两种窗口。调试机若 `justfile.local` 里还留着同名的临时 `webview-cadence` recipe,同步本分支后先删掉它——`justfile` 经 `import? "justfile.local"` 合并,重名会让所有 `just` 命令报 recipe redefined。判读:idle 与 click 都是 ~32 ms → 成本在 Preact 渲染侧;idle ~32 而 click ~200 ms → 成本在 WebKit 的原生提交/绘制,用第二层的 `self-top.txt` 收口。
 

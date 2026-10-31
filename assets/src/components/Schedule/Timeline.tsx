@@ -13,6 +13,7 @@
  *    之前,会被 clamp 到窗口左边界,仍能渲染为最小宽度的占位(测 1/3 已覆盖)。
  */
 
+import { useEffect, useState } from "preact/hooks";
 import { TaskBlock } from "./TaskBlock";
 import type { TimelineTask } from "./types";
 import { t } from "../../utils/i18n";
@@ -29,6 +30,20 @@ function buildHourTicks(startHour: number, endHour: number): number[] {
   return out;
 }
 
+/**
+ * 按视口宽度决定显示哪些整点刻度:窄屏抽稀避免 390px 下标签重叠(R6)。
+ */
+export function pickTickHours(
+  viewportWidth: number,
+  startHour = 6,
+  endHour = 23,
+): number[] {
+  const hours = buildHourTicks(startHour, endHour);
+  if (viewportWidth < 640) return hours.filter((h) => h % 6 === 0); // [6,12,18]
+  if (viewportWidth < 1024) return hours.filter((h) => h % 3 === 0); // [6,9,12,15,18,21]
+  return hours;
+}
+
 function pctOfWindow(min: number, startMin: number, endMin: number): number {
   const span = endMin - startMin;
   if (span <= 0) return 0;
@@ -38,7 +53,18 @@ function pctOfWindow(min: number, startMin: number, endMin: number): number {
 export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23 }: TimelineProps) {
   const windowStartMin = dayStartHour * 60;
   const windowEndMin = dayEndHour * 60;
-  const ticks = buildHourTicks(dayStartHour, dayEndHour);
+
+  const [viewportWidth, setViewportWidth] = useState(
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+  );
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const ticks = pickTickHours(viewportWidth, dayStartHour, dayEndHour);
 
   return (
     <div
@@ -53,7 +79,9 @@ export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23 }: TimelineP
             className="timeline-tick absolute top-0 -translate-x-1/2 text-[10px] opacity-60"
             style={{ left: `${pctOfWindow(h * 60, windowStartMin, windowEndMin)}%` }}
           >
-            {String(h).padStart(2, "0")}:00
+            {viewportWidth < 640
+              ? String(h).padStart(2, "0")
+              : String(h).padStart(2, "0") + ":00"}
           </span>
         ))}
       </div>

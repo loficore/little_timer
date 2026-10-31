@@ -93,21 +93,36 @@
 
   /* ===== Schedule Timeline (Task 9) ===== */
 
-  /* context_tag 底色族:左侧 3px inset 色条区分 6 类情境。 */
-  .timeline-task-block.context-writing {
-    box-shadow: inset 3px 0 0 #a855f7;
+  /* 任务块优先级:单一色相的明度阶梯(R2「一屏数据色不超一个主色相 + 辅助明度阶梯」)。
+     color-mix 的百分比必须 ≤100%,所以用「主色占比逐级升高」表达强度。 */
+  .timeline-task-block.my-priority-1 {
+    background: color-mix(in oklab, var(--my-primary-solid) 12%, var(--my-surface-strong));
+    color: var(--my-on-surface);
   }
-  .timeline-task-block.context-coding {
-    box-shadow: inset 3px 0 0 #0ea5e9;
+  .timeline-task-block.my-priority-2 {
+    background: color-mix(in oklab, var(--my-primary-solid) 30%, var(--my-surface-strong));
+    color: var(--my-on-surface);
   }
-  .timeline-task-block.context-communication {
-    box-shadow: inset 3px 0 0 #22c55e;
+  .timeline-task-block.my-priority-3 {
+    background: color-mix(in oklab, var(--my-primary-solid) 52%, var(--my-surface-strong));
+    color: var(--my-on-primary-solid);
   }
-  .timeline-task-block.context-study {
-    box-shadow: inset 3px 0 0 #eab308;
+  .timeline-task-block.my-priority-4 {
+    background: color-mix(in oklab, var(--my-primary-solid) 76%, var(--my-surface-strong));
+    color: var(--my-on-primary-solid);
   }
+  .timeline-task-block.my-priority-5 {
+    background: var(--my-primary-solid);
+    color: var(--my-on-primary-solid);
+  }
+
+  /* context_tag 底色族:左侧 3px inset 色条区分 6 类情境(辅助区分,不抢主色相)。 */
+  .timeline-task-block.context-writing,
+  .timeline-task-block.context-coding,
+  .timeline-task-block.context-communication,
+  .timeline-task-block.context-study,
   .timeline-task-block.context-chores {
-    box-shadow: inset 3px 0 0 #f97316;
+    box-shadow: inset 3px 0 0 color-mix(in oklab, var(--my-on-surface-variant) 70%, transparent);
   }
   .timeline-task-block.context-general,
   .timeline-task-block.context-default {

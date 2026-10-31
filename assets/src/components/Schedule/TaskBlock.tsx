@@ -2,7 +2,7 @@
  * TaskBlock —— Timeline 中的单个任务块。
  *
  * 视觉:
- *  - 优先级 1-5 映射到 5 个明显不同的背景色(daisyUI/Tailwind utility)。
+ *  - 优先级 1-5 映射到 `my-priority-N`(单一主色相的明度阶梯,见 surfaces.css)。
  *  - context_tag 决定左边 tint(`context-writing` / `context-coding` / …)。
  *  - 内部渲染 title + 优先级徽章 + 时长。
  *
@@ -22,11 +22,11 @@ interface TaskBlockProps {
 }
 
 const PRIORITY_STYLE: Record<number, string> = {
-  1: "bg-blue-200 text-blue-950 border-blue-300",
-  2: "bg-cyan-300 text-cyan-950 border-cyan-400",
-  3: "bg-amber-300 text-amber-950 border-amber-400",
-  4: "bg-orange-400 text-white border-orange-500",
-  5: "bg-red-600 text-white border-red-700",
+  1: "my-priority-1",
+  2: "my-priority-2",
+  3: "my-priority-3",
+  4: "my-priority-4",
+  5: "my-priority-5",
 };
 
 const CONTEXT_TINT: Record<string, string> = {

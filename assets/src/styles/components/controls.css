@@ -355,3 +355,18 @@
     border-color: color-mix(in oklab, var(--my-outline) 72%, transparent);
   }
 }
+/* R6: 设置页 5 个中文 tab 在 390px 下放不下。只对带 .my-tabs-scroll 的容器
+   改成横向滚动 + 两端渐隐；桌面端与 PlanPage 的两 tab 均分都不受影响。 */
+@media (max-width: 639px) {
+  .my-tabs.my-tabs-scroll {
+    overflow-x: auto;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 0.75rem, #000 calc(100% - 0.75rem), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 0.75rem, #000 calc(100% - 0.75rem), transparent 100%);
+  }
+
+  .my-tabs.my-tabs-scroll .my-tab {
+    flex: 0 0 auto;
+    overflow: visible;
+    text-overflow: clip;
+  }
+}

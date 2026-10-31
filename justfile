@@ -119,7 +119,9 @@ go-dev-webview:
         sleep 3
 
         echo "=== 启动 Go 后端 (webview) ==="
-        cd {{go_src}} && go build -o bin/server ./cmd/server && bin/server serve --webview --port $GO_PORT &
+        # webview 由 build tag 门控(internal/webview/native.go),不带 -tags webview
+        # 编出来的是桩,窗口永远起不来;需要 gtk3-devel + webkit2gtk3-devel。
+        cd {{go_src}} && go build -tags webview -o bin/server ./cmd/server && bin/server serve --webview --port $GO_PORT &
         GO_PID=$!
 
         echo ""

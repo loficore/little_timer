@@ -119,7 +119,9 @@ go-dev-webview:
         sleep 3
 
         echo "=== 启动 Go 后端 (webview) ==="
-        cd {{go_src}} && go build -o bin/server ./cmd/server && bin/server serve --webview --port $GO_PORT &
+        # webview 由 build tag 门控(internal/webview/native.go),不带 -tags webview
+        # 编出来的是桩,窗口永远起不来;需要 gtk3-devel + webkit2gtk3-devel。
+        cd {{go_src}} && go build -tags webview -o bin/server ./cmd/server && bin/server serve --webview --port $GO_PORT &
         GO_PID=$!
 
         echo ""
@@ -129,6 +131,47 @@ go-dev-webview:
         echo ""
         echo "按 Ctrl+C 停止所有服务"
         wait
+
+# 两个变量缺一不可 —— LT_WEBKIT_DEBUG 开 developer extras,WEBKIT_INSPECTOR_SERVER 给监听地址。
+# 需要本机有 gtk/webkit 开发包(EL9 没有,在调试机上跑)。
+# 带 WebKit 远程 inspector 的 webview 开发运行:profile/timeline/memory 都在浏览器里看。
+webview-inspect:
+        #!/usr/bin/env bash
+        set -e
+        export LT_WEBKIT_DEBUG=1
+        export WEBKIT_INSPECTOR_SERVER="${WEBKIT_INSPECTOR_SERVER:-127.0.0.1:2222}"
+        export WEBKIT_INSPECTOR_HTTP_SERVER="${WEBKIT_INSPECTOR_HTTP_SERVER:-127.0.0.1:2224}"
+        echo "inspector 列表页: http://${WEBKIT_INSPECTOR_HTTP_SERVER} (旧版 WebKit 用 http://${WEBKIT_INSPECTOR_SERVER}) —— 同机浏览器打开,选 Little Timer → Inspect"
+        just go-dev-webview
+
+# 持续帧率计贴进真前端产物:构建 dist → 注入 assets/devprobe/cadence.js → vite preview 顶住 :5173 → 起 -tags webview 二进制。
+# 必须用 preview:apiClientSingleton 的 baseUrl 取 window.location.origin,纯静态服务器给不了 /api。
+# dist 每次 pnpm build 重生成,注入是临时的,不改 assets/src 任何源文件。
+# 判读:idle 与 click 两行都 ~32ms → 成本在前端渲染侧;idle ~32 而 click ~200 → 成本在 WebKit 原生提交/绘制,用 scripts/collect-webkit-perf.sh 的 self-top.txt 收口。
+# 需要本机有 gtk/webkit 开发包(EL9 没有,在调试机上跑);wails/runtime.js 桩不写会白屏(已知问题 4)。
+webview-cadence:
+        #!/usr/bin/env bash
+        set -e
+        export BACKEND_PORT=8013
+        export LT_WEBKIT_DEBUG=1
+        LOGF="$PWD/perf-out/cadence-$(date +%Y%m%d-%H%M%S).log"
+        mkdir -p perf-out
+        echo "留档: [CAD] 行随 LT_WEBKIT_DEBUG 回传终端,整段 tee 到 $LOGF"
+        # 调试机 justfile.local 常年 export WEBKIT_DISABLE_DMABUF_RENDERER := "1";
+        # CADENCE_CLEAR_DMABUF=1 只在本 recipe 的子进程里撤掉它(矩阵 B/D 格),不改 justfile.local。
+        if [ "${CADENCE_CLEAR_DMABUF:-0}" = "1" ]; then unset WEBKIT_DISABLE_DMABUF_RENDERER; fi
+        (cd assets && pnpm build)
+        mkdir -p assets/dist/wails
+        printf 'export const Call = { ByID: () => { throw new Error("wails runtime stub"); } };\nexport const CancellablePromise = class {};\nexport const Create = {};\n' > assets/dist/wails/runtime.js
+        cp assets/devprobe/cadence.js assets/dist/cadence.js
+        printf '<script src="/cadence.js"></script>\n' >> assets/dist/index.html
+        echo "=== 启动静态预览 + Go 后端 (webview) ==="
+        (cd assets && exec pnpm exec vite preview --port 5173 --strictPort) &
+        PREVIEW_PID=$!
+        until ss -tln | grep -q ':5173 '; do sleep 0.2; done
+        trap 'kill $PREVIEW_PID 2>/dev/null; pkill -f "vite preview --port 5173" 2>/dev/null' EXIT INT TERM
+        cd {{go_src}} && go build -tags webview -o bin/server ./cmd/server
+        bin/server serve --webview --port $BACKEND_PORT 2>&1 | tee "$LOGF"
 
 go-run: go-build
         @{{go_src}}/bin/server serve

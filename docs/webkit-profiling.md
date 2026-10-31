@@ -86,19 +86,21 @@ valgrind --tool=massif --pages-as-heap=yes --massif-out-file=perf-out/massif.out
 | 装饰层 `backdrop-filter: blur(18px/8px/呼吸动画)` 对间隔的影响 | 无(四阶段均 32 ms) | 本机实验 2026-10-30 |
 | `Settings.interaction.frame`(dev / prod / X11 / 关掉 DMABUF 开关) | 215–382 ms,四组同量级 | [linux-packaging.md](linux-packaging.md) 已知问题 7 |
 | 浏览器同页面 | 主观流畅(`[CAD]` 数字待补) | `just webview-cadence` 产物在 :5173,浏览器直接开 |
-| webview 同页面 2026-10-31 复访 | 主观不卡(无 `[PERF]`/`[CAD]` 数字;「webkitgtk 升到 2.52.1」假设已排除——该机 2026-05-08 就装的 2.52.1,早于卡顿数据;`justfile.local` 仍导出 `WEBKIT_DISABLE_DMABUF_RENDERER := "1"`,即复访跑的仍是软件路径,差异原因待 B/C 两格量化) | 调试机实跑,待量化 |
+| webview C 格(Wayland + `WEBKIT_DISABLE_DMABUF_RENDERER=1`)2026-10-31 16:37 | idle n=293:p50 16.1 / p90 16.2 / p99 16.7 / max 24.7 ms;click 三窗 median 16.0 ms(avg 15.5–20.3) | 调试机 Fedora_Jiaolong,`perf-out/cadence-20261031-163746.log`(不入库) |
+| webview B 格(Wayland + dmabuf 开)同日 | **无帧数据**:起窗约 6 s 后 `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display`,连接被杀 | 同上,`cadence-20261031-164109.log` |
+| webview D 格(X11 + dmabuf 开)同日 | **无帧数据**:Go 进程在 webkit cgo 内 SIGSEGV(`signal arrived during cgo execution`)后 recipe exit 1 | 同上,`cadence-20261031-164539.log` |
 
-持续帧率计已正式化:`assets/devprobe/cadence.js` 由 `just webview-cadence` 注入生产构建产物,输出 `[CAD] idle …` / `[CAD] click …` 两种窗口。判读:idle 与 click 都是 ~32 ms → 成本在 Preact 渲染侧;idle ~32 而 click ~200 ms → 成本在 WebKit 的原生提交/绘制,用第二层的 `self-top.txt` 收口。
+持续帧率计已正式化:`assets/devprobe/cadence.js` 由 `just webview-cadence` 注入生产构建产物,输出 `[CAD] idle …` / `[CAD] click …` 两种窗口。判读:idle 与 click 同为 ~16 ms → 送帧与交互都不卡;idle ~32 而 click ~200 ms → 成本在 WebKit 的原生提交/绘制,用第二层的 `self-top.txt` 收口。**2026-10-31 复测结论**:同一台机器、同一开关状态(`justfile.local` 导出 =1,「升级到 2.52.1」假设已排除——该机 5 月就装了),C 格 idle/click 都是 16 ms,10-29/30 的 215–382 ms 卡顿**未复现**;其成因至今没有符号化证据,不要拿旧数字下新结论。
 
-**自动留档(2026-10-31 补)**:WebKitGTK 默认不把页面 console 转发到终端,`[CAD]` 行只能靠 webview 绑定回传——`LT_WEBKIT_DEBUG=1` 时 `native.go` 注册 `window.ltProfLog`,cadence.js 把同一行送回来写进 stderr;recipe 自身 `tee` 整段输出到 `perf-out/cadence-<时间戳>.log`(gitignore 内),跑完一格交 `grep '\[CAD\]' <日志>` 即可,不需要人抄。绑定只在 debug 开时注册,发布行为不变;若终端一直没有 `[CAD]` 行,降级读数走右键 → Inspect Element 的 Console(右键 → Save All Messages)或浏览器 `http://localhost:5173` 的 devtools。
+**自动留档(2026-10-31 补)**:实测发现 webkit2gtk4.1-2.52.1 会把页面 console 原样打到 stderr(带 `file:line:col: CONSOLE LOG` 前缀),`[CAD]` 行因此天然落终端;`LT_WEBKIT_DEBUG=1` 时 `native.go` 另外注册 `window.ltProfLog` 绑定,cadence.js 把同一行干净地再写一遍——两处都有,统计前必须 `grep '\[CAD\]' <日志> | grep -v CONSOLE` 去重,否则每行计 2 次。绑定只在 debug 开时注册,发布行为不变;若两个来源都没有 `[CAD]` 行,降级读数走右键 → Inspect Element 的 Console(右键 → Save All Messages)或浏览器 `http://localhost:5173` 的 devtools。recipe 自身 `tee` 整段输出到 `perf-out/cadence-<时间戳>.log`(gitignore 内),不需要人抄。
 
 **矩阵四格**(每格单独跑一次 recipe,Ctrl+C 结束后交对应日志的 `grep '[CAD]'` 结果;Wayland/X11 与 DMABUF 状态逐格标注,禁止跨格平均):
 
-| 格 | 命令 | 说明 |
-| --- | --- | --- |
-| A/C(当前默认,DMABUF 关) | `just webview-cadence` | `justfile.local` 导出 =1 的机器上 A 与 C 同格 |
-| B(DMABUF 开) | `CADENCE_CLEAR_DMABUF=1 just webview-cadence` | recipe 只在自己的子进程里 unset,不改 `justfile.local` |
-| D(X11 + DMABUF 开) | `GDK_BACKEND=x11 CADENCE_CLEAR_DMABUF=1 just webview-cadence` | X11 对照,同一次采集不混 Wayland |
+| 格 | 命令 | 说明 | 2026-10-31 结果(Fedora_Jiaolong) |
+| --- | --- | --- | --- |
+| A/C(当前默认,DMABUF 关) | `just webview-cadence` | `justfile.local` 导出 =1 的机器上 A 与 C 同格 | idle p50 16.1 ms,click median 16 ms——流畅 |
+| B(DMABUF 开) | `CADENCE_CLEAR_DMABUF=1 just webview-cadence` | recipe 只在自己的子进程里 unset,不改 `justfile.local` | 起窗 ~6 s 后 Wayland Protocol error 71,连接被杀 |
+| D(X11 + DMABUF 开) | `GDK_BACKEND=x11 CADENCE_CLEAR_DMABUF=1 just webview-cadence` | X11 对照,同一次采集不混 Wayland | webkit cgo 内 SIGSEGV |
 
 浏览器分母:同一 `vite preview` 已在 :5173 服务注入了 cadence 的产物,浏览器打开同址连点 tab,从 devtools console 抄 `[CAD]` 行(或 Save All Messages)。
 

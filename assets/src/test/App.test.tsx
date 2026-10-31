@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../utils/apiClientSingleton", () => ({
+  supportsDailySweep: true,
   getAPIClient: vi.fn(() => ({
     getSettings: vi.fn().mockImplementation(() =>
       Promise.resolve({

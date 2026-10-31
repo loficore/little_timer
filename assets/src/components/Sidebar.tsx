@@ -5,6 +5,7 @@
 
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
+import { supportsDailySweep } from "../utils/apiClientSingleton";
 import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, CalendarIcon } from "../utils/icons";
 import { SparklesIconComponent, DailySweepIcon } from "../utils/icons";
 
@@ -70,6 +71,8 @@ const navItems = [
 ];
 
 export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavigate }) => {
+    // Android 每日梳理后端绑定未落地(GitHub issue #41),能力探测为 false 时隐藏入口
+    const visibleNavItems = supportsDailySweep ? navItems : navItems.filter((i) => i.id !== "dailySweep");
     return (
         <aside className="my-sidebar flex flex-col w-60 h-full shrink-0">
             {/* Logo */}
@@ -82,7 +85,7 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
 
             {/* 导航 */}
             <nav className="flex-1 p-2" aria-label={t("common.app_name")}>
-                {navItems.map((item) => (
+                {visibleNavItems.map((item) => (
                     <button
                         key={item.id}
                         data-testid={`nav-${item.id}`}

@@ -94,4 +94,9 @@ describe("Timeline", () => {
     const { container } = render(<Timeline tasks={[]} />);
     expect(container.querySelectorAll("[data-task-id]").length).toBe(0);
   });
+
+  it("不再渲染 habit 占位轨", () => {
+    const { container } = render(<Timeline tasks={[]} />);
+    expect(container.querySelector('[data-testid="habit-lane"]')).toBeNull();
+  });
 });

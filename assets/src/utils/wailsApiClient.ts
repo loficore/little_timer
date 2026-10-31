@@ -392,43 +392,43 @@ export class WailsAPIClient {
     return { filename: "" };
   }
   // ===== GTD Daily Sweep / Review (v12) =====
-  // Android Wails 绑定尚未包含 daily-sweep 服务 — stub 为 throw,避免 proxy
-  // 静默返回 undefined。Web (HTTP) 路径走 APIClient 完整实现。
+  // 入口已由 supportsDailySweep 能力探测隐藏,此处的 throw 是深链兜底的内部
+  // 不变量,错误文案即用户可见口径。补齐跟踪见 GitHub issue #41。
   /**
    *
    */
   async startDailySweep(): Promise<{ job_ids: number[] }> {
-    throw new Error("daily_sweep.startDailySweep: not implemented on Android (Wails)");
+    throw new Error("每日梳理在当前平台不可用");
   }
   /**
    *
    */
   async getDailySweepToday(): Promise<unknown> {
-    throw new Error("daily_sweep.getDailySweepToday: not implemented on Android (Wails)");
+    throw new Error("每日梳理在当前平台不可用");
   }
   /**
    *
    */
   async adoptDailySweep(_body: unknown): Promise<unknown> {
-    throw new Error("daily_sweep.adoptDailySweep: not implemented on Android (Wails)");
+    throw new Error("每日梳理在当前平台不可用");
   }
   /**
    *
    */
   async rejectDailySweep(_body: unknown): Promise<void> {
-    throw new Error("daily_sweep.rejectDailySweep: not implemented on Android (Wails)");
+    throw new Error("每日梳理在当前平台不可用");
   }
   /**
    *
    */
   async getDailySweepSettings(): Promise<unknown> {
-    throw new Error("daily_sweep.getDailySweepSettings: not implemented on Android (Wails)");
+    throw new Error("每日梳理在当前平台不可用");
   }
   /**
    *
    */
   async updateDailySweepSettings(_patch: unknown): Promise<unknown> {
-    throw new Error("daily_sweep.updateDailySweepSettings: not implemented on Android (Wails)");
+    throw new Error("每日梳理在当前平台不可用");
   }
 }
 

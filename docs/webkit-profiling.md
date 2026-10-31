@@ -86,7 +86,7 @@ valgrind --tool=massif --pages-as-heap=yes --massif-out-file=perf-out/massif.out
 | `Settings.interaction.frame`(dev / prod / X11 / 关掉 DMABUF 开关) | 215–382 ms,四组同量级 | [linux-packaging.md](linux-packaging.md) 已知问题 7 |
 | 浏览器同页面 | 主观流畅(`[CAD]` 数字待补) | `just webview-cadence` |
 
-持续帧率计已正式化:`assets/devprobe/cadence.js` 由 `just webview-cadence` 注入生产构建产物,终端输出 `[CAD] idle …` / `[CAD] click …` 两种窗口。判读:idle 与 click 都是 ~32 ms → 成本在 Preact 渲染侧;idle ~32 而 click ~200 ms → 成本在 WebKit 的原生提交/绘制,用第二层的 `self-top.txt` 收口。
+持续帧率计已正式化:`assets/devprobe/cadence.js` 由 `just webview-cadence` 注入生产构建产物,终端输出 `[CAD] idle …` / `[CAD] click …` 两种窗口。调试机若 `justfile.local` 里还留着同名的临时 `webview-cadence` recipe,同步本分支后先删掉它——`justfile` 经 `import? "justfile.local"` 合并,重名会让所有 `just` 命令报 recipe redefined。判读:idle 与 click 都是 ~32 ms → 成本在 Preact 渲染侧;idle ~32 而 click ~200 ms → 成本在 WebKit 的原生提交/绘制,用第二层的 `self-top.txt` 收口。
 
 **怎么算正常(硬阈值)**:webview 的交互帧时间 ≤ 同一页面在浏览器里交互帧时间的 2 倍,才算能当默认推荐形态发;否则 [linux-packaging.md](linux-packaging.md) D6 取「HTTP-only + 浏览器为默认,webview 为可选」。
 

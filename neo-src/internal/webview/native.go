@@ -22,6 +22,13 @@ func run() error {
 
 	if devtoolsEnabled() {
 		fmt.Fprintln(os.Stderr, "webview: devtools 已开。远程 inspector 由 WEBKIT_INSPECTOR_SERVER 决定地址(默认无,右键页面 → Inspect Element)。")
+		// Navigate 之前绑定:webview.h 的 bind 走 user script(init),新文档加载时自动重放,
+		// 页面里的 cadence.js 因此一定能看到 window.ltProfLog。
+		if err := w.Bind(profBindingName, func(msg string) error {
+			return writeProfLine(os.Stderr, msg)
+		}); err != nil {
+			fmt.Fprintln(os.Stderr, "webview: ltProfLog 绑定失败,[CAD] 行只留在页面 console:", err)
+		}
 	}
 	w.SetTitle(Title)
 	w.SetSize(DefaultWidth, DefaultHeight, webview.HintNone)

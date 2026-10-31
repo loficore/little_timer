@@ -85,10 +85,24 @@ valgrind --tool=massif --pages-as-heap=yes --massif-out-file=perf-out/massif.out
 | 空闲 rAF 间隔(探针页,无业务代码) | avg 31.9 / median 32.0 / max 33.0 ms | 本机实验 2026-10-30 |
 | 装饰层 `backdrop-filter: blur(18px/8px/呼吸动画)` 对间隔的影响 | 无(四阶段均 32 ms) | 本机实验 2026-10-30 |
 | `Settings.interaction.frame`(dev / prod / X11 / 关掉 DMABUF 开关) | 215–382 ms,四组同量级 | [linux-packaging.md](linux-packaging.md) 已知问题 7 |
-| 浏览器同页面 | 主观流畅(`[CAD]` 数字待补) | `just webview-cadence` |
-| webview 同页面 2026-10-31 复访 | 主观不卡(无 `[PERF]`/`[CAD]` 数字;疑与 `WEBKIT_DISABLE_DMABUF_RENDERER` 的投放状态或 webkitgtk 升级到 2.52.1 有关) | 调试机实跑,待量化 |
+| 浏览器同页面 | 主观流畅(`[CAD]` 数字待补) | `just webview-cadence` 产物在 :5173,浏览器直接开 |
+| webview 同页面 2026-10-31 复访 | 主观不卡(无 `[PERF]`/`[CAD]` 数字;「webkitgtk 升到 2.52.1」假设已排除——该机 2026-05-08 就装的 2.52.1,早于卡顿数据;`justfile.local` 仍导出 `WEBKIT_DISABLE_DMABUF_RENDERER := "1"`,即复访跑的仍是软件路径,差异原因待 B/C 两格量化) | 调试机实跑,待量化 |
 
-持续帧率计已正式化:`assets/devprobe/cadence.js` 由 `just webview-cadence` 注入生产构建产物,终端输出 `[CAD] idle …` / `[CAD] click …` 两种窗口。调试机若 `justfile.local` 里还留着同名的临时 `webview-cadence` recipe,同步本分支后先删掉它——`justfile` 经 `import? "justfile.local"` 合并,重名会让所有 `just` 命令报 recipe redefined。判读:idle 与 click 都是 ~32 ms → 成本在 Preact 渲染侧;idle ~32 而 click ~200 ms → 成本在 WebKit 的原生提交/绘制,用第二层的 `self-top.txt` 收口。
+持续帧率计已正式化:`assets/devprobe/cadence.js` 由 `just webview-cadence` 注入生产构建产物,输出 `[CAD] idle …` / `[CAD] click …` 两种窗口。判读:idle 与 click 都是 ~32 ms → 成本在 Preact 渲染侧;idle ~32 而 click ~200 ms → 成本在 WebKit 的原生提交/绘制,用第二层的 `self-top.txt` 收口。
+
+**自动留档(2026-10-31 补)**:WebKitGTK 默认不把页面 console 转发到终端,`[CAD]` 行只能靠 webview 绑定回传——`LT_WEBKIT_DEBUG=1` 时 `native.go` 注册 `window.ltProfLog`,cadence.js 把同一行送回来写进 stderr;recipe 自身 `tee` 整段输出到 `perf-out/cadence-<时间戳>.log`(gitignore 内),跑完一格交 `grep '\[CAD\]' <日志>` 即可,不需要人抄。绑定只在 debug 开时注册,发布行为不变;若终端一直没有 `[CAD]` 行,降级读数走右键 → Inspect Element 的 Console(右键 → Save All Messages)或浏览器 `http://localhost:5173` 的 devtools。
+
+**矩阵四格**(每格单独跑一次 recipe,Ctrl+C 结束后交对应日志的 `grep '[CAD]'` 结果;Wayland/X11 与 DMABUF 状态逐格标注,禁止跨格平均):
+
+| 格 | 命令 | 说明 |
+| --- | --- | --- |
+| A/C(当前默认,DMABUF 关) | `just webview-cadence` | `justfile.local` 导出 =1 的机器上 A 与 C 同格 |
+| B(DMABUF 开) | `CADENCE_CLEAR_DMABUF=1 just webview-cadence` | recipe 只在自己的子进程里 unset,不改 `justfile.local` |
+| D(X11 + DMABUF 开) | `GDK_BACKEND=x11 CADENCE_CLEAR_DMABUF=1 just webview-cadence` | X11 对照,同一次采集不混 Wayland |
+
+浏览器分母:同一 `vite preview` 已在 :5173 服务注入了 cadence 的产物,浏览器打开同址连点 tab,从 devtools console 抄 `[CAD]` 行(或 Save All Messages)。
+
+调试机若 `justfile.local` 里还留着同名的临时 `webview-cadence` recipe,同步本分支后先删掉它——`justfile` 经 `import? "justfile.local"` 合并,重名会让所有 `just` 命令报 recipe redefined。
 
 **怎么算正常(硬阈值)**:webview 的交互帧时间 ≤ 同一页面在浏览器里交互帧时间的 2 倍,才算能当默认推荐形态发;否则 [linux-packaging.md](linux-packaging.md) D6 取「HTTP-only + 浏览器为默认,webview 为可选」。
 

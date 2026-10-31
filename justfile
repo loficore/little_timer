@@ -153,6 +153,13 @@ webview-cadence:
         #!/usr/bin/env bash
         set -e
         export BACKEND_PORT=8013
+        export LT_WEBKIT_DEBUG=1
+        LOGF="$PWD/perf-out/cadence-$(date +%Y%m%d-%H%M%S).log"
+        mkdir -p perf-out
+        echo "留档: [CAD] 行随 LT_WEBKIT_DEBUG 回传终端,整段 tee 到 $LOGF"
+        # 调试机 justfile.local 常年 export WEBKIT_DISABLE_DMABUF_RENDERER := "1";
+        # CADENCE_CLEAR_DMABUF=1 只在本 recipe 的子进程里撤掉它(矩阵 B/D 格),不改 justfile.local。
+        if [ "${CADENCE_CLEAR_DMABUF:-0}" = "1" ]; then unset WEBKIT_DISABLE_DMABUF_RENDERER; fi
         (cd assets && pnpm build)
         mkdir -p assets/dist/wails
         printf 'export const Call = { ByID: () => { throw new Error("wails runtime stub"); } };\nexport const CancellablePromise = class {};\nexport const Create = {};\n' > assets/dist/wails/runtime.js
@@ -163,7 +170,8 @@ webview-cadence:
         PREVIEW_PID=$!
         until ss -tln | grep -q ':5173 '; do sleep 0.2; done
         trap 'kill $PREVIEW_PID 2>/dev/null; pkill -f "vite preview --port 5173" 2>/dev/null' EXIT INT TERM
-        cd {{go_src}} && go build -tags webview -o bin/server ./cmd/server && bin/server serve --webview --port $BACKEND_PORT
+        cd {{go_src}} && go build -tags webview -o bin/server ./cmd/server
+        bin/server serve --webview --port $BACKEND_PORT 2>&1 | tee "$LOGF"
 
 go-run: go-build
         @{{go_src}}/bin/server serve

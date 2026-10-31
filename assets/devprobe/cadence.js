@@ -8,12 +8,25 @@
   let pendingClick = false;
   let windowSize = IDLE_WINDOW;
 
+  function emit(line) {
+    console.log(line);
+    // LT_WEBKIT_DEBUG=1 时 native.go 绑了 window.ltProfLog,把同一行写回终端;
+    // 绑定不存在(浏览器 / 未开 debug)就只留 console,静默降级。
+    const bound = window.ltProfLog;
+    if (typeof bound === "function") {
+      try {
+        const r = bound(line);
+        if (r && typeof r.catch === "function") r.catch(() => {});
+      } catch (e) { /* 回传失败不影响计时 */ }
+    }
+  }
+
   function report(mode) {
     const d = [];
     for (let i = 1; i < stamps.length; i++) d.push(stamps[i] - stamps[i - 1]);
     if (!d.length) return;
     const sorted = [...d].sort((a, b) => a - b);
-    console.log(
+    emit(
       `[CAD] ${mode} avgMs=${(d.reduce((a, b) => a + b, 0) / d.length).toFixed(1)} ` +
       `medianMs=${sorted[sorted.length >> 1].toFixed(1)} maxMs=${sorted[sorted.length - 1].toFixed(1)}`,
     );

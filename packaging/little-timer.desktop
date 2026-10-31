@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Name=Little Timer
+Name[zh_CN]=小计时
+Name[ja_JP]=リトルタイマー
+Comment=Countdown, stopwatch, habits and GTD timer
+Comment[zh_CN]=倒计时、正计时、习惯与 GTD 计时
+Comment[ja_JP]=カウントダウン・ストップウォッチ・習慣・GTD タイマー
+Exec=little-timer-desktop
+Icon=little-timer
+Terminal=false
+Categories=Utility;
+Keywords=timer;countdown;stopwatch;habit;focus;
+StartupNotify=true
+StartupWMClass=little-timer
+Actions=Webview;
+
+[Desktop Action Webview]
+Name=Open in WebView Window
+Name[zh_CN]=在 WebView 窗口中打开
+Exec=little-timer serve --webview

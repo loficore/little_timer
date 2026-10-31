@@ -11,7 +11,7 @@
 package http
 
 import (
-	"net/http"
+	"io/fs"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -25,6 +25,16 @@ import (
 // `corsOrigin` 控制 Access-Control-Allow-Origin 响应头；
 // 开发环境传 "*"，生产环境传具体 origin。
 func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
+	return newRouter(a, corsOrigin, nil)
+}
+
+// NewRouterWithUI 与 NewRouter 相同，但额外把 uiFS 作为前端静态资源根。
+// uiFS 为 nil 时退化为 NewRouter 的占位页行为。
+func NewRouterWithUI(a *app.App, corsOrigin string, uiFS fs.FS) *gin.Engine {
+	return newRouter(a, corsOrigin, uiFS)
+}
+
+func newRouter(a *app.App, corsOrigin string, uiFS fs.FS) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -57,7 +67,7 @@ func NewRouter(a *app.App, corsOrigin string) *gin.Engine {
 	api := r.Group("/api")
 	api.Use(middleware.RequireVersionForMutation())
 
-	registerRoot(r)
+	registerRoot(r, uiFS)
 	registerTimer(api)
 	registerHabits(api)
 	registerSettings(api)
@@ -83,15 +93,6 @@ func registerDailySweep(g *gin.RouterGroup) {
 	g.GET("/daily-sweep/today", handlers.DailySweepToday)
 	g.POST("/daily-sweep/adopt", handlers.DailySweepAdopt)
 	g.POST("/daily-sweep/reject", handlers.DailySweepReject)
-}
-
-// GET /（SPA 兜底页）。
-
-func registerRoot(r *gin.Engine) {
-	r.GET("/", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, "<html><body><h1>Little Timer</h1><p>Build the frontend (cd assets && pnpm run build) or open the dev server.</p></body></html>")
-	})
 }
 
 // 计时器路由。

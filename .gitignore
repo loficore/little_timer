@@ -66,6 +66,8 @@ lerna-debug.log*
 !/scripts/
 !/android-build.sh
 !/scripts/collect-webkit-perf.sh
+!/scripts/package-linux.sh
+!/scripts/stage-embedded-ui.sh
 
 # === CI/CD ===
 /.github/*
@@ -81,6 +83,8 @@ assets/src/bindings/
 neo-src/cmd/server/assets/bindings/
 neo-src/frontend/bindings/
 neo-src/cmd/server/assets/index.html
+neo-src/cmd/server/assets/fonts/
+neo-src/cmd/server/assets/i18n/
 
 # === Agent & Tooling ===
 .unipi/

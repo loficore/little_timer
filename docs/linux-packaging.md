@@ -6,18 +6,22 @@
 
 - 本轮只做两条通道：**deb → webkit2gtk-4.1**、**rpm → webkit2gtk-4.0（EL9）**。`2 构建目标 × 2 格式 ≈ 4 产物` 是长期形态，本轮不排。
 - 现有 `apk` / `exe` 不受影响：Android 用系统 WebView，Windows 用 WebView2，都不经 GTK。
-- 当前仓库**尚无** deb/rpm 产出：发布通道只有 `just package` 的 tar.gz 与 `scripts/build-android.sh` 的 APK，deb/rpm 属新建。
-- **前置缺口**：Linux 侧没有前端静态服务路径，`GET /` 返回占位文案（`internal/http/router.go:90-95`）。补齐这项之前，桌面包打出去只会显示占位页。
+- 本地链路已落地：`just package-linux` 产出 rpm（AlmaLinux 9 容器）与 deb（Ubuntu 22.04 容器），产物在 `dist/`；`release.yml` 已把两种包与 tar.gz 一起挂到 GitHub Release。
+- **D5 已定：前端 embed 进二进制**，`-tags "webview,embed_ui"` 的包与 `just package` 的 tar.gz 都自带界面。
 - 硬约束：`webkit2gtk-4.0` 与 `webkit2gtk-4.1` 是**不同 SONAME**，不存在「一个二进制通吃」。
 - 静态链接不可行，已排除（理由见「为什么分变体」末节）。
 
 ## 为什么必须分变体
 
-`github.com/webview/webview_go` 的 cgo 指令写死了 pkg-config 模块名：
+上游 `github.com/webview/webview_go` 的 cgo 指令写死了 pkg-config 模块名：
 
 ```
 #cgo linux openbsd freebsd netbsd pkg-config: gtk+-3.0 webkit2gtk-4.0
 ```
+
+本仓库在 `neo-src/third_party/webview_go` 的 fork 里把它拆成默认 4.0 与
+`webkit41` tag 的 4.1 两个文件（见 D3），所以同一套 Go 代码可以按需链接不同
+API 代，而不必依赖构建镜像里恰好存在的 `.pc` 名称。
 
 而各发行版保留的 API 代不同。运行时 SONAME 按 API 代划分，互不兼容：
 
@@ -53,16 +57,19 @@
 
 | 产物 | 构建镜像 | 链接目标 | 需安装的包 |
 | --- | --- | --- | --- |
-| deb | `ubuntu:24.04`（若要覆盖 22.04 改 `ubuntu:22.04`） | `libwebkit2gtk-4.1.so.0` | `libgtk-3-dev` `libwebkit2gtk-4.1-dev`（universe，需先 enable） `libsqlite3-dev` `pkg-config`，另加 4.0 → 4.1 的 `.pc` shim |
-| rpm | `almalinux:9` | `libwebkit2gtk-4.0.so.37` | `gtk3-devel` `webkit2gtk3-devel` `sqlite-devel` `pkg-config`（均在 AppStream，已在本机核实） |
+| deb | `ubuntu:22.04`（glibc 2.35，覆盖 jammy + noble） | `libwebkit2gtk-4.1.so.0` | `build-essential` `pkg-config` `libgtk-3-dev` `libwebkit2gtk-4.1-dev` `libsqlite3-dev` `dpkg-dev` |
+| rpm | `almalinux:9` | `libwebkit2gtk-4.0.so.37` | `gtk3-devel` `webkit2gtk3-devel` `sqlite-devel` `pkg-config` `rpm-build` `redhat-rpm-config`（均在 AppStream，已在本机核实） |
 
-`.pc` shim 沿用 `.github/workflows/ci.yml:347-352` 的既有做法（把 `webkit2gtk-4.1.pc` 复制成 `webkit2gtk-4.0.pc`），不引入新机制。EL9 侧不需要 shim，仓库里就是真 4.0。
+WebKit 版本由 build tag 决定（D3）：默认 `-tags "webview,embed_ui"` 链 4.0，deb 用 `-tags "webview,embed_ui,webkit41"` 链 4.1。tag 由本地 fork `neo-src/third_party/webview_go` 的两个 cgo 文件提供，构建时不再复制或覆盖 `.pc` 文件；链接目标因此由命令行显式选择，而不是取决于镜像里恰好存在哪个 `.pc`。
 
-构建命令与 CI 的 linux job 一致：
+本地入口是 `scripts/package-linux.sh {rpm|deb|all} [version]`（`just package-rpm` / `package-deb` / `package-linux`）。宿主机缺少对应开发包时自动进入上表容器；版本默认取最近 git tag（去掉 `v` 前缀），无 tag 时用当天日期。容器内不读 `proxy.golang.org`：脚本挂载宿主机的 `GOROOT` 与 `GOMODCACHE`，并把模块缓存以 `GOPROXY=file:///host-gomod/cache/download` 暴露给容器。
 
-```bash
-go build -tags "webview,embed_ui" -o bin/server ./cmd/server   # 在 neo-src 下
-```
+脚本内的构建步骤：
+
+1. `pnpm run build` + `scripts/stage-embedded-ui.sh`，把 `assets/dist/index.html` 与 `fonts/` 同步到 `neo-src/cmd/server/assets/`；
+2. `go build -tags "webview,embed_ui"`（rpm）或 `-tags "webview,embed_ui,webkit41"`（deb），`-ldflags "-s -w -X little-timer/internal/app.Version=<ver>"`；
+3. `readelf -d` 断言 `DT_NEEDED` 指向本变体的 webkit SONAME；
+4. rpm 交给 rpmbuild 自动生成 `Requires`，deb 用 `dpkg-shlibdeps` 生成 `Depends`，两者再断言包含对应的 `libwebkit2gtk-4.x`。
 
 ## 依赖声明方式
 
@@ -88,27 +95,24 @@ CI 断言两者指向同一 API 代，不一致即 fail。
 
 ## 包内容与桌面入口
 
-Linux 上 `defaultHTTPOnly()` 返回 true（`neo-src/internal/cli/args.go`），即不带 `--webview` 时只起 HTTP 服务。因此 webview 变体的桌面入口必须在 `Exec` 里显式传 `--webview`，否则点击图标只会静默开一个后台服务。
+Linux 上 `defaultHTTPOnly()` 返回 true（`neo-src/internal/cli/args.go`），即不带 `--webview` 时只起 HTTP 服务。按 D6，默认桌面入口 `little-timer-desktop` 起 HTTP 服务后用 `xdg-open` 打开浏览器；webview 只放在 Desktop Action `Webview`（`Exec=little-timer serve --webview`），不默认起窗。
 
 其余约定：
 
 - 数据目录走 `os.UserConfigDir()`，即 `~/.config/little_timer/little_timer.db`；程序是用户级桌面应用，包内**不含** systemd 系统单元、不含提权配置。
 - 默认端口 `8080`（`cli.DefaultPort`），dev 期的 8013 与包无关。
 
-### 前端资源的提供方式（打包的前置条件）
+### 前端资源的提供方式（D5 已定：embed）
 
-Linux 侧目前没有任何把构建好的前端交到客户端手里的路径：
+选定 embed 进二进制，实现分布如下：
 
-- `//go:embed all:assets` 只出现在 `cmd/server/main_android.go`，Linux 路径不读 `assets/dist`；
-- `embed_ui` 这个 tag 只切换 webview 窗口的目标 URL（`url_dev.go` 指向 Vite `:5173`，`url_embed.go` 指向 `:8080`），本身不 embed 任何文件；
-- `:8080` 的根路由由 `registerRoot` 提供，返回一句「Build the frontend …」的占位 HTML。
+- `cmd/server/ui_embed.go`（`//go:build embed_ui && !android`）用 `//go:embed all:assets` 把 `neo-src/cmd/server/assets/` 编进二进制；`ui_noembed.go` 在其它构建返回 `nil`，保持原占位页。
+- `scripts/stage-embedded-ui.sh` 在 build 前把 `assets/dist/index.html` 与 `fonts/` 同步到该目录；i18n 已由 Vite 内联，脚本只在源目录存在时拷贝 `i18n/`，并清理上一轮残留。
+- `internal/http/ui.go` 的 `registerRoot` 负责静态文件与 SPA fallback：命中实际文件就 `http.ServeFileFS`，否则回落到 `index.html`；`/api/*` 与 `/wails/*` 不参与 fallback。
+- `/wails/runtime.js` 由同一个 handler 返回桩模块（`Call.ByID` 抛错，`CancellablePromise` / `Create` 为空实现），解决非 Wails 运行时下裸 import 白屏的问题。
+- `neo-src/cmd/server/assets/README.md` 保证干净 clone 里 `//go:embed all:assets` 有目录可嵌；`index.html`、`fonts/`、`i18n/` 仍 gitignore。
 
-所以 `-tags "webview,embed_ui"` 编出的 Linux 桌面二进制，窗口里显示的是占位页；`just package` 出的 tar.gz 则是纯 API 服务、没有界面。打包之前要先定 UI 的落地方式（D5），它直接决定包内容：
-
-| 方式 | 包内容 | 代价 |
-| --- | --- | --- |
-| Go server 内 embed `assets/dist`（把 Android 那条路铺到 Linux） | 只带单二进制 | 前端每次改动都要重编 Go；tar.gz 自洽 |
-| server 从磁盘读 `/usr/share/little-timer/dist`（含 `i18n/*.toml`） | 需带资源目录；`just package` 的 stage 目前只拷 `bin/server`，要一并补 | 资源与二进制分离，升级时须保证同版本 |
+代价是前端每次改动都要重编 Go，换来单二进制、tar.gz 自洽。当前产物仍是 4.27 MB 的单 HTML（gzip 2.51 MB，字体外置为 `fonts/*.woff2`），包体主要在二进制上。
 
 ### 密钥服务依赖
 
@@ -125,11 +129,11 @@ Linux 凭据后端走 Secret Service（D-Bus），且**启动时检测不到密�
 
 ## 待决策项
 
-- **D1 二进制命名**：现产物名 `server`，包内路径按 `usr/bin/little-timer` 更符合 FHS，但会打断现有脚本与用户习惯。
-- **D2 图标源**：是否新增 SVG（视觉规范见 `docs/visual-design-spec.md`，图标属资产改动）。
-- **D3 webkit API 选择机制**：短期沿用 `.pc` shim（改动最小、与 CI 同源），中期换成 fork 补丁 + 自有 build tag，让链接目标出现在命令行而非取决于镜像里恰好存在哪个 `.pc`。上游 `webview_go` 自 2024 年后基本停维护（issue #50、PR #62 未合），已有 4.1 补丁 fork（`intrinsicgray/webview_go`、`GopeedLab/webview_go`，2026-09 有提交）。风险点：在同时提供 4.0 与 4.1 `.pc` 的镜像里，shim 的 `cp` 会覆盖真 4.0.pc，静默改变链接目标——所以构建镜像必须锁定且门禁必须存在。
-- **D4 发布渠道**：本轮挂 GitHub Release 附件（与 tar.gz 并列），或搭 apt/dnf 仓库（需签名密钥与额外发布步骤）。
-- **D5 前端资源提供方式**：embed 进二进制，还是 server 从 `/usr/share/little-timer/dist` 读磁盘。优先级最高——它决定包内容，也决定 tar.gz 通道能否自带界面（现状是不带，见「包内容」节）。
+- **D1 二进制命名**：已定包内 `/usr/bin/little-timer`；桌面入口另装 `/usr/bin/little-timer-desktop` 包装器，`StartupWMClass` 仍指向 `little-timer`。
+- **D2 图标源**：是否新增 SVG（视觉规范见 `docs/visual-design-spec.md`，图标属资产改动）。本轮沿用 Android `ic_launcher.png`，未新增 SVG。
+- **D3 webkit API 选择机制**：**已落地：fork 补丁 + build tag**。上游 `webview_go` 自 2024 年后基本停维护（issue #50、PR #62 未合），仓库内 `neo-src/third_party/webview_go` 是提交 `6173450` 的本地 fork，只把 Linux/BSD 的 `pkg-config` 拆成 `webkit2gtk_40.go`（默认 4.0）与 `webkit2gtk_41.go`（`-tags webkit41`），Go API 与头文件不变。`go.mod` 用 `replace` 指向该目录；打包、CI 与 `just webview-*` 都通过 tag 选择变体，`.pc` shim 已删除。后续同步上游时按 fork 内 README 重做这处拆分即可。风险点只剩构建镜像必须装有目标 `.pc`（EL9 4.0、22.04 4.1），由 `pkg-config --exists` 前置检查兜住。
+- **D4 发布渠道**：**已定：GitHub Release 附件**。`release.yml` 在 tar.gz 之后运行 `just package-linux`，把 `dist/*.rpm` 与 `dist/*.deb` 一并附加；apt/dnf 仓库（签名密钥与额外发布步骤）不在本轮范围。
+- **D5 前端资源提供方式**：**已定：embed 进二进制**，实现见「前端资源的提供方式」节；tar.gz 通道因此自带界面。
 - **D6 NVIDIA + Wayland 的支持边界**：这类机器上 webview 窗口会白屏（见「已知问题」4）。三个选项：
   1. `.desktop` 的 `Exec` 里无条件注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`——能保证不白屏；代价按常理是 WebKit 改用共享内存上传每帧、内容合成落 CPU，但 2026-10-31 C 格实测软件路径的 idle/click 都是 ~16 ms（见「已知问题」7 复测段），这笔代价在本机量不出来，非 NVIDIA 用户则无条件付；
   2. 不加变量，把这条组合写进「已知不支持」，NVIDIA 用户用 HTTP-only 模式（`little-timer serve` 无 `--webview`，浏览器打开 `:8080`）——包最简单，但点图标开窗口白屏的观感很差；
@@ -139,11 +143,11 @@ Linux 凭据后端走 Secret Service（D-Bus），且**启动时检测不到密�
 
 ## 已知问题
 
-1. **发布通道给的 tar.gz 没有界面**。`just package` 只 build `-tags embed_ui`（不含 `webview`）且 stage 里只有 `bin/server`，而 Linux 侧无静态资源服务，用户拿到的是纯 API 服务，需自行跑 Vite dev server 才能看 UI。D5 未定之前，deb/rpm 会继承同一个缺口。
-2. **`ci.yml` 的 linux webview 产物在 EL9 上跑不起来**。该 job 在 ubuntu-latest 上经 shim 后链的是 `libwebkit2gtk-4.1.so.0`，EL8/EL9 与 Debian 11 只有 `.so.37`。目前尚未影响已发布产物（`release.yml` 只附 tar.gz），但 webview 二进制一旦发出去就会暴露。修法即本文件的 D3 与依赖门禁。
+1. ~~发布通道给的 tar.gz 没有界面~~（**已解决，D5 embed**）。`just package` 现在先 `pnpm run build` 再走 `scripts/stage-embedded-ui.sh`，构建 `-tags embed_ui` 的 `bin/little-timer` 并打进 tar.gz；打包脚本出 rpm/deb 时额外带 `webview`。
+2. **`ci.yml` 的 linux webview 产物在 EL9 上跑不起来**。该 job 用 `-tags webkit41` 显式链 `libwebkit2gtk-4.1.so.0`，EL8/EL9 与 Debian 11 只有 `.so.37`。本地/发布用的 rpm 已走 AlmaLinux 9 容器，这一条只影响 CI 的裸二进制 artifact；接入 `release.yml` 时按格式分构建镜像，不要复用这个 artifact。
 3. **`cmd/server/main_android.go:113` 引用了 `application.BundledAssetFileServer(assets)`，而该函数在仓库里找不到定义**（全仓 grep 只命中调用点）。需单独核实：可能是 Android 构建路径未经过该文件（例如走 gomobile bind），也可能是 APK 通道已经断了。与 Linux 打包无关，但既然顺带发现就记在这里。
-4. **`assets/dist/index.html` 直接给非 Wails 运行时用会白屏，D5 两条路都踩**。`vite.config.ts` 里 `rollupOptions.external: ['/wails/runtime.js']` 让产物保留一条裸 `from"/wails/runtime.js"`（已在现成 dist 里核实），这个 URL 只由 Android/Wails 运行时注入；dev server 靠 `wailsRuntimeStub` 插件的 `resolveId` 拦掉，所以 `just go-dev` / `go-dev-webview` 正常。后果是：embed 进二进制或从 `/usr/share/little-timer/dist` 读磁盘，只要不额外提供 `/wails/runtime.js`，窗口就只有空背景。D5 实现时必须连带处理这条（补桩，或让非 Android 路径不 import 那些 binding 模块）。
-5. **前端产物是 4.27 MB 的单个 HTML（gzip 2.51 MB）**。`assetsInlineLimit: Number.MAX_SAFE_INTEGER` + `viteSingleFile` 把字体与 `i18n/*.toml` 一并 base64 内联——这是 Android 单文件策略，Linux 侧沿用的话，首帧要先解码这 4 MB。选 embed 时它同时决定二进制体积，选读磁盘时决定装包后要落多大文件；按平台拆开内联策略是一项能量出收益的改动，属 D5 的实现细节。
+4. ~~`assets/dist/index.html` 直接给非 Wails 运行时用会白屏~~（**已解决**）。`internal/http/ui.go` 提供 `/wails/runtime.js` 桩模块，`registerRoot` 同时处理静态文件与 SPA fallback；`ui_test.go` / `ui_embed_test.go` 覆盖根路径、SPA 路由、runtime 桩、API 404 与缺 index 的报错路径。
+5. **前端产物仍是 4.27 MB 的单个 HTML（gzip 2.51 MB）**。`viteSingleFile` 把 JS/CSS 与 `i18n/*.toml` 内联，字体外置为 `fonts/*.woff2`（3.1 MB）。embed 之后这部分直接计入二进制体积；按平台拆分内联策略仍是可量收益的后续优化，不在本轮范围。
 6. **NVIDIA 专有驱动 + Wayland 下 webview 白屏**。开发机 Fedora（KDE Plasma / Wayland / RTX 4060）上 `just go-dev-webview` 起窗后页面全白，日志里是 `Failed to create GBM buffer of size 800x600: 无效的参数`（EINVAL）。宿主侧该配的都配了——`nvidia_drm.modeset=1`、`nvidia_drm.fbdev=1`、`libnvidia-egl-wayland.so.1` 与 `libnvidia-egl-wayland2.so.1` 在位、`libgbm.so.1` 在位、EGL vendor json 齐全、nouveau 已黑名单——所以这不是配置缺失，是 WebKitGTK 走 dmabuf/GBM 零拷贝时与 NVIDIA 驱动在 modifier 协商上谈不拢，属上游问题。`WEBKIT_DISABLE_DMABUF_RENDERER=1` 可以不白屏（开发环境已用它跑通）。对打包的含义：装了 rpm/deb 的 NVIDIA 用户会撞上同一堵墙，`Exec` 不能无条件注入那个变量，也不能假装这个问题不存在——落地口径见 D6。复测（2026-10-31，同机同组合）：症状从白屏恶化为起窗约 6 s 后 `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display`，Wayland 连接直接被杀——dmabuf 路径在这台机器上现在是「一点就崩」，不是「只是白屏」；详见 `docs/webkit-profiling.md` 矩阵 B 格。
 7. **同一套前端在浏览器里流畅、在 webview 里卡，且与缓冲区分配路径无关**。开发机 Fedora 上的四组对照，`[PERF] Settings.interaction.frame` 全部落在 215–382 ms：dev server、生产产物（`vite preview` 顶替 `:5173`）、`GDK_BACKEND=x11`、以及**去掉** `WEBKIT_DISABLE_DMABUF_RENDERER=1` 的 X11 —— 开关不是这笔开销的来源。同一时间同一 dev server、同一 Go 后端，浏览器（HTTP-only 模式）里主观流畅无卡顿。所以成本出在 WebKitGTK 这一侧（送帧节奏或页面绘制），不是 JS 构建产物、也不是后端网络路径。`apiGetHabitsMs` 在 0 条记录上从 253 → 130 → 125 ms 逐级下降，属冷启动而非固定代理税。拆源工具链已落地（[webkit-profiling.md](webkit-profiling.md) 三层）：空闲 rAF 探针连同装饰层对照都稳定在 32 ms，「WebKit 空闲送帧就这么慢」已排除；剩下「前端渲染侧 vs WebKit 原生提交/绘制」的分岔，由调试机上的 `[CAD]` 持续帧率计（`just webview-cadence`）与 `scripts/collect-webkit-perf.sh` 的 `self-top.txt` 收口。对打包的含义：阈值判定「webview ≥ 2× 浏览器」已由现有四组数字满足，D6 据此选定；`[CAD]`/perf 输出只细化成因表述，不翻转该结论。
 
@@ -151,19 +155,21 @@ Linux 凭据后端走 Secret Service（D-Bus），且**启动时检测不到密�
 
 ## 验收清单（发版前）
 
-1. EL9 干净容器内 `rpm -ivh` 成功，`rpm -qp --requires` 含 `libwebkit2gtk-4.0.so.37`，`little-timer serve --webview` 能起窗。
-2. jammy 与 noble 干净容器内 `dpkg -i` 成功，depends 含 `libwebkit2gtk-4.1-0`，起窗正常。
-3. 起窗后显示的是真实前端，而不是「Build the frontend …」占位页（D5 的落地校验）。
-4. 在无任何 webkit 运行时的容器内安装两包均应失败（依赖挡住），而不是装完运行时崩。
-5. 一致性门禁跑通：二进制 NEEDED 与包元数据同代。
-6. KDE Plasma（Fedora_Jiaolong 环境）下桌面入口图标、`StartupWMClass` 与窗口分类正常。
-7. 无密钥服务的机器上首启**按预期报错退出并给出启动 daemon 的命令**（不是静默降级），装好 `gnome-keyring` 后凭据功能正常。
-8. NVIDIA + Wayland 真机（Fedora_Jiaolong）上桌面入口起窗后**既不白屏、交互帧时间也可接受**——只「能出画面」不够，按 D6 的决定验收：走开关则记录该组合下的帧时间，走「不支持」则确认文档写明改用 HTTP-only。
+本地验证（2026-10-31，产物 `little-timer-2.0.0-1webkit40.el9.x86_64.rpm` / `little-timer_2.0.0-1webkit41_amd64.deb`）：
+
+1. [x] EL9 干净容器内 `rpm -ivh` 成功，`rpm -qp --requires` 含 `libwebkit2gtk-4.0.so.37`，`little-timer serve --webview` 能起窗（Xvfb 下验证窗口创建）。
+2. [x] jammy 与 noble 干净容器内 `dpkg -i` 成功，`Depends` 含 `libwebkit2gtk-4.1-0`，起窗正常。
+3. [x] 起窗后显示的是真实前端，而不是「Build the frontend …」占位页：`/` 返回 `<title>Little Timer</title>`，SPA 路由回落 `index.html`，`/wails/runtime.js` 返回桩，`/api/*` 仍 404，字体可拉取。
+4. [x] 在无任何 webkit 运行时的容器内安装两包均被依赖挡住（rpm 缺 `libwebkit2gtk-4.0.so.37`，deb 缺 `libwebkit2gtk-4.1-0`），不是装完运行时崩。
+5. [x] 一致性门禁跑通：`readelf -d` 的 NEEDED 与包元数据同代（rpm 4.0、deb 4.1）；`dpkg-shlibdeps` 生成的 Depends 也含 4.1。
+6. [ ] KDE Plasma（Fedora_Jiaolong 环境）下桌面入口图标、`StartupWMClass` 与窗口分类正常。Xvfb 下已确认 `WM_CLASS` 为 `"little-timer", "Little-timer"`、`WM_NAME` 为 `Little Timer`，与 `StartupWMClass=little-timer` 匹配；真实 KDE 桌面待验。
+7. [x] 无密钥服务的机器上首启**按预期报错退出并给出启动 daemon 的命令**（exit 1）；装好 `gnome-keyring` 并解锁后，打包二进制能正常提供 UI 与凭据功能。
+8. [ ] NVIDIA + Wayland 真机（Fedora_Jiaolong）上确认 D6 口径：默认入口走 HTTP-only + 浏览器；webview 变体在该组合下按「已知不支持」记录，不承诺不白屏。
 
 ## 落地顺序
 
-1. 定 D5 并实现 Linux 侧 UI 提供（embed 或读磁盘）——不先做这步，打出来的包只有 API，没有界面。
-2. 定 D1–D4 与 D6（D3 决定后续 CI 改动形态，D6 决定 webview 变体能否作为默认推荐形态）。D6 的判定输入来自 `docs/webkit-profiling.md` 的 baseline，不要在没有符号化的 perf 数据上下结论。
-3. 加打包 job：EL9 容器出 rpm，Ubuntu 容器出 deb，共用同一 `go build -tags "webview,embed_ui"` 步骤。
-4. 加依赖一致性门禁，接进 `release.yml`。
-5. 全绿后发新版，`README.md` / `docs/development.md` 的发布章节补上包格式与依赖说明。
+1. [x] 定 D5 并实现 Linux 侧 UI 提供：embed 进二进制，含 runtime 桩与 SPA fallback。
+2. [x] 定 D1（`/usr/bin/little-timer`）、D3（fork + build tag）与 D6（HTTP-only 默认、webview 可选）；D2/D4 按上文现状保留。
+3. [x] 本地打包链路：`scripts/package-linux.sh` 用 EL9 容器出 rpm（默认 tag，4.0）、Ubuntu 22.04 容器出 deb（`webkit41` tag，4.1）；`just package-rpm` / `package-deb` / `package-linux` 为入口。
+4. [x] 依赖一致性门禁：构建脚本内 `readelf` 断言 + `dpkg-shlibdeps` / rpmbuild 自动依赖。待接进 `release.yml`。
+5. [x] `release.yml` 已把 deb/rpm 与 tar.gz 一起挂到 GitHub Release；包格式与依赖说明已补进 `README.md` / `docs/development.md`。

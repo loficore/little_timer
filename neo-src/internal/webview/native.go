@@ -16,7 +16,7 @@ import (
 func run() error {
 	w := webview.New(devtoolsEnabled())
 	if w == nil {
-		return fmt.Errorf("webview: failed to create window — on Linux, install one of: gtk4+webkitgtk-6.0, gtk+-3.0+webkit2gtk-4.1, gtk+-3.0+webkit2gtk-4.0\n%s", missingDepsHint())
+		return fmt.Errorf("webview: failed to create window — on Linux, install gtk3 + webkit2gtk-4.0 (default) or gtk3 + webkit2gtk-4.1 (build with -tags webkit41)\n%s", missingDepsHint())
 	}
 	defer w.Destroy()
 

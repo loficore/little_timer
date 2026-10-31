@@ -19,6 +19,8 @@ require (
 	golang.org/x/sys v0.43.0
 )
 
+replace github.com/webview/webview_go => ./third_party/webview_go
+
 require (
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.6 // indirect

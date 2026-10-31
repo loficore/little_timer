@@ -28,6 +28,8 @@
 //   - `embed_ui` —— 把窗口目标 URL 从 Vite 开发服务器（:5173）切换到
 //     内嵌 HTTP server（:8080）。定义在 `url_embed.go`，仅当 `webview`
 //     tag 同时设置时才有意义。
+//   - `webkit41` —— Linux 上把链接目标从 webkit2gtk-4.0 切到 4.1。
+//     由本地 fork（`third_party/webview_go`）提供；不设置时为 4.0。
 package webview
 
 import (
@@ -64,8 +66,7 @@ func CheckLinuxDeps() (bool, string) {
 
 // missingDepsHint 返回 Linux 上 webview.New() 失败时显示的安装提示。
 func missingDepsHint() string {
-	return "❌ 未检测到可用 GTK/WebKit 组合。请安装任一组合：\n" +
-		"  1) gtk4 + webkitgtk-6.0\n" +
-		"  2) gtk+-3.0 + webkit2gtk-4.1\n" +
-		"  3) gtk+-3.0 + webkit2gtk-4.0\n"
+	return "❌ 未检测到可用 GTK/WebKit 组合。请安装：\n" +
+		"  1) gtk3-devel + webkit2gtk-4.0-devel（默认构建）\n" +
+		"  2) gtk3-devel + webkit2gtk-4.1-devel（构建加 -tags webkit41）\n"
 }

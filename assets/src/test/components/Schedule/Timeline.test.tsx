@@ -90,6 +90,11 @@ describe("Timeline", () => {
     expect(screen.getByTestId("task-block-1").textContent).toContain("30m");
   });
 
+  it("不渲染习惯时段占位轨", () => {
+    const { container } = render(<Timeline tasks={[]} />);
+    expect(container.querySelector("[data-testid='habit-lane']")).toBeNull();
+  });
+
   it("renders empty timeline when tasks array is empty", () => {
     const { container } = render(<Timeline tasks={[]} />);
     expect(container.querySelectorAll("[data-task-id]").length).toBe(0);

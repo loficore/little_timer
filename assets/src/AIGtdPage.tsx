@@ -12,21 +12,23 @@ export function AIGtdPage() {
   const [editing, setEditing] = useState<TaskDTO | null>(null);
 
   return (
-    <div className="container mx-auto max-w-3xl space-y-3 p-4">
-      <h1 className="text-2xl font-bold">{t("aigtd.title")}</h1>
-      <CaptureBox onCapture={capture} />
-      {tasks.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <TaskList
-          tasks={tasks}
-          onArchive={(id) => void archive(id)}
-          onReparse={(id) => void reparse(id)}
-          onToggleSubtask={(taskId, subId, done) => void toggleSubtask(taskId, subId, done)}
-          onEdit={setEditing}
-        />
-      )}
-      {editing && <TaskEditModal task={editing} onClose={() => setEditing(null)} />}
+    <div className="flex-1 overflow-y-auto">
+      <div className="container mx-auto max-w-4xl space-y-4 p-4">
+        <h1 className="text-2xl font-bold">{t("aigtd.title")}</h1>
+        <CaptureBox onCapture={capture} />
+        {tasks.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <TaskList
+            tasks={tasks}
+            onArchive={(id) => void archive(id)}
+            onReparse={(id) => void reparse(id)}
+            onToggleSubtask={(taskId, subId, done) => void toggleSubtask(taskId, subId, done)}
+            onEdit={setEditing}
+          />
+        )}
+        {editing && <TaskEditModal task={editing} onClose={() => setEditing(null)} />}
+      </div>
     </div>
   );
 }

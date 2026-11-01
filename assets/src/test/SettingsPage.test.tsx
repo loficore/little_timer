@@ -69,8 +69,6 @@ vi.mock("../utils/i18n", () => ({
   t: (key: string) => {
     const translations: Record<string, string> = {
       "settings.tabs.basic": "Basic",
-      "settings.tabs.countdown": "Countdown",
-      "settings.tabs.stopwatch": "Stopwatch",
       "common.settings_title": "Settings",
       "common.save": "Save",
       "common.reset_default": "Reset",
@@ -119,23 +117,7 @@ vi.mock("../components/BasicSettings", () => ({
   ),
 }));
 
-vi.mock("../components/CountdownSettings", () => ({
-  CountdownSettings: ({ config, onChange }: any) => (
-    <div data-testid="countdown-settings">
-      <span data-testid="countdown-settings-config">{JSON.stringify(config)}</span>
-      <button onClick={() => onChange({ duration_seconds: 1800 })}>Change Duration</button>
-    </div>
-  ),
-}));
 
-vi.mock("../components/StopwatchSettings", () => ({
-  StopwatchSettings: ({ config, onChange }: any) => (
-    <div data-testid="stopwatch-settings">
-      <span data-testid="stopwatch-settings-config">{JSON.stringify(config)}</span>
-      <button onClick={() => onChange({ max_seconds: 7200 })}>Change Max</button>
-    </div>
-  ),
-}));
 
 vi.mock("../components/GalleryContent", () => ({
   GalleryContent: () => <div data-testid="gallery-content">Gallery</div>,
@@ -162,9 +144,11 @@ describe("SettingsPage", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("tab-basic")).toBeTruthy();
-      expect(screen.getByTestId("tab-countdown")).toBeTruthy();
-      expect(screen.getByTestId("tab-stopwatch")).toBeTruthy();
+      expect(screen.getByTestId("tab-llm")).toBeTruthy();
+      expect(screen.getByTestId("tab-backup")).toBeTruthy();
     });
+    expect(screen.queryByTestId("tab-countdown")).toBeNull();
+    expect(screen.queryByTestId("tab-stopwatch")).toBeNull();
   });
 
   it("supportsDailySweep 为 false 时隐藏每日梳理标签页", async () => {
@@ -203,33 +187,7 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("点击倒计时标签应该显示倒计时设置", async () => {
-    render(<SettingsPage />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("tab-countdown")).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByTestId("tab-countdown"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("countdown-settings")).toBeTruthy();
-    });
-  });
-
-  it("点击秒表标签应该显示秒表设置", async () => {
-    render(<SettingsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("tab-stopwatch")).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByTestId("tab-stopwatch"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("stopwatch-settings")).toBeTruthy();
-    });
-  });
 
   it("点击图库标签应该显示图库内容", async () => {
     render(<SettingsPage />);

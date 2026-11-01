@@ -10,7 +10,7 @@ import { t } from "../../utils/i18n";
  * 字段:Provider / Base URL / Model / Max Tokens / Timeout / API Key。
  * API Key 用密码框 + 末 4 位掩码;留空表示不动现有 Key;"清除" 显式删除。
  *
- * 布局沿用 BasicSettings/CountdownSettings 的 SettingItem 模式(左标签 + 右控件),
+ * 布局沿用 BasicSettings 的 SettingItem 模式(左标签 + 右控件),
  * 与其他设置子选项保持一致。
  */
 export function LLMSettings() {

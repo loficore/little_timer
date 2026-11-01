@@ -5,11 +5,9 @@
 
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
-import { supportsDailySweep } from "../utils/apiClientSingleton";
-import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, CalendarIcon } from "../utils/icons";
-import { SparklesIconComponent, DailySweepIcon } from "../utils/icons";
+import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, CalendarIcon, SparklesIconComponent } from "../utils/icons";
 
-type Page = "timer" | "habits" | "aigtd" | "schedule" | "stats" | "settings" | "dailySweep";
+type Page = "timer" | "habits" | "aigtd" | "plan" | "stats" | "settings";
 
 interface SidebarProps {
     /** 当前所在页面 */
@@ -41,17 +39,10 @@ const navItems = [
         ),
     },
     {
-        id: "schedule" as const,
-        labelKey: "schedule.nav_label",
+        id: "plan" as const,
+        labelKey: "plan.nav_label",
         icon: (
             <CalendarIcon className="h-5 w-5" />
-        ),
-    },
-    {
-        id: "dailySweep" as const,
-        labelKey: "nav.daily_sweep",
-        icon: (
-            <DailySweepIcon className="h-5 w-5" />
         ),
     },
     {
@@ -71,8 +62,6 @@ const navItems = [
 ];
 
 export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavigate }) => {
-    // Android 每日梳理后端绑定未落地(GitHub issue #41),能力探测为 false 时隐藏入口
-    const visibleNavItems = supportsDailySweep ? navItems : navItems.filter((i) => i.id !== "dailySweep");
     return (
         <aside className="my-sidebar flex flex-col w-60 h-full shrink-0">
             {/* Logo */}
@@ -85,7 +74,7 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
 
             {/* 导航 */}
             <nav className="flex-1 p-2" aria-label={t("common.app_name")}>
-                {visibleNavItems.map((item) => (
+                {navItems.map((item) => (
                     <button
                         key={item.id}
                         data-testid={`nav-${item.id}`}

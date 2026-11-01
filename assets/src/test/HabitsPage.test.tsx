@@ -231,13 +231,8 @@ describe("HabitsPage", () => {
     expect(onSettingsClick).toHaveBeenCalled();
   });
 
-  it("点击返回按钮应该执行回调", async () => {
-    const onBackClick = vi.fn();
+  it("顶栏不再显示返回按钮", () => {
     render(<HabitsPage onStatsClick={vi.fn()} onSettingsClick={vi.fn()} />);
-
-    const backButton = screen.getByText("Back");
-    fireEvent.click(backButton);
-
-    expect(onBackClick).not.toHaveBeenCalled();
+    expect(screen.queryByText("Back")).toBeNull();
   });
 });

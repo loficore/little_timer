@@ -19,14 +19,14 @@ import { useTimer } from "./hooks/useTimer";
 import type { TimerMode } from "./hooks/useTimer";
 import { showToast } from "./components/common/Toast";
 import { vibrateForToast } from "./utils/vibrate";
-import { PlayIconComponent, PauseIconComponent, CheckIconComponent, ResetIcon, CloseIcon, PlusIconComponent, ChevronDownIconComponent, ForwardIconComponent, HabitsIconComponent } from "./utils/icons";
+import { PlayIconComponent, PauseIconComponent, CheckIconComponent, ResetIcon, CloseIcon, PlusIconComponent, ChevronDownIconComponent, ForwardIconComponent } from "./utils/icons";
+
+type LayoutDensity = "compact" | "normal" | "spacious";
+type TimeDisplayStyle = "classic" | "seven_segment";
 
 interface TimerPageProps {
     onHabitsClick?: () => void;
 }
-
-type LayoutDensity = "compact" | "normal" | "spacious";
-type TimeDisplayStyle = "classic" | "seven_segment";
 
 export const TimerPage: FunctionalComponent<TimerPageProps> = ({
     onHabitsClick,
@@ -383,11 +383,6 @@ export const TimerPage: FunctionalComponent<TimerPageProps> = ({
             <header className="navbar my-topbar shrink-0 px-2 sm:px-3">
                 <div className="flex-1 flex justify-center">
                     <span className="my-topbar-title text-xl font-bold">{t("timer.title")}</span>
-                </div>
-                <div className="flex-none">
-                    <button className="my-icon-btn" onClick={onHabitsClick} aria-label={t("nav.habits")}>
-                        <HabitsIconComponent className="h-5 w-5" />
-                    </button>
                 </div>
             </header>
 

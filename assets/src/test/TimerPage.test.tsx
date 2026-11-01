@@ -166,12 +166,9 @@ describe("TimerPage", () => {
     expect(screen.getByText("Timer")).toBeTruthy();
   });
 
-  it("点击导航到习惯页面", () => {
-    const onHabitsClick = vi.fn();
-    render(<TimerPage onHabitsClick={onHabitsClick} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "nav.habits" }));
-    expect(onHabitsClick).toHaveBeenCalled();
+  it("顶栏不再有习惯跳转按钮", () => {
+    render(<TimerPage />);
+    expect(screen.queryByRole("button", { name: "nav.habits" })).toBeNull();
   });
 
   it.skip("时间格式应该正确显示", () => {

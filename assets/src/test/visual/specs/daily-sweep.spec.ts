@@ -4,7 +4,7 @@
  * 覆盖 user journey:
  *   1. API 直接建一条顶层 active 任务(绕 AI,确定性,无 reparse 抢 LLM fixture);
  *   2. 注入固定 review LLM 响应(`/api/aigtd/_test/prompt`),proposal 指向真实 task_id;
- *   3. 浏览器 clickNav 到 dailySweep → 点"立即扫一遍" → worker 跑完 today 拉出 proposal-card;
+ *   3. 浏览器 clickNav 到 plan → 切「回顾」tab → 点"立即扫一遍" → worker 跑完 today 拉出 proposal-card;
  *   4. UI 点 Adopt → card 消失,后端 version→2 + scheduled_start 落地;
  *   5. 二次 adopt 用**当前** version 作 If-Match → FindAdoption 命中短路返回 idempotent;
  *      最终 version 仍 = 2(证明幂等防住双 bump)。
@@ -14,7 +14,7 @@
  *
  * 原被回滚 spec (commit 140f7e3) 的两个根因已修:
  *   - `page.goto("/aigtd")` App 的 page 状态初始化为 timer、不走 URL 路由 → 改用 clickNav;
- *   - 移动端底部 nav 无 dailySweep 入口 → 已在 App.tsx 补齐 nav-dailySweep。
+ *   - 调度与每日回顾已合并为「计划」单页双 tab → 入口是 nav-plan + plan-tab-review。
  *
  * Project 匹配:测试名带 "E2E" → 走 mobile-390/412/desktop-1280 三个串行项目。
  *
@@ -106,7 +106,8 @@ test.describe("Daily Sweep E2E", () => {
     // 4) 浏览器:goto 首页 → clickNav 到 dailySweep → 点"立即扫一遍"
     await page.goto(baseURL);
     await page.waitForLoadState("networkidle");
-    await clickNav(page, "nav-dailySweep");
+    await clickNav(page, "nav-plan");
+    await page.locator('[data-testid="plan-tab-review"]:visible').first().click();
     await expect(page.locator('[data-testid="start-btn"]')).toBeVisible({ timeout: 10000 });
     await page.locator('[data-testid="start-btn"]').click();
 

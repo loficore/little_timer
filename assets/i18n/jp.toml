@@ -172,7 +172,6 @@ timer = "集中"
 habits = "習慣"
 stats = "統計"
 settings = "設定"
-daily_sweep = "毎日の見直し"
 
 [gallery]
 title = "壁紙ギャラリー"
@@ -186,9 +185,6 @@ unbound_note = "参照は自動的に解除されます。"
 
 [settings.tabs]
 basic = "基本設定"
-countdown = "カウントダウン"
-stopwatch = "ストップウォッチ"
-presets = "プリセット"
 backup = "バックアップ"
 
 [settings.basic]
@@ -225,47 +221,6 @@ debug_mode = "デバッグモード"
 debug_mode_desc = "パフォーマンスログを有効化"
 debug_no_memory = "メモリ監視非対応"
 debug_memory_hint = "2秒更新 - コンソールで詳細を確認"
-
-[settings.countdown]
-duration = "時間"
-duration_minutes = "デフォルト時間（分）"
-duration_hint = "約 {minutes} 分"
-loop_mode = "ループ"
-loop_enable = "ループを有効にする"
-loop_count = "ループ回数"
-loop_count_hint = "0 は無限"
-loop_interval = "ループ間隔（秒）"
-loop_interval_hint = "各ループ間の休憩時間"
-
-[settings.stopwatch]
-max_hours = "最大時間（時間）"
-max_hours_hint = "{hours} 時間"
-
-[settings.presets]
-title = "保存済みプリセット"
-none_title = "📋 プリセットはありません"
-none_desc = "下のボタンで追加してください"
-saved_badge_countdown = "⏱️ カウントダウン"
-saved_badge_stopwatch = "⏲️ ストップウォッチ"
-use = "使用"
-delete = "削除"
-add_new = "➕ 新規プリセット"
-new_title = "新規プリセット"
-name_label = "プリセット名 *"
-name_placeholder = "例: ポモドーロ"
-mode_label = "モード"
-duration_label = "時間"
-loop_label = "ループ"
-loop_count_label = "ループ回数（0=∞）"
-loop_interval_label = "休憩間隔"
-max_hours_label = "最大時間"
-save_preset = "✓ プリセットを保存"
-cancel = "キャンセル"
-applied = "⚡ プリセット {name} を適用しました。保存して永続化してください"
-exists = "このプリセット名は既に存在します"
-name_required = "プリセット名を入力してください"
-confirm_delete = "プリセット \"{name}\" を削除しますか？"
-list_count = "プリセット ({count}/10)"
 
 [backup]
 network_error = "ネットワーク接続に失敗しました。ネットワークを確認して再試行してください"
@@ -339,6 +294,7 @@ nav_label = "AI GTD"
 nav_label_short = "AI"
 capture_placeholder = "ふと思いついたことを入力、Enterで送信…"
 capture_hint = "Cmd/Ctrl + Enter で送信"
+submit = "記録"
 status_inbox = "受信箱"
 status_parsing = "AI 処理中"
 status_parsed = "解析済み"
@@ -384,10 +340,14 @@ save_fail = "保存に失敗しました"
 conflict = "バージョン競合 — 最新のデータを再読み込みしました。再編集してから保存してください"
 conflict_refresh_failed = "バージョン競合 — 最新の再読み込みに失敗しました:{error}。編集内容はそのまま保存されています。しばらくしてから再試行してください"
 
-[schedule]
-title = "スケジュール"
-nav_label = "スケジュール"
+[plan]
+title = "計画"
+nav_label = "計画"
 nav_label_short = "計画"
+tab_schedule = "スケジュール"
+tab_review = "見直し"
+
+[schedule]
 run = "スケジュール実行"
 applyAll = "すべて適用"
 empty = "タスクがありません"
@@ -399,8 +359,6 @@ next_day = "翌日"
 summary = "{placed} 配置済 · {unscheduled} 未配置"
 
 [dailySweep]
-nav_label_short = "見直し"
-title = "毎日の見直し"
 start = "今すぐ実行"
 adopt = "採用"
 reject = "拒否"
@@ -415,12 +373,12 @@ time = "実行時刻"
 
 [credentials]
 status = "クレデンシャルの管理"
-unavailable = "システムキERING サービスを利用できません"
+unavailable = "システムキーサービスを利用できません"
 unavailable_detail = "ディスクに保存済みのクレデンシャルはありますが、システムキーリングで開けません。システムキーサービスを確認して再試行してください（sway / 最小構成では `gnome-keyring-daemon --daemonize --components=secrets` を実行するか KWallet / KeePassXC を導入）。クレデンシャルの再入力では解決しません。"
 reset = "クレデンシャルをリセット"
 reset_confirm = "システムキーリングのマスターキーを削除し、保存済みのクレデンシャル（LLM API キー、WebDAV / S3 バックアップ認証情報）をすべて消去します。再入力が必要になります。続行しますか？"
 reset_done = "クレデンシャルをリセットしました"
-reset_failed = "リセットに失敗しました。システムキー服务的有無を確認してください"
+reset_failed = "リセットに失敗しました。システムキーサービスが利用可能か確認してください"
 
 [credentials.backend]
 secretService = "システムキーリング（Secret Service）"

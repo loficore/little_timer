@@ -39,13 +39,13 @@ export const TabPanel = ({
 }: TabPanelProps) => {
   return (
     <div className="flex flex-col flex-1 overflow-hidden px-4 sm:px-6">
-      <div className={`my-tabs ${isAnimated ? "animate-slideUp" : ""}`}>
+      <div className={`my-tabs my-tabs-scroll ${isAnimated ? "animate-slideUp" : ""}`}>
         {tabs.map((tab) => (
           <button
             key={tab.id}
             data-testid={`tab-${tab.id}`}
             onClick={() => onTabChange(tab.id)}
-            className={`my-tab truncate whitespace-nowrap min-w-0 ${activeTab === tab.id ? "my-tab-active" : ""}`}
+            className={`my-tab whitespace-nowrap ${activeTab === tab.id ? "my-tab-active" : ""}`}
           >
             {tab.icon && <span className="w-5 h-5 flex items-center">{tab.icon}</span>}
             <span className="text-[0.72rem] sm:text-sm leading-none">{tab.label}</span>

@@ -133,9 +133,7 @@ export const HabitsPage: FunctionalComponent<HabitsPageProps> = ({
             <Header
                 title={t("habit.management")}
                 showSettings={false}
-                showBack={true}
-                onBackClick={() => {
-                }}
+                showBack={false}
                 onStatsClick={onStatsClick}
                 onSettingsClick={onSettingsClick}
             />

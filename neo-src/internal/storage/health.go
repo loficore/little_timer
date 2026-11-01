@@ -81,8 +81,15 @@ func (h *HealthCheckManager) UpdateRecord() error {
 	if err := h.db.QueryRow(`SELECT COUNT(*) FROM sessions;`).Scan(&count); err != nil {
 		return err
 	}
+	// 用 upsert 而不是 INSERT OR REPLACE:REPLACE 会删旧行再插新行,未列出的
+	// 列(checksum)退回 DEFAULT(NULL)。见 crud.go 同名注释。
 	_, err := h.db.Exec(
-		`INSERT OR REPLACE INTO health_check (id, last_check, status, record_count) VALUES (1, CURRENT_TIMESTAMP, 'healthy', ?);`,
+		`INSERT INTO health_check (id, last_check, status, record_count)
+		 VALUES (1, CURRENT_TIMESTAMP, 'healthy', ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   last_check   = CURRENT_TIMESTAMP,
+		   status       = 'healthy',
+		   record_count = excluded.record_count;`,
 		count,
 	)
 	return err

@@ -6,6 +6,7 @@ vi.mock("../utils/i18n", () => ({ t: (key: string) => key }));
 vi.mock("../utils/logger", () => ({ logError: vi.fn(), logPerf: vi.fn(), logLifecycle: vi.fn() }));
 // 两个面板各自用 useScheduler / useDailySweep，都会打 API —— 这里只测 tab 切换，全部打桩。
 vi.mock("../utils/apiClientSingleton", () => ({
+  supportsDailySweep: true,
   getAPIClient: () => ({
     listTasks: vi.fn().mockResolvedValue([]),
     getDailySweepToday: vi.fn().mockResolvedValue({ proposals: [] }),

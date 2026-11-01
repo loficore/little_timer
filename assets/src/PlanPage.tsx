@@ -7,12 +7,16 @@
 import { useState } from "preact/hooks";
 import { SchedulePage } from "./SchedulePage";
 import { DailySweepPage } from "./DailySweepPage";
+import { supportsDailySweep } from "./utils/apiClientSingleton";
 import { t } from "./utils/i18n";
 
 type PlanTab = "schedule" | "review";
 
 export function PlanPage() {
   const [tab, setTab] = useState<PlanTab>("schedule");
+  // 每日梳理的后端绑定在 Wails 移动端尚未落地(GitHub issue #41):能力探测为
+  // false 时,和合并前的 dailySweep 入口一样隐藏「回顾」tab。
+  const reviewAvailable = supportsDailySweep;
 
   return (
     <div className="flex flex-col flex-1 bg-transparent overflow-hidden">
@@ -33,17 +37,19 @@ export function PlanPage() {
             >
               {t("plan.tab_schedule")}
             </button>
-            <button
-              type="button"
-              data-testid="plan-tab-review"
-              className={`my-tab ${tab === "review" ? "my-tab-active" : ""}`}
-              onClick={() => setTab("review")}
-            >
-              {t("plan.tab_review")}
-            </button>
+            {reviewAvailable && (
+              <button
+                type="button"
+                data-testid="plan-tab-review"
+                className={`my-tab ${tab === "review" ? "my-tab-active" : ""}`}
+                onClick={() => setTab("review")}
+              >
+                {t("plan.tab_review")}
+              </button>
+            )}
           </div>
 
-          {tab === "schedule" ? <SchedulePage /> : <DailySweepPage />}
+          {tab === "review" && reviewAvailable ? <DailySweepPage /> : <SchedulePage />}
         </div>
       </div>
     </div>

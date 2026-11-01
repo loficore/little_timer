@@ -385,6 +385,16 @@ export interface CredentialStatus {
    * 引导用户去修密钥服务；引导其重新填写凭据是错的，填了也解不开。
    */
   backend: string;
+  /**
+   * 仅当 backend === "unavailable" 时有值，决定展示哪组可操作文案：
+   *
+   * - `"format"`：磁盘上的凭据文件不是当前格式（v1 遗留文件、或未加密的垃圾）。
+   *   密钥服务本身是好的，**唯一出路是重置凭据**；此时提示"去修密钥服务"是误诊。
+   * - `"keystore"`：密钥服务坏了（master key 缺失、解封失败、平台无 keystore）。
+   *   引导用户修密钥服务；引导其重新填写凭据是错的，填了也解不开。
+   * - `""`：未提供（旧后端 / 正常态），按 `"keystore"` 文案兜底。
+   */
+  reason?: string;
   /** 仅当 backend === "unavailable" 时非空：可操作的失败原因。 */
   detail: string;
   /** secret store 内是否已有凭据。 */

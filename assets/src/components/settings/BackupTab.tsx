@@ -25,8 +25,7 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
   const [isVerifying, setIsVerifying] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   // 凭据由系统密钥环托管（issue #13），不再有主口令/锁状态。
-  // backend === "unavailable" 表示磁盘有凭据但密钥环解不开 —— 那是环境问题，
-  // 要提示用户去修密钥服务，而不是重新填凭据。
+  // backend === "unavailable" 时凭据读不出来，具体成因见 isLegacyFile。
   const [credentialStatus, setCredentialStatus] = useState<CredentialStatus>({
     backend: "",
     detail: "",
@@ -79,6 +78,10 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
     if (backend === "windows-dpapi") return "windowsDpapi";
     return "other";
   };
+
+  // "凭据文件读不出来"有两种成因，出路相反：v1 遗留 / 未加密文件只能重置，
+  // 密钥服务坏了要先修服务。后端用 reason 区分，字段缺失时按密钥服务兜底。
+  const isLegacyFile = credentialStatus?.backend === "unavailable" && credentialStatus?.reason === "format";
 
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -274,7 +277,9 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
           <div className="flex items-center gap-2 text-sm">
             <span>🔐 {t("credentials.status")}:</span>
             {credentialStatus.backend === "unavailable" ? (
-              <span className="text-error">{t("credentials.unavailable")}</span>
+              <span className="text-error">
+                {isLegacyFile ? t("credentials.format") : t("credentials.unavailable")}
+              </span>
             ) : (
               <span className="text-success">
                 {t(`credentials.backend.${credentialBackendKey(credentialStatus.backend)}`)}
@@ -285,8 +290,9 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
           {credentialStatus.backend === "unavailable" && (
             <div className="alert alert-warning text-sm">
               <span>
-                {t("credentials.unavailable_detail")}
-                {credentialStatus.detail ? ` ${credentialStatus.detail}` : ""}
+                {isLegacyFile
+                  ? t("credentials.format_detail")
+                  : `${t("credentials.unavailable_detail")}${credentialStatus.detail ? ` ${credentialStatus.detail}` : ""}`}
               </span>
             </div>
           )}

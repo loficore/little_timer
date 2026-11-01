@@ -148,4 +148,60 @@ func TestCredentialStatus_UnavailableWhenFileExistsWithoutKey(t *testing.T) {
 	if cs.Detail == "" {
 		t.Error("Detail 为空,应透出不可用原因(never pretend empty)")
 	}
+	if cs.Reason != "keystore" {
+		t.Errorf("Reason = %q, want keystore(密钥环侧失败)", cs.Reason)
+	}
+}
+
+// seedLegacySecretFile 在盘上留一个 v1 遗留 blob(前缀不对、非 v2 envelope),
+// 用于验证"密钥服务完好但文件读不出来"这一成因。
+func seedLegacySecretFile(t *testing.T, dbPath string) {
+	t.Helper()
+	secretPath := filepath.Join(filepath.Dir(dbPath), "secret.db")
+	if err := os.WriteFile(secretPath, []byte("LTMSECv1legacy-blob"), 0o600); err != nil {
+		t.Fatalf("写 v1 遗留 blob: %v", err)
+	}
+}
+
+// newAppWithKeystore 复用同一 DBPath 重建 App,绕过 Secrets() 的 sync.Once。
+func newAppWithKeystore(a *App, hasKey bool) *App {
+	a2 := NewApp(a.Clock, a.Settings, a.SQLite, a.Backup, a.DBPath)
+	a2.Keystore = keystoretest.New("secret-service", hasKey)
+	return a2
+}
+
+// 成因分类:v1 遗留文件的失败点是磁盘内容,不是密钥服务。报成 keystore 会让
+// 升级用户被引导去装 gnome-keyring,而唯一出路其实是重置凭据。
+func TestCredentialStatus_LegacyFileReasonIsFormat(t *testing.T) {
+	a := newSecretTestApp(t, keystoretest.New("secret-service", true))
+	seedLegacySecretFile(t, a.DBPath)
+
+	a2 := newAppWithKeystore(a, true)
+	cs := a2.CredentialStatus()
+	if cs.Backend != "unavailable" {
+		t.Errorf("Backend = %q, want unavailable", cs.Backend)
+	}
+	if cs.Reason != "format" {
+		t.Errorf("Reason = %q, want format", cs.Reason)
+	}
+	if !cs.HasSecret {
+		t.Error("HasSecret = false,盘上确实有 secret.db")
+	}
+}
+
+// TestWailsCredentialStatus_ForwardsReason 盯 Wails 通道(Windows / Android)
+// 的手搓 map[string]any:它逐键复制 domain.CredentialStatus,漏一个键前端就
+// 永远收不到该成因,HTTP 与 Wails 两端会静默分叉。
+func TestWailsCredentialStatus_ForwardsReason(t *testing.T) {
+	a := newSecretTestApp(t, keystoretest.New("secret-service", true))
+	seedLegacySecretFile(t, a.DBPath)
+
+	svc := NewBackupService(newAppWithKeystore(a, true))
+	m, err := svc.CredentialStatus()
+	if err != nil {
+		t.Fatalf("CredentialStatus: %v", err)
+	}
+	if m["reason"] != "format" {
+		t.Errorf("m[\"reason\"] = %v, want format(手搓 map 漏转 reason,前端拿不到成因)", m["reason"])
+	}
 }

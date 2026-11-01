@@ -30,6 +30,7 @@ import type {
     DailySweepToday,
     DailySweepSettings,
     ReviewProposal,
+    TestConnectionResult,
 } from "../types/aigtd";
 
 /**
@@ -744,6 +745,27 @@ export class APIClient {
     }): Promise<LLMSettingsDTO> {
         return this.fetchJson<LLMSettingsDTO>(`${this.baseUrl}/api/settings/llm`, {
             method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+        });
+    }
+
+    /**
+     * 测试 LLM 连通性:POST /api/settings/llm/test。
+     *
+     * 传当前表单值(未保存也能测);api_key 留空表示沿用已保存的 Key。
+     * 业务失败(Key 错、模型名不存在)以 ok=false + error 返回,不抛异常。
+     */
+    async testLLMSettings(patch: {
+        provider?: "openai_compat" | "anthropic";
+        base_url?: string;
+        model?: string;
+        max_tokens?: number;
+        timeout_seconds?: number;
+        api_key?: string;
+    }): Promise<TestConnectionResult> {
+        return this.fetchJson<TestConnectionResult>(`${this.baseUrl}/api/settings/llm/test`, {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(patch),
         });

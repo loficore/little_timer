@@ -8,9 +8,9 @@
  * 注意:
  *  - 入参 `scheduled_start`/`scheduled_end` 是 unix 秒,需用本地时区解析到「当日
  *    几点几分」;窗口本身也是分钟(0-1440)。这种"日期 + 当天 hour window"
- *    的混合由 `localMinuteOfDay` 处理。
- *  - 测试用例 scheduled_start=0(epoch)在 UTC 环境下为 0:00,落在 dayStart(6:00)
- *    之前,会被 clamp 到窗口左边界,仍能渲染为最小宽度的占位(测 1/3 已覆盖)。
+ *    的混合由 `localMinuteOfDay` 处理,和后端 scheduler 的 `time.Local` 对齐。
+ *  - 落在窗口外的任务会被夹到最近一侧的最小宽度占位;窗口内的短任务同样保留
+ *    最小宽度,但会回夹 left,避免右边界溢出轨道。
  */
 
 import { useEffect, useState } from "preact/hooks";
@@ -68,22 +68,27 @@ export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23 }: TimelineP
 
   return (
     <div
-      className="schedule-timeline relative w-full rounded-lg border border-base-300 bg-base-100 px-8 py-3"
+      className="schedule-timeline relative w-full rounded-lg border border-base-300 bg-base-100 px-3 py-3"
       data-testid="timeline"
     >
       {/* 小时轴 */}
       <div className="timeline-axis relative mb-2 h-6 border-b border-base-300">
-        {ticks.map((h) => (
-          <span
-            key={h}
-            className="timeline-tick absolute top-0 -translate-x-1/2 text-[10px] opacity-60"
-            style={{ left: `${pctOfWindow(h * 60, windowStartMin, windowEndMin)}%` }}
-          >
-            {viewportWidth < 640
-              ? String(h).padStart(2, "0")
-              : String(h).padStart(2, "0") + ":00"}
-          </span>
-        ))}
+        {ticks.map((h) => {
+          const pct = pctOfWindow(h * 60, windowStartMin, windowEndMin);
+          // 首尾刻度贴着轨道两端:0% 左对齐、100% 右对齐,避免半个标签溢出卡片。
+          const shift = pct <= 0 ? "0" : pct >= 100 ? "-100%" : "-50%";
+          return (
+            <span
+              key={h}
+              className="timeline-tick absolute top-0 text-[10px] opacity-60"
+              style={{ left: `${pct}%`, transform: `translateX(${shift})` }}
+            >
+              {viewportWidth < 640
+                ? String(h).padStart(2, "0")
+                : String(h).padStart(2, "0") + ":00"}
+            </span>
+          );
+        })}
       </div>
 
       {/* Task 轨 */}

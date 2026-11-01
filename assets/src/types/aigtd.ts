@@ -63,8 +63,8 @@ export interface LLMSettingsDTO {
 
 export interface TestConnectionResult {
   ok: boolean;
-  latency_ms?: number;
-  model_echo?: string;
+  latency_ms: number;
+  model: string;
   error?: string;
 }
 

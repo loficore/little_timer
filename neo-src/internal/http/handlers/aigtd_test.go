@@ -46,6 +46,7 @@ func setupAIGtdRouter(t *testing.T, a *app.App) *gin.Engine {
 
 	r.GET("/api/settings/llm", LLMSettingsGet)
 	r.PUT("/api/settings/llm", LLMSettingsUpdate)
+	r.POST("/api/settings/llm/test", LLMSettingsTest)
 	testRouterApp = a
 	t.Cleanup(func() { testRouterApp = nil })
 	return r
@@ -533,6 +534,139 @@ func TestLLMSettings_RejectsBadProvider(t *testing.T) {
 	w := doJSON(t, r, http.MethodPut, "/api/settings/llm", map[string]any{"provider": "bogus"})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("bad provider: code=%d, want 400", w.Code)
+	}
+}
+
+// TestLLMSettingsTest_OK 验证「测试连接」用已保存的 Base URL / Key 真发一次
+// 请求,并把上游成功映射成 ok=true + 延迟。
+func TestLLMSettingsTest_OK(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`))
+	}))
+	defer srv.Close()
+
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPut, "/api/settings/llm", map[string]any{
+		"provider": "openai_compat",
+		"base_url": srv.URL + "/v1",
+		"model":    "probe-model",
+		"api_key":  "sk-probe",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("put: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 不带任何覆盖:走已保存配置 + 已保存 Key。
+	w = doJSON(t, r, http.MethodPost, "/api/settings/llm/test", map[string]any{})
+	if w.Code != http.StatusOK {
+		t.Fatalf("test: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var got LLMTestResult
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.OK || got.Error != "" {
+		t.Fatalf("want ok, got %+v", got)
+	}
+	if got.Model != "probe-model" {
+		t.Errorf("model echo = %q, want probe-model", got.Model)
+	}
+	if gotAuth != "Bearer sk-probe" {
+		t.Errorf("authorization = %q, want Bearer sk-probe", gotAuth)
+	}
+}
+
+// TestLLMSettingsTest_OverridesBeforeSave 验证未保存的表单值也参与测试
+// (改完就能测,不必先落库)。
+func TestLLMSettingsTest_OverridesBeforeSave(t *testing.T) {
+	var gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotModel = body.Model
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"}}],"usage":{}}`))
+	}))
+	defer srv.Close()
+
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/settings/llm/test", map[string]any{
+		"provider": "openai_compat",
+		"base_url": srv.URL,
+		"model":    "form-only-model",
+		"api_key":  "sk-form",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	var got LLMTestResult
+	_ = json.Unmarshal(w.Body.Bytes(), &got)
+	if !got.OK {
+		t.Fatalf("want ok, got %+v", got)
+	}
+	if gotModel != "form-only-model" {
+		t.Errorf("upstream model = %q, want form-only-model", gotModel)
+	}
+}
+
+// TestLLMSettingsTest_UpstreamFailure 验证 4xx/5xx 变成可读的业务反馈
+// (HTTP 200 + ok=false),而不是把整个请求打成 500。
+func TestLLMSettingsTest_UpstreamFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad key", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/settings/llm/test", map[string]any{
+		"provider": "openai_compat",
+		"base_url": srv.URL,
+		"model":    "m",
+		"api_key":  "sk-bad",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	var got LLMTestResult
+	_ = json.Unmarshal(w.Body.Bytes(), &got)
+	if got.OK {
+		t.Fatalf("want failure, got %+v", got)
+	}
+	if !strings.Contains(got.Error, "401") {
+		t.Errorf("error = %q, want it to mention 401", got.Error)
+	}
+}
+
+// TestLLMSettingsTest_MissingKey 验证没配 Key 时给出明确提示,而不是发一个
+// 注定 401 的请求。
+func TestLLMSettingsTest_MissingKey(t *testing.T) {
+	a := newTestApp(t)
+	r := setupAIGtdRouter(t, a)
+
+	w := doJSON(t, r, http.MethodPost, "/api/settings/llm/test", map[string]any{})
+	if w.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	var got LLMTestResult
+	_ = json.Unmarshal(w.Body.Bytes(), &got)
+	if got.OK {
+		t.Fatalf("want failure, got %+v", got)
+	}
+	if !strings.Contains(got.Error, "API Key") {
+		t.Errorf("error = %q, want it to mention API Key", got.Error)
 	}
 }
 

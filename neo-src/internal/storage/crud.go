@@ -70,7 +70,27 @@ func NewCrudManager() *CrudManager {
 func (c *CrudManager) SetDB(db *sql.DB) { c.db = db }
 
 // saveSettingsSQL 是 settings 行的 UPSERT 语句。
-const saveSettingsSQL = `INSERT OR REPLACE INTO settings (id, timezone, language, default_mode, theme_mode, wallpaper, duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+//
+// 必须用 `ON CONFLICT(id) DO UPDATE` 而不是 `INSERT OR REPLACE`:REPLACE 的语义是
+// 删旧行再插新行,列清单之外的列(llm_*、daily_sweep_*、updated_at)会退回建表
+// DEFAULT —— 即"改个主题就把 LLM Base URL / 模型重置成默认值"。DO UPDATE 只碰
+// 本函数负责的列,其余列原样保留。
+const saveSettingsSQL = `INSERT INTO settings (id, timezone, language, default_mode, theme_mode, wallpaper, duration_seconds, countdown_loop, countdown_loop_count, countdown_loop_interval, stopwatch_max_seconds, log_level, log_enable_timestamp, log_tick_interval) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  timezone                = excluded.timezone,
+  language                = excluded.language,
+  default_mode            = excluded.default_mode,
+  theme_mode              = excluded.theme_mode,
+  wallpaper               = excluded.wallpaper,
+  duration_seconds        = excluded.duration_seconds,
+  countdown_loop          = excluded.countdown_loop,
+  countdown_loop_count    = excluded.countdown_loop_count,
+  countdown_loop_interval = excluded.countdown_loop_interval,
+  stopwatch_max_seconds   = excluded.stopwatch_max_seconds,
+  log_level               = excluded.log_level,
+  log_enable_timestamp    = excluded.log_enable_timestamp,
+  log_tick_interval       = excluded.log_tick_interval,
+  updated_at              = CURRENT_TIMESTAMP;`
 
 // SaveSettings 将 SettingsConfig 持久化到 settings 表的单行记录中。
 //

@@ -43,6 +43,8 @@ saving = "保存中..."
 create = "创建"
 delete = "删除"
 
+close = "关闭"
+
 [timer]
 title = "专注"
 select_habit = "选择习惯"
@@ -308,6 +310,13 @@ error_too_long = "内容过长（最多 2000 字）"
 parse_failed_title = "解析失败"
 parse_failed_retry = "点击重新解析"
 task_count = "{count} 个任务"
+
+edit_title = "编辑任务 #{id}"
+section_basic = "基本信息"
+section_scores = "评分"
+field_title = "标题"
+field_notes = "备注"
+field_due_date = "截止日期"
 
 [llm_settings]
 title = "AI"

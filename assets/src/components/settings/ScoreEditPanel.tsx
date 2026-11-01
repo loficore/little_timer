@@ -1,14 +1,12 @@
 /**
- * ScoreEditPanel —— 编辑任务的 4 维调度评分(priority/urgency/energy/context_tag)。
+ * ScoreEditPanel —— 独立保存的 4 维调度评分面板（计划页侧栏使用）。
  *
- * 与 useAITasks.patchScores 的区别:
- *  - 本组件是 UI 入口:在 409 时拉一次最新任务,刷新本地图形状态,并展示冲突横幅
- *    让用户决定是否再点保存(不自动重发,避免覆盖用户未看到的远端改动)。
- *  - useAITasks.patchScores 是程序化 API:同样的 409 时有界自动重发 1 次,适用于
- *    非交互场景(scheduler apply 等)。
+ * 字段本身由 ScoreFields 渲染；本组件负责「保存 + 409 处理 + toast」：
+ *  - 409：拉一次最新任务，刷新本地状态并展示冲突横幅（不自动重发，避免覆盖
+ *    用户没看到的远端改动）；
+ *  - 刷新也失败：保留用户编辑，只展示带原因的冲突提示。
  *
- * 数据流:输入 current/version;保存成功 → onUpdated(updatedTask);409 → 拉取
- * 最新任务 → 回填本地图形状态 + onUpdated(fresh) + 显示冲突横幅。
+ * TaskEditModal 不经过本组件，它直接用 ScoreFields + 底部统一保存。
  */
 
 import { useState } from "preact/hooks";
@@ -17,26 +15,17 @@ import { getAPIClient } from "../../utils/apiClientSingleton";
 import { VersionConflictError } from "../../utils/apiClient";
 import { showToast } from "../common/Toast";
 import { t } from "../../utils/i18n";
+import { ScoreFields, type ScoreValues } from "./ScoreFields";
 
 export interface ScoreEditPanelProps {
   taskId: number;
-  current: {
-    priority_score: number;
-    urgency_score: number;
-    energy_required: number;
-    context_tag: string;
-  };
+  current: ScoreValues;
   version: number;
   onUpdated: (next: TaskDTO) => void;
 }
 
-const CONTEXT_OPTIONS = ["写作", "编码", "沟通", "学习", "杂事", "general"];
-
 export function ScoreEditPanel(props: ScoreEditPanelProps) {
-  const [priority, setPriority] = useState(props.current.priority_score);
-  const [urgency, setUrgency] = useState(props.current.urgency_score);
-  const [energy, setEnergy] = useState(props.current.energy_required);
-  const [context, setContext] = useState(props.current.context_tag);
+  const [values, setValues] = useState<ScoreValues>({ ...props.current });
   const [version, setVersion] = useState(props.version);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState<string | null>(null);
@@ -46,28 +35,21 @@ export function ScoreEditPanel(props: ScoreEditPanelProps) {
     setConflict(null);
     try {
       const api = getAPIClient();
-      const updated = await api.patchTaskScores(props.taskId, {
-        version,
-        priority_score: priority,
-        urgency_score: urgency,
-        energy_required: energy,
-        context_tag: context,
-      });
+      const updated = await api.patchTaskScores(props.taskId, { version, ...values });
       setVersion(updated.version);
       props.onUpdated(updated);
       showToast(t("score.save_success"), "success");
     } catch (err) {
       if (err instanceof VersionConflictError) {
-        // 409:服务端版本已变,拉取最新任务并展示冲突,让用户重新编辑后保存。
-        // 若拉取也失败(refresh failed),表单保持用户原编辑(避免覆盖未保存
-        // 输入),只展示带原因的冲突提示让用户决定下一步。
         try {
           const fresh = await getAPIClient().getTask(props.taskId);
           setVersion(fresh.version);
-          setPriority(fresh.priority_score);
-          setUrgency(fresh.urgency_score);
-          setEnergy(fresh.energy_required);
-          setContext(fresh.context_tag);
+          setValues({
+            priority_score: fresh.priority_score,
+            urgency_score: fresh.urgency_score,
+            energy_required: fresh.energy_required,
+            context_tag: fresh.context_tag,
+          });
           setConflict(t("score.conflict"));
           props.onUpdated(fresh);
         } catch (refreshErr) {
@@ -84,84 +66,14 @@ export function ScoreEditPanel(props: ScoreEditPanelProps) {
   };
 
   return (
-    <div className="score-edit-panel space-y-3" data-testid="score-edit-panel">
+    <div className="space-y-4" data-testid="score-edit-panel">
       {conflict && (
         <div className="alert alert-warning" data-testid="conflict-banner" role="alert">
           <span>{conflict}</span>
         </div>
       )}
 
-      <div className="form-control">
-        <label className="label">
-          <span className="label-text">{t("score.priority")}</span>
-          <span className="label-text-alt" data-testid="priority-value">{priority}</span>
-        </label>
-        <input
-          type="range"
-          min={1}
-          max={5}
-          step={1}
-          className="range range-primary range-sm"
-          value={priority}
-          data-testid="priority-input"
-          onInput={(e) => setPriority(Number((e.currentTarget as HTMLInputElement).value))}
-        />
-      </div>
-
-      <div className="form-control">
-        <label className="label">
-          <span className="label-text">{t("score.urgency")}</span>
-          <span className="label-text-alt" data-testid="urgency-value">{urgency}</span>
-        </label>
-        <input
-          type="range"
-          min={1}
-          max={10}
-          step={1}
-          className="range range-primary range-sm"
-          value={urgency}
-          data-testid="urgency-input"
-          onInput={(e) => setUrgency(Number((e.currentTarget as HTMLInputElement).value))}
-        />
-      </div>
-
-      <div className="form-control">
-        <label className="label">
-          <span className="label-text">{t("score.energy")}</span>
-        </label>
-        <div className="flex gap-4" data-testid="energy-radio">
-          {[1, 2, 3].map((n) => (
-            <label key={n} className="flex cursor-pointer items-center gap-2">
-              <input
-                type="radio"
-                name="energy"
-                value={n}
-                className="radio radio-sm"
-                checked={energy === n}
-                data-testid={`energy-${n}`}
-                onChange={() => setEnergy(n)}
-              />
-              <span>{n}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div className="form-control">
-        <label className="label">
-          <span className="label-text">{t("score.context")}</span>
-        </label>
-        <select
-          className="select select-bordered select-sm"
-          value={context}
-          data-testid="context-select"
-          onChange={(e) => setContext((e.currentTarget as HTMLSelectElement).value)}
-        >
-          {CONTEXT_OPTIONS.map((opt) => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      </div>
+      <ScoreFields value={values} onChange={setValues} testId="score-fields" />
 
       <div className="flex justify-end">
         <button

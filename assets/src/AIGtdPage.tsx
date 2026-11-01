@@ -8,7 +8,7 @@ import { t } from "./utils/i18n";
 import type { TaskDTO } from "./types/aigtd";
 
 export function AIGtdPage() {
-  const { tasks, capture, archive, toggleSubtask, reparse } = useAITasks();
+  const { tasks, refresh, capture, archive, toggleSubtask, reparse } = useAITasks();
   const [editing, setEditing] = useState<TaskDTO | null>(null);
 
   return (
@@ -27,7 +27,9 @@ export function AIGtdPage() {
             onEdit={setEditing}
           />
         )}
-        {editing && <TaskEditModal task={editing} onClose={() => setEditing(null)} />}
+        {editing && (
+          <TaskEditModal task={editing} onClose={() => setEditing(null)} onSaved={() => void refresh()} />
+        )}
       </div>
     </div>
   );

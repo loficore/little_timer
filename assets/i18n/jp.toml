@@ -129,6 +129,8 @@ saving = "保存中..."
 create = "作成"
 delete = "削除"
 
+close = "閉じる"
+
 [timer]
 title = "集中"
 select_habit = "習慣を選択"
@@ -309,6 +311,13 @@ error_too_long = "内容が長すぎます(最大2000文字)"
 parse_failed_title = "解析失敗"
 parse_failed_retry = "クリックで再解析"
 task_count = "{count} 件のタスク"
+
+edit_title = "タスク #{id} を編集"
+section_basic = "基本情報"
+section_scores = "スコア"
+field_title = "タイトル"
+field_notes = "メモ"
+field_due_date = "期限"
 
 [llm_settings]
 title = "AI"

@@ -86,6 +86,8 @@
 
 > **2026-10-22 更新（issue #13）**：MasterPasswordModal 已随主口令 UX 一并删除（凭据改由 OS 原生密钥服务托管，见 README「凭据安全」）。它原本是本节的正面样例，删除后当前剩余两个弹窗（HabitModal / WallpaperModal）**都**需要向本节规则收敛，不再有可直接参照的既有实现。
 
+**已整改（2026-11-01，部分）**：新增共用壳 `components/common/Modal.tsx` —— portal 挂到 `document.body`（避免祖先 `backdrop-filter` 把 `position: fixed` 限制在内容区，移动端顶栏浮在遮罩上）、`.my-overlay-backdrop` + `.my-surface-modal`、header（T2 标题 + X）、body（超高内部滚动）、footer（取消 + solid 确认）、Escape / 遮罩 / X 关闭。AI-GTD 任务编辑弹窗已迁到该壳，并把「基本信息 + 4 维评分」收成底部单一 primary「保存」。**未完成**：HabitModal / WallpaperModal 仍是各自实现，尚未迁到共用壳。
+
 **规则**：
 - 所有弹窗共用一个壳组件：header（T2 标题 + X）、内容区（超高时内部滚动，禁止裁切）、footer（取消/确认，确认走 R1 solid）。
 - Escape 关闭 + 遮罩点击关闭为默认行为，逐弹窗豁免需写明理由。
@@ -96,3 +98,4 @@
 - [ ] R1 的 VRT 对比度断言落地。
 - [ ] light 主题按 dark 水准重做后，重截全套基线。
 - [ ] 修复即录 bug：WallpaperModal / HabitModal 不响应 Escape；HabitModal 内容超屏裁切；WallpaperModal「渐变」tab 缺失与原生色输入框未设样式。
+- [ ] HabitModal / WallpaperModal 迁到共用壳 `components/common/Modal.tsx`（R7）。

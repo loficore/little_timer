@@ -155,6 +155,8 @@ saving = "Saving..."
 create = "Create"
 delete = "Delete"
 
+close = "Close"
+
 [timer]
 title = "Focus"
 select_habit = "Select habit"
@@ -308,6 +310,13 @@ error_too_long = "Content too long (max 2000 chars)"
 parse_failed_title = "Parse failed"
 parse_failed_retry = "Click to reparse"
 task_count = "{count} tasks"
+
+edit_title = "Edit task #{id}"
+section_basic = "Details"
+section_scores = "Scores"
+field_title = "Title"
+field_notes = "Notes"
+field_due_date = "Due date"
 
 [llm_settings]
 title = "AI"

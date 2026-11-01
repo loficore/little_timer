@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { getAPIClient } from "../utils/apiClientSingleton";
 import { logError } from "../utils/logger";
-import type { LLMSettingsDTO } from "../types/aigtd";
+import type { LLMSettingsDTO, TestConnectionResult } from "../types/aigtd";
 
 export interface LLMSettingsPatch {
   provider?: "openai_compat" | "anthropic";
@@ -20,6 +20,7 @@ export interface LLMSettingsPatch {
 export function useLLMSettings() {
   const [cfg, setCfg] = useState<LLMSettingsDTO | null>(null);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -48,9 +49,25 @@ export function useLLMSettings() {
     }
   }, []);
 
+  /** 用当前表单值(可含未保存改动)测一次连通性。 */
+  const test = useCallback(
+    async (
+      patch: Omit<LLMSettingsPatch, "clear_key">,
+    ): Promise<TestConnectionResult> => {
+      setTesting(true);
+      setError(null);
+      try {
+        return await getAPIClient().testLLMSettings(patch);
+      } finally {
+        setTesting(false);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  return { cfg, saving, error, refresh, save };
+  return { cfg, saving, testing, error, refresh, save, test };
 }

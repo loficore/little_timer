@@ -50,26 +50,47 @@ function durationMinutes(startSec: number, endSec: number): number {
   return min > 0 ? min : 0;
 }
 
+/** 把 unix 秒换算成「本地时区当天第几分钟」(0..1439)。 */
+export function localMinuteOfDay(sec: number): number {
+  const d = new Date(sec * 1000);
+  return d.getHours() * 60 + d.getMinutes();
+}
+
 function positionStyle(
   startSec: number,
   endSec: number,
   windowStartMin: number,
   windowEndMin: number,
 ): { left: string; width: string } {
-  const taskStartMin = (startSec / 60);
-  const taskEndMin = (endSec / 60);
-  const start = Math.max(taskStartMin, windowStartMin);
-  const end = Math.min(taskEndMin, windowEndMin);
   const span = windowEndMin - windowStartMin;
-  if (span <= 0 || end <= start) {
-    // 任务完全落在窗口外:贴左画最小宽度,确保可被定位到,可见。
-    return { left: "0%", width: "2%" };
+  if (span <= 0) return { left: "0%", width: "2%" };
+
+  // scheduled_start/end 是 unix 秒(绝对时刻),轨道坐标是「当天第几分钟」。
+  // 不做这一步换算的话,epoch 分钟永远大于窗口右界,所有任务都会塌到最左边
+  // 变成 2% 的细条(线上真实出现过)。
+  const startMin = localMinuteOfDay(startSec);
+  let endMin = localMinuteOfDay(endSec);
+  if (endMin <= startMin) {
+    // 跨午夜,或上游给了零长度:按真实时长补足,避免宽度塌成 0。
+    endMin = startMin + Math.max(1, Math.round((endSec - startSec) / 60));
   }
-  const leftPct = ((start - windowStartMin) / span) * 100;
-  const widthPct = ((end - start) / span) * 100;
+
+  if (endMin <= windowStartMin || startMin >= windowEndMin) {
+    // 任务完全落在窗口外:贴最近的一侧画一条最小宽度,提示"排到窗口外了"。
+    return startMin >= windowEndMin
+      ? { left: "98.5%", width: "1.5%" }
+      : { left: "0%", width: "1.5%" };
+  }
+
+  const start = Math.max(startMin, windowStartMin);
+  const end = Math.min(endMin, windowEndMin);
+  // 最小宽度用于保证短任务可见,但它可能把右边界顶出轨道:
+  // 回夹 left,确保 left + width 不超过 100%。
+  const widthPct = Math.max(1.5, ((end - start) / span) * 100);
+  const leftPct = Math.min(((start - windowStartMin) / span) * 100, 100 - widthPct);
   return {
     left: `${leftPct.toFixed(3)}%`,
-    width: `${Math.max(1.5, widthPct).toFixed(3)}%`,
+    width: `${widthPct.toFixed(3)}%`,
   };
 }
 

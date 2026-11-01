@@ -150,6 +150,7 @@ func registerLLMSettings(g *gin.RouterGroup) {
 	sg := g.Group("/settings/llm")
 	sg.GET("", handlers.LLMSettingsGet)
 	sg.PUT("", handlers.LLMSettingsUpdate)
+	sg.POST("/test", handlers.LLMSettingsTest)
 }
 
 // 任务路由。

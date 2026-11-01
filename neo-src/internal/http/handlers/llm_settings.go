@@ -6,7 +6,10 @@
 package handlers
 
 import (
+	"errors"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -164,6 +167,107 @@ func readLLMSettings(a *app.App) (*LLMSettingsDTO, error) {
 		d.TimeoutSeconds = 30
 	}
 	return &d, nil
+}
+
+// LLMTestResult 是 POST /api/settings/llm/test 的出参。
+//
+// 语义:HTTP 200 + ok=false 表示"请求发出去了,但配置或上游有问题",前端把
+// 它当可读的业务反馈渲染;HTTP 4xx/5xx 只留给请求本身非法(JSON 坏了、DB
+// 读失败)——这样「Key 错了」「模型名不存在」不会和「后端挂了」混为一谈。
+type LLMTestResult struct {
+	OK        bool   `json:"ok"`
+	LatencyMS int64  `json:"latency_ms"`
+	Model     string `json:"model"`
+	Error     string `json:"error,omitempty"`
+}
+
+// LLMSettingsTest POST /api/settings/llm/test
+//
+// 用「已保存配置 + 本次表单覆盖」发一次最小补全,验证 Base URL / 模型 /
+// API Key / 网络是否真的可用。body 字段与 PUT 相同且全部可选;api_key 留空
+// 表示沿用已保存的 Key(用户可以改完表单先测、再保存)。
+//
+// 探针固定只要 64 token 以内,不跟随用户配置的 32000 上限——测试本身不应该
+// 变慢或变贵。超时沿用配置值(上限 300s),因为"配置的超时撑不撑得住"也是
+// 要验证的一部分。
+func LLMSettingsTest(c *gin.Context) {
+	a := appFromCtx(c)
+	var body map[string]any
+	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid json"})
+		return
+	}
+
+	cur, err := readLLMSettings(a)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "read failed"})
+		return
+	}
+
+	provider := pickStr(body, "provider", cur.Provider)
+	switch provider {
+	case "", "openai_compat":
+		provider = "openai_compat"
+	case "anthropic":
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid provider"})
+		return
+	}
+
+	baseURL := pickStr(body, "base_url", cur.BaseURL)
+	model := pickStr(body, "model", cur.Model)
+	maxTokens := pickInt(body, "max_tokens", cur.MaxTokens)
+	timeoutSec := pickInt(body, "timeout_seconds", cur.TimeoutSeconds)
+	if timeoutSec <= 0 || timeoutSec > 300 {
+		timeoutSec = 30
+	}
+	if maxTokens <= 0 || maxTokens > 64 {
+		maxTokens = 64
+	}
+
+	apiKey := ""
+	if v, ok := body["api_key"].(string); ok {
+		apiKey = v
+	}
+	if apiKey == "" {
+		if key, kerr := a.Secrets().Retrieve([]byte(llmAPIKeySecret)); kerr == nil {
+			apiKey = string(key)
+		}
+	}
+
+	result := LLMTestResult{Model: model}
+	if apiKey == "" {
+		result.Error = "未配置 API Key"
+		c.JSON(http.StatusOK, result)
+		return
+	}
+
+	timeout := time.Duration(timeoutSec) * time.Second
+	var p aigtd.Provider
+	switch provider {
+	case "anthropic":
+		p = aigtd.NewAnthropicProvider(apiKey, model, timeout)
+	default:
+		if baseURL == "" {
+			baseURL = "https://api.deepseek.com/v1"
+		}
+		p = aigtd.NewOpenAICompatProvider(baseURL, apiKey, model, timeout)
+	}
+
+	start := time.Now()
+	_, perr := p.Complete(c.Request.Context(), aigtd.CompletionRequest{
+		SystemPrompt: "You are a connectivity probe. Reply with JSON only.",
+		UserPrompt:   `{"ping":true}`,
+		Model:        model,
+		MaxTokens:    maxTokens,
+	})
+	result.LatencyMS = time.Since(start).Milliseconds()
+	if perr != nil {
+		result.Error = perr.Error()
+	} else {
+		result.OK = true
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func maskAPIKey(s string) string {

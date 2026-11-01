@@ -14,7 +14,7 @@ import { t } from "../../utils/i18n";
  * 与其他设置子选项保持一致。
  */
 export function LLMSettings() {
-  const { cfg, saving, error, save } = useLLMSettings();
+  const { cfg, saving, testing, error, save, test } = useLLMSettings();
   const [provider, setProvider] = useState<string>("");
   const [baseURL, setBaseURL] = useState("");
   const [model, setModel] = useState("");
@@ -23,6 +23,7 @@ export function LLMSettings() {
   const [apiKey, setApiKey] = useState("");
   const [clearKey, setClearKey] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   // cfg 加载完后填表单(一次性同步;之后用户编辑表单不覆盖 cfg)。
   useEffect(() => {
@@ -37,6 +38,7 @@ export function LLMSettings() {
 
   const onSave = async () => {
     setFeedback(null);
+    setTestResult(null);
     try {
       await save({
         provider: provider as "openai_compat" | "anthropic",
@@ -52,6 +54,38 @@ export function LLMSettings() {
       setFeedback(t("llm_settings.saved"));
     } catch (e) {
       setFeedback(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /**
+   * 测试连通性:用**当前表单值**发一次最小请求,所以改完不用先保存就能验证。
+   * API Key 留空时后端沿用已保存的 Key。
+   */
+  const onTest = async () => {
+    setFeedback(null);
+    setTestResult(null);
+    try {
+      const r = await test({
+        provider: provider as "openai_compat" | "anthropic",
+        base_url: baseURL,
+        model,
+        max_tokens: maxTokens,
+        timeout_seconds: timeout,
+        api_key: apiKey || undefined,
+      });
+      setTestResult({
+        ok: r.ok,
+        text: r.ok
+          ? t("llm_settings.test_ok", { latency: r.latency_ms })
+          : t("llm_settings.test_fail", { error: r.error ?? "" }),
+      });
+    } catch (e) {
+      setTestResult({
+        ok: false,
+        text: t("llm_settings.test_fail", {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      });
     }
   };
 
@@ -136,13 +170,37 @@ export function LLMSettings() {
         )}
       </SettingItem>
 
-      <div className="flex items-center gap-2">
-        <button className="btn btn-primary" disabled={saving} onClick={() => void onSave()}>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="btn btn-primary"
+          data-testid="llm-save"
+          disabled={saving || testing}
+          onClick={() => void onSave()}
+        >
           {saving ? "..." : t("common.save")}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          data-testid="llm-test"
+          disabled={saving || testing}
+          onClick={() => void onTest()}
+        >
+          {testing ? t("llm_settings.testing") : t("llm_settings.test_connection")}
         </button>
         {feedback && <span className="text-sm opacity-70">{feedback}</span>}
         {error && <span className="text-sm text-error">{error}</span>}
       </div>
+      {testResult && (
+        <p
+          className={`text-sm ${testResult.ok ? "text-success" : "text-error"}`}
+          role="status"
+          data-testid="llm-test-result"
+        >
+          {testResult.text}
+        </p>
+      )}
     </div>
   );
 }

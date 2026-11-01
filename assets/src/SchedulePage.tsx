@@ -145,7 +145,7 @@ export function SchedulePage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
         <Timeline tasks={timelineTasks} />
 
         <section
@@ -154,17 +154,7 @@ export function SchedulePage() {
         >
           <h2 className="mb-2 font-semibold">{t("schedule.tasks")}</h2>
           {tasks.length === 0 && (
-            <div className="flex flex-col items-center gap-3 py-6 text-center">
-              <p className="text-sm opacity-70">{t("schedule.empty")}</p>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => void runPreview(date)}
-                disabled={loading}
-              >
-                {t("schedule.run")}
-              </button>
-            </div>
+            <p className="py-6 text-center text-sm opacity-70">{t("schedule.empty")}</p>
           )}
           <ul className="space-y-2">
             {tasks.map((task) => {

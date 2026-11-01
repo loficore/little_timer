@@ -411,6 +411,25 @@ describe("BackupTab", () => {
     expect(screen.getByText(new RegExp("master key 不在托管中"))).toBeTruthy();
   });
 
+  it("routes a legacy (v1) secret file to the reset copy, not the keyring one", async () => {
+    mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.getCredentialStatus.mockResolvedValue({
+      backend: "unavailable",
+      reason: "format",
+      detail: 'decryption failed: 文件前缀不是 "LTMSEKv2"(未加密或 v1 遗留文件,请在设置中重置凭据)',
+      has_secret: true
+    });
+
+    render(<BackupTab config={{ backup_target_type: "webdav", backup_webdav_url: "http://x" }} onChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(t("credentials.format"))).toBeTruthy();
+    });
+    // 「密钥服务坏了」的误诊不该出现；后端 Go 错误串也不该裸奔到界面上。
+    expect(screen.queryByText(t("credentials.unavailable"))).toBeNull();
+    expect(screen.queryByText(/LTMSEKv2/)).toBeNull();
+  });
+
   it("shows regular error when no action in response", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
     mockApiClient.createBackup.mockResolvedValue({

@@ -533,6 +533,7 @@ func (s *BackupService) CredentialStatus() (map[string]any, error) {
 		"has_secret", st.HasSecret)
 	return map[string]any{
 		"backend":    st.Backend,
+		"reason":     st.Reason,
 		"detail":     st.Detail,
 		"has_secret": st.HasSecret,
 	}, nil

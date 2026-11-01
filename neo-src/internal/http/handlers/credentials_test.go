@@ -150,8 +150,49 @@ func TestCredentialsStatus_BrokenPairReportsUnavailable(t *testing.T) {
 	if st.Detail == "" {
 		t.Error("detail 为空：不可用必须给出可操作原因")
 	}
+	if st.Reason != "keystore" {
+		t.Errorf("reason = %q, want keystore（密钥环侧失败，应走「检查密钥服务」文案）", st.Reason)
+	}
 	if !st.HasSecret {
 		t.Error("has_secret = false，磁盘上确实还有 secret.db，应反映存在")
+	}
+}
+
+// TestCredentialsStatus_LegacyFileReportsFormatReason 覆盖 v1 遗留 / 未加密的
+// secret.db：master key 完好托管在密钥环里，失败原因是磁盘内容不是 v2 envelope。
+// 此时「系统密钥服务不可用」是误诊——把它归到 keystore 会引导升级用户去装
+// gnome-keyring / 查 KWallet，而唯一出路是重置凭据。
+func TestCredentialsStatus_LegacyFileReportsFormatReason(t *testing.T) {
+	a, tmpDir := newCredentialsTestApp(t, true)
+	secretPath := filepath.Join(tmpDir, "secret.db")
+	if err := os.WriteFile(secretPath, []byte("LTMSECv1legacy-blob"), 0o600); err != nil {
+		t.Fatalf("写入 v1 遗留 blob: %v", err)
+	}
+
+	// 换 App 重建以绕过 Secrets() 的 sync.Once，让构造流程读到盘上的 v1 文件。
+	a2 := app.NewApp(a.Clock, a.Settings, a.SQLite, a.Backup, a.DBPath)
+	a2.Keystore = keystoretest.New("secret-service", true)
+	_ = a2.Secrets()
+	if lf := a2.Secrets().LoadFailure(); lf == nil {
+		t.Fatal("前提不成立：期望 v1 文件进入载入失败态，LoadFailure() 却为 nil")
+	}
+
+	w := doJSON(t, setupCredentialsRouter(t, a2), http.MethodGet, "/api/credentials/status", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200（降级态也返 200）", w.Code)
+	}
+	var st domain.CredentialStatus
+	if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if st.Backend != "unavailable" {
+		t.Errorf("backend = %q, want unavailable", st.Backend)
+	}
+	if st.Reason != "format" {
+		t.Errorf("reason = %q, want format（成因是文件格式，不是密钥服务）", st.Reason)
+	}
+	if !st.HasSecret {
+		t.Error("has_secret = false，盘上确实有 secret.db，应反映存在")
 	}
 }
 

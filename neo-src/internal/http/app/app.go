@@ -9,6 +9,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -380,15 +381,18 @@ func (a *App) CredentialStatus() domain.CredentialStatus {
 	if lf := store.LoadFailure(); lf != nil {
 		return domain.CredentialStatus{
 			Backend:   "unavailable",
+			Reason:    loadFailureReason(lf),
 			Detail:    lf.Error(),
 			HasSecret: secretFileExists(a.DBPath),
 		}
 	}
 	ks := a.ActiveKeystore()
 	backend := "unavailable"
+	reason := "keystore"
 	detail := ""
 	if ks != nil {
 		backend = ks.Name()
+		reason = ""
 	} else {
 		// 维持 "unavailable ⇒ Detail 非空" 不变式:平台 keystore 缺失时
 		// 也要透出原因,绝不留下空的不可用说明。
@@ -397,9 +401,22 @@ func (a *App) CredentialStatus() domain.CredentialStatus {
 	items, err := store.Items()
 	return domain.CredentialStatus{
 		Backend:   backend,
+		Reason:    reason,
 		Detail:    detail,
 		HasSecret: err == nil && len(items) > 0,
 	}
+}
+
+// loadFailureReason 把 secret 载入失败归到前端可分派的成因(取值见
+// domain.CredentialStatus.Reason)。只有 ErrSecretDecryptionFailed —— 盘上
+// 内容不是 v2 envelope(v1 遗留文件 / 未加密文件)—— 才算 format;那时密钥
+// 服务是好的,报成 keystore 会把升级用户支使去装 keyring。其余(密钥缺失、
+// 解封失败、文件 IO)都归 keystore,沿用既有的「检查密钥服务」文案。
+func loadFailureReason(lf error) string {
+	if errors.Is(lf, crypto.ErrSecretDecryptionFailed) {
+		return "format"
+	}
+	return "keystore"
 }
 
 // 认证辅助方法。

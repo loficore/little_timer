@@ -339,11 +339,21 @@ func (b BackupTargetType) String() string {
 }
 
 // CredentialStatus 概览凭据子系统的后端健康度(取代旧的主口令状态)。
-// Backend 取注入 keystore 的 Name(),或在"磁盘有 secret.db 但 master key
-// 缺失 / 解封失败"的降级态下取 "unavailable"(此时 Detail 必非空,绝不
-// 假装"没有凭据"——见 spec §10 Review Focus #2)。
+// Backend 取注入 keystore 的 Name(),或在"磁盘有 secret.db 但读不出来"的
+// 降级态下取 "unavailable"(此时 Detail 必非空,绝不假装"没有凭据"——见
+// spec §10 Review Focus #2)。
+//
+// Reason 只在 Backend == "unavailable" 时有值,给前端分派可操作文案:
+//   - "keystore" —— 密钥服务坏了(master key 缺失 / 解封失败 / 平台无
+//     keystore),出路是修密钥服务,重新填写凭据无效;
+//   - "format"   —— 磁盘内容不是 v2 envelope(v1 遗留文件 / 未加密文件),
+//     密钥服务本身是好的,出路只有重置凭据。
+//
+// 两者必须分开:混报成 keystore 会让从 v1 升级的用户被引导去装
+// gnome-keyring / 查 KWallet,而重置才是唯一有效操作。
 type CredentialStatus struct {
 	Backend   string `json:"backend"` // "secret-service" | "android-keystore" | "other" | "unavailable"
+	Reason    string `json:"reason"`  // "" | "keystore" | "format"
 	Detail    string `json:"detail"`
 	HasSecret bool   `json:"has_secret"`
 }

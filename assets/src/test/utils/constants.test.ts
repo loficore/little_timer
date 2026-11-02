@@ -8,7 +8,6 @@ import {
   WALLPAPER_FALLBACK_GRADIENT,
   isAllowedWallpaperUrl,
   API_ENDPOINTS,
-  APP_VERSION,
   DEFAULT_TIMEZONE,
   LANGUAGE_OPTIONS,
   THEME_MODES,
@@ -132,12 +131,6 @@ describe("constants", () => {
       expect(API_ENDPOINTS.HABITS).toBe("/api/habits");
       expect(API_ENDPOINTS.SESSIONS).toBe("/api/sessions");
       expect(API_ENDPOINTS.EVENTS).toBe("/api/events");
-    });
-  });
-
-  describe("APP_VERSION", () => {
-    it("应该是一个有效的版本字符串", () => {
-      expect(APP_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
     });
   });
 

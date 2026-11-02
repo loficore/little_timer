@@ -68,6 +68,7 @@ func newRouter(a *app.App, corsOrigin string, uiFS fs.FS) *gin.Engine {
 	api.Use(middleware.RequireVersionForMutation())
 
 	registerRoot(r, uiFS)
+	registerVersion(api)
 	registerTimer(api)
 	registerHabits(api)
 	registerSettings(api)
@@ -82,6 +83,11 @@ func newRouter(a *app.App, corsOrigin string, uiFS fs.FS) *gin.Engine {
 	registerEvents(api)
 
 	return r
+}
+
+// registerVersion 注册 /api/version（只读构建信息，供 UI 显示版本号）。
+func registerVersion(g *gin.RouterGroup) {
+	g.GET("/version", handlers.VersionGet)
 }
 
 // registerDailySweep 注册 /api/settings/daily-sweep 与 /api/daily-sweep/*

@@ -32,6 +32,7 @@ import type {
   WallpaperListResult,
   WallpaperDeleteResult,
   CredentialStatus,
+  AppVersionInfo,
 } from "../types/api";
 
 /* eslint-disable @typescript-eslint/require-await */
@@ -82,6 +83,14 @@ export class WailsAPIClient {
   async getState(): Promise<TimerState> {
     const TS = await this._b('TimerService');
     return TS.GetState();
+  }
+
+  /**
+   * 构建信息。Android 侧 Go 绑定暂未暴露版本服务，如实返回 dev，
+   * 不谎报版本号（桌面/Web 走 HTTP /api/version）。
+   */
+  async getVersion(): Promise<AppVersionInfo> {
+    return { version: "dev", git_commit: "unknown", build_time: "" };
   }
 
   /**

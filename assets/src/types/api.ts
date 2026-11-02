@@ -400,3 +400,16 @@ export interface CredentialStatus {
   /** secret store 内是否已有凭据。 */
   has_secret: boolean;
 }
+
+/**
+ * @description GET /api/version 的返回：进程级构建信息。
+ * UI 的版本号只允许来自这里，组件里不得写死。
+ */
+export interface AppVersionInfo {
+  /** 发布版本（已去掉 tag 的 v 前缀）；无 ldflags 的构建为 "dev"。 */
+  version: string;
+  /** 构建时的短 commit hash；非 git 环境为 "unknown"。 */
+  git_commit: string;
+  /** 二进制加载时捕获的 RFC3339 时间。 */
+  build_time: string;
+}

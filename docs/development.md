@@ -38,6 +38,16 @@
 - 在 `main` 上打 tag 并发 GitHub Release；`release.yml` 随即打包产物（tar.gz + rpm + deb）。rpm/deb 由 `just package-linux` 在容器内构建，见 `docs/linux-packaging.md`。
 - 不再需要「同步 develop 到 main」的步骤。
 
+### 版本号（唯一事实来源）
+
+- 用户可见版本号 = **git tag**。构建时通过
+  `-ldflags "-X little-timer/internal/app.Version=<tag>"` 注入；`just go-build` /
+  `just go-dev` 取最近 tag（无 tag 用短 commit），release 流水线取 release tag。
+- 后端 `GET /api/version` 返回 `{version, git_commit, build_time}`；前端 Sidebar
+  只从这个接口取版本（`hooks/useAppVersion.ts`）。**禁止在组件/常量里写死版本**。
+- 未注入的构建（CI、纯 `go run`）如实显示 `dev`，不再谎报某个历史版本。
+- VRT 里版本元素已 `mask`，发版不会 churn 基线。
+
 ### Linux 包（本地）
 
 `just package-linux [version]` 一次产出 rpm 与 deb；版本缺省取最近 git tag（去掉 `v`），无 tag 时用当天日期。也可分开跑 `just package-rpm` / `just package-deb`。

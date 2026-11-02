@@ -31,6 +31,14 @@ async function closeAnyHabitSelector(page: Page) {
 }
 
 
+/**
+ * 版本号来自 GET /api/version（随 tag / 构建变化），VRT 一律遮掉，
+ * 避免每次发版都churn 基线。底部导航同理（移动端安全区差异）。
+ */
+function unstableMasks(page: Page) {
+  return [page.locator(".my-bottom-nav"), page.locator('[data-testid="app-version"]')];
+}
+
 test.describe("TimerPage VRT 截图测试", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(baseURL);
@@ -49,7 +57,7 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-display-seven-segment.png", {
       maxDiffPixels: 100,
-      mask: [page.locator(".my-bottom-nav")],
+      mask: unstableMasks(page),
     });
   });
 
@@ -61,7 +69,7 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-display-classic.png", {
       maxDiffPixels: 100,
-      mask: [page.locator(".my-bottom-nav")],
+      mask: unstableMasks(page),
     });
   });
 
@@ -109,7 +117,7 @@ test.describe("TimerPage VRT 截图测试", () => {
     await expect(page.locator(".my-topbar")).toBeVisible();
     await expect(page).toHaveScreenshot("timer-sidebar-visuals.png", {
       maxDiffPixels: 100,
-      mask: [page.locator(".my-bottom-nav")],
+      mask: unstableMasks(page),
     });
   });
 
@@ -123,7 +131,7 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.waitForTimeout(500);
     await expect(page).toHaveScreenshot("timer-theme-light.png", {
       maxDiffPixels: 100,
-      mask: [page.locator(".my-bottom-nav")],
+      mask: unstableMasks(page),
     });
   });
 
@@ -135,13 +143,13 @@ test.describe("TimerPage VRT 截图测试", () => {
     await page.waitForLoadState("networkidle");
     await page.locator('.my-surface-modal button').nth(1).click();
     await page.waitForTimeout(500);
-    await expect(page).toHaveScreenshot("timer-stopwatch-mode.png", { maxDiffPixels: 100, mask: [page.locator(".my-bottom-nav")] });
+    await expect(page).toHaveScreenshot("timer-stopwatch-mode.png", { maxDiffPixels: 100, mask: unstableMasks(page) });
 
     await page.locator('.dropdown-select-btn').first().click();
     await page.waitForLoadState("networkidle");
     await page.locator('.my-surface-modal button').nth(0).click();
     await page.waitForTimeout(500);
-    await expect(page).toHaveScreenshot("timer-countdown-mode.png", { maxDiffPixels: 100, mask: [page.locator(".my-bottom-nav")] });
+    await expect(page).toHaveScreenshot("timer-countdown-mode.png", { maxDiffPixels: 100, mask: unstableMasks(page) });
   });
 
   test("控制按钮等高（stopwatch 运行中）", async ({ page }) => {

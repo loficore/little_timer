@@ -21,6 +21,7 @@ import type {
     WallpaperListResult,
     WallpaperDeleteResult,
   CredentialStatus,
+  AppVersionInfo,
 } from "../types/api";
 import type {
     TaskDTO,
@@ -158,6 +159,15 @@ export class APIClient {
      */
     async getState(): Promise<TimerState> {
         return this.fetchJson<TimerState>(`${this.baseUrl}/api/state`);
+    }
+
+    /**
+     * 获取进程级构建信息（版本号 / commit / 构建时间）。
+     *
+     * UI 的版本号只允许来自这里；不要在组件里写死。
+     */
+    async getVersion(): Promise<AppVersionInfo> {
+        return this.fetchJson<AppVersionInfo>(`${this.baseUrl}/api/version`);
     }
 
     /**

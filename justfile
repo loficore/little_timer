@@ -31,13 +31,18 @@ frontend-build:
 
 go_src := justfile_directory() / "neo-src"
 
+# 用户可见版本号：优先最近 tag（去掉 v 前缀），无 tag 用短 commit，
+# 工作区有改动时带 -dirty。通过 ldflags 注入 app.Version，UI 的
+# /api/version 直接读它 —— 不在源码里写死版本。
+app_version := `(git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo dev) | sed 's/^v//'`
+
 # go-sqlite3 是 cgo-only，构建需要 CGO_ENABLED=1 + 一个 C 编译器。
 # 优先 zig cc（自带 libc，CI 无 gcc 时兜底），其次 gcc / clang / cc。
 export CC := `command -v zig >/dev/null 2>&1 && echo "zig cc" || (command -v gcc >/dev/null 2>&1 && echo gcc || (command -v clang >/dev/null 2>&1 && echo clang || echo cc))`
 export CGO_ENABLED := "1"
 
 go-build:
-        @cd {{go_src}} && go build -o bin/server ./cmd/server
+        @cd {{go_src}} && go build -ldflags "-X little-timer/internal/app.Version={{app_version}}" -o bin/server ./cmd/server
 
 go-test:
         @cd {{go_src}} && go test ./...
@@ -84,7 +89,7 @@ go-dev host="":
         sleep 3
 
         echo "=== 启动 Go 后端 ==="
-        cd {{go_src}} && go build -o bin/server ./cmd/server && bin/server serve --http-only --port $GO_PORT 2>&1 &
+        cd {{go_src}} && go build -ldflags "-X little-timer/internal/app.Version={{app_version}}" -o bin/server ./cmd/server && bin/server serve --http-only --port $GO_PORT 2>&1 &
         GO_PID=$!
 
         FRONTEND_URL="http://localhost:5173"
@@ -224,7 +229,13 @@ package version="" embed_ui="true":
         #!/usr/bin/env bash
         set -euo pipefail
         ver="{{version}}"
-        if [ -z "$ver" ]; then ver="$(date +%Y%m%d)"; fi
+        if [ -z "$ver" ]; then
+            if tag="$(git -C {{ROOT}} describe --tags --abbrev=0 2>/dev/null)"; then
+                ver="${tag#v}"
+            else
+                ver="$(date +%Y%m%d)"
+            fi
+        fi
         if [ "{{embed_ui}}" = "true" ]; then tag="embed_ui"; else tag=""; fi
         if [ "{{embed_ui}}" = "true" ]; then
             cd {{ROOT}}/assets

@@ -5,6 +5,7 @@
 
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
+import { useAppVersion } from "../hooks/useAppVersion";
 import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, CalendarIcon, SparklesIconComponent } from "../utils/icons";
 
 type Page = "timer" | "habits" | "aigtd" | "plan" | "stats" | "settings";
@@ -62,6 +63,7 @@ const navItems = [
 ];
 
 export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavigate }) => {
+    const versionInfo = useAppVersion();
     return (
         <aside className="my-sidebar flex flex-col w-60 h-full shrink-0">
             {/* Logo */}
@@ -88,9 +90,13 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
                 ))}
             </nav>
 
-            {/* 底部 */}
+            {/* 底部：版本号唯一来源是后端 /api/version（发布时 = git tag） */}
             <div className="p-4 text-center text-sm text-[var(--my-on-surface)] opacity-60 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--my-outline)_18%,transparent)]">
-                <p>v1.0.0</p>
+                {versionInfo && (
+                    <p data-testid="app-version" title={versionInfo.gitCommit}>
+                        v{versionInfo.version}
+                    </p>
+                )}
             </div>
         </aside>
     );

@@ -102,7 +102,6 @@ export const API_ENDPOINTS = {
   WALLPAPERS: "/api/wallpapers",
 } as const;
 
-export const APP_VERSION = "1.0.0";
 
 export const DEFAULT_TIMEZONE = 8;
 

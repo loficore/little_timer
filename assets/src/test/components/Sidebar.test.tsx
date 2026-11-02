@@ -2,7 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/preact";
 import { Sidebar } from "../../components/Sidebar";
 
-vi.mock("../../utils/apiClientSingleton", () => ({ supportsDailySweep: false }));
+vi.mock("../../utils/apiClientSingleton", () => ({
+  supportsDailySweep: false,
+  // Sidebar 底部的版本号来自 /api/version；导航测试不关心具体值。
+  getAPIClient: () => ({
+    getVersion: () =>
+      Promise.resolve({ version: "test", git_commit: "test", build_time: "" }),
+  }),
+}));
 
 vi.mock("../../utils/i18n", () => ({
   t: (key: string) => {

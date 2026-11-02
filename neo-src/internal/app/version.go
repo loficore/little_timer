@@ -12,9 +12,10 @@ import (
 	"time"
 )
 
-// Version 是人可读的发布 tag。每次发布递增，与发布时打的 git tag 保持一致
-// （打包时 release.yml 会用 ldflags 覆盖它，源码里的值是无 flag 构建的兜底）。
-var Version = "2.0.0"
+// Version 是人可读的发布 tag。发布构建由 ldflags
+// (`-X little-timer/internal/app.Version=<tag>`) 注入,与打出的 git tag 一致;
+// 没有注入的构建(dev / CI)如实报告 "dev",不再谎报某个写死的版本号。
+var Version = "dev"
 
 // BuildTime 在包初始化时捕获。它实际是二进制被加载的时间 —— 对于
 // “这个二进制是什么时候组装的”这一目的，足够接近构建时间了。

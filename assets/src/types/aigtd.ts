@@ -9,6 +9,8 @@ export interface SubtaskDTO {
   status: "active" | "done" | "archived";
   estimated_minutes: number;
   order_index: number;
+  /** 子任务自己的乐观锁版本（不是父任务的）。 */
+  version: number;
 }
 
 export interface TaskDTO {

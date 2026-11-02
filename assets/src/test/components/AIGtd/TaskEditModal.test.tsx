@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   updateTask: vi.fn(),
   patchTaskScores: vi.fn(),
   getTask: vi.fn(),
+  createSubtask: vi.fn(),
+  updateSubtask: vi.fn(),
+  deleteSubtask: vi.fn(),
 }));
 
 vi.mock("../../../utils/apiClientSingleton", () => ({
@@ -12,6 +15,9 @@ vi.mock("../../../utils/apiClientSingleton", () => ({
     updateTask: mocks.updateTask,
     patchTaskScores: mocks.patchTaskScores,
     getTask: mocks.getTask,
+    createSubtask: mocks.createSubtask,
+    updateSubtask: mocks.updateSubtask,
+    deleteSubtask: mocks.deleteSubtask,
   }),
 }));
 
@@ -24,6 +30,14 @@ vi.mock("../../../utils/i18n", () => ({
       "aigtd.field_due_date": "截止日期",
       "aigtd.section_basic": "基本信息",
       "aigtd.section_scores": "评分",
+      "aigtd.section_subtasks": "拆解步骤",
+      "aigtd.subtask_add": "添加步骤",
+      "aigtd.subtask_delete": "删除步骤",
+      "aigtd.subtask_title": "步骤",
+      "aigtd.subtask_minutes": "分钟",
+      "aigtd.subtasks_empty": "暂无步骤，可手动添加",
+      "aigtd.field_estimated_minutes": "预计时长（分钟）",
+      "aigtd.subtask_invalid": "步骤标题不能为空",
       "score.priority": "优先级",
       "score.urgency": "紧急度",
       "score.energy": "精力",
@@ -158,5 +172,110 @@ describe("TaskEditModal", () => {
     expect(mocks.patchTaskScores).toHaveBeenCalledTimes(1);
     // 刷新后表单回到服务端值
     await waitFor(() => expect(screen.getByTestId("priority-value").textContent).toBe("4"));
+  });
+});
+
+function makeTaskWithSubs() {
+  return makeTask({
+    subtasks: [
+      {
+        id: 11,
+        task_id: 7,
+        title: "列大纲",
+        status: "active",
+        estimated_minutes: 25,
+        order_index: 0,
+        version: 2,
+      },
+      {
+        id: 12,
+        task_id: 7,
+        title: "填数据",
+        status: "active",
+        estimated_minutes: 30,
+        order_index: 1,
+        version: 4,
+      },
+    ],
+  });
+}
+
+describe("TaskEditModal 拆解步骤", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.createSubtask.mockResolvedValue({ id: 99 });
+    mocks.updateSubtask.mockResolvedValue(undefined);
+    mocks.deleteSubtask.mockResolvedValue(undefined);
+  });
+
+  it("AI 步骤以可编辑表单呈现，改名后按子任务自己的 version 保存", async () => {
+    const onClose = vi.fn();
+    render(<TaskEditModal task={makeTaskWithSubs()} onClose={onClose} />);
+
+    const titleInput = screen.getByTestId("subtask-title-11") as HTMLInputElement;
+    expect(titleInput.value).toBe("列大纲");
+
+    fireEvent.input(titleInput, { target: { value: "列详细大纲" } });
+    fireEvent.input(screen.getByTestId("subtask-minutes-11"), { target: { value: "40" } });
+    fireEvent.click(screen.getByTestId("task-edit-save"));
+
+    await waitFor(() => {
+      expect(mocks.updateSubtask).toHaveBeenCalledWith(
+        7,
+        11,
+        { title: "列详细大纲", estimated_minutes: 40 },
+        2,
+      );
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("删除步骤调用 deleteSubtask（带子任务 version）", async () => {
+    render(<TaskEditModal task={makeTaskWithSubs()} onClose={() => {}} />);
+
+    fireEvent.click(screen.getByTestId("subtask-delete-12"));
+    fireEvent.click(screen.getByTestId("task-edit-save"));
+
+    await waitFor(() => {
+      expect(mocks.deleteSubtask).toHaveBeenCalledWith(7, 12, 4);
+    });
+    expect(mocks.updateSubtask).not.toHaveBeenCalled();
+  });
+
+  it("新增步骤调用 createSubtask（带父任务 version 与 order_index）", async () => {
+    render(<TaskEditModal task={makeTaskWithSubs()} onClose={() => {}} />);
+
+    fireEvent.click(screen.getByTestId("subtask-add"));
+    fireEvent.input(screen.getByTestId("subtask-title-new-0"), {
+      target: { value: "校对" },
+    });
+    fireEvent.input(screen.getByTestId("subtask-minutes-new-0"), {
+      target: { value: "15" },
+    });
+    fireEvent.click(screen.getByTestId("task-edit-save"));
+
+    await waitFor(() => {
+      expect(mocks.createSubtask).toHaveBeenCalledWith(
+        7,
+        { title: "校对", estimated_minutes: 15, order_index: 2 },
+        3,
+      );
+    });
+  });
+
+  it("预计时长可编辑并随任务字段一起保存", async () => {
+    render(<TaskEditModal task={makeTaskWithSubs()} onClose={() => {}} />);
+
+    fireEvent.input(screen.getByTestId("task-edit-estimated-minutes"), {
+      target: { value: "60" },
+    });
+    fireEvent.click(screen.getByTestId("task-edit-save"));
+
+    await waitFor(() => {
+      expect(mocks.updateTask).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ version: 3, estimated_minutes: 60 }),
+      );
+    });
   });
 });

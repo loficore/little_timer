@@ -318,6 +318,15 @@ field_title = "Title"
 field_notes = "Notes"
 field_due_date = "Due date"
 
+section_subtasks = "Steps"
+subtask_add = "Add step"
+subtask_delete = "Delete step"
+subtask_title = "Step"
+subtask_minutes = "minutes"
+subtasks_empty = "No steps yet — add one"
+field_estimated_minutes = "Estimated minutes"
+subtask_invalid = "Step title cannot be empty"
+
 [llm_settings]
 title = "AI"
 provider = "Provider"
@@ -366,6 +375,12 @@ tasks = "Task Scores"
 prev_day = "Previous day"
 next_day = "Next day"
 summary = "{placed} placed · {unscheduled} unscheduled"
+
+edit_block = "Adjust time block"
+block_start = "Start"
+block_end = "End"
+block_invalid = "End must be later than start"
+block_remove = "Unschedule"
 
 [dailySweep]
 start = "Run Review Now"

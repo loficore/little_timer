@@ -319,6 +319,15 @@ field_title = "タイトル"
 field_notes = "メモ"
 field_due_date = "期限"
 
+section_subtasks = "ステップ"
+subtask_add = "ステップを追加"
+subtask_delete = "ステップを削除"
+subtask_title = "ステップ"
+subtask_minutes = "分"
+subtasks_empty = "ステップがありません — 追加できます"
+field_estimated_minutes = "所要時間（分）"
+subtask_invalid = "ステップ名は必須です"
+
 [llm_settings]
 title = "AI"
 provider = "プロバイダー"
@@ -367,6 +376,12 @@ tasks = "タスク採点"
 prev_day = "前日"
 next_day = "翌日"
 summary = "{placed} 配置済 · {unscheduled} 未配置"
+
+edit_block = "時間ブロックを調整"
+block_start = "開始"
+block_end = "終了"
+block_invalid = "終了は開始より後にしてください"
+block_remove = "予定から外す"
 
 [dailySweep]
 start = "今すぐ実行"

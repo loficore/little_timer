@@ -577,6 +577,10 @@ func TestUpdateSubtask_VersionConflict_ReturnsErrVersionConflict(t *testing.T) {
 	if len(subs) != 1 || subs[0].Status != domain.SubtaskStatusDone {
 		t.Errorf("冲突更新不应改状态, got %+v", subs)
 	}
+	// GetTask 必须把子任务自己的 version 读出来（前端拿它做乐观锁）。
+	if len(subs) == 1 && subs[0].Version != 1 {
+		t.Errorf("子任务 version 应随更新自增到 1, got %d", subs[0].Version)
+	}
 }
 
 // TestUpdateSubtask_RejectsNonSubtaskRow 验证 `parent_id IS NOT NULL` 守卫

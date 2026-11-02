@@ -57,6 +57,8 @@ type SubtaskDTO struct {
 	Status           string `json:"status"`
 	EstimatedMinutes int64  `json:"estimated_minutes"`
 	OrderIndex       int64  `json:"order_index"`
+	// Version 是子任务自己的乐观锁版本（不是父任务的）。
+	Version int64 `json:"version"`
 }
 
 func toTaskDTO(t *domain.TaskRow, subs []domain.SubtaskRow) TaskDTO {
@@ -91,14 +93,9 @@ func toTaskDTO(t *domain.TaskRow, subs []domain.SubtaskRow) TaskDTO {
 		dto.ParsedAt = &s
 	}
 	for _, s := range subs {
-		dto.Subtasks = append(dto.Subtasks, SubtaskDTO{
-			ID:               s.ID,
-			TaskID:           s.TaskID,
-			Title:            s.Title,
-			Status:           string(s.Status),
-			EstimatedMinutes: s.EstimatedMinutes,
-			OrderIndex:       s.OrderIndex,
-		})
+		// 复用唯一转换函数，避免这里漏字段（曾经漏了 version，导致前端拿到 0
+		// 去 PATCH 子任务必然 409）。
+		dto.Subtasks = append(dto.Subtasks, toSubtaskDTO(s))
 	}
 	return dto
 }
@@ -135,7 +132,14 @@ func TaskList(c *gin.Context) {
 	out := make([]TaskDTO, 0, len(rows))
 	for i := range rows {
 		t := rows[i]
-		out = append(out, toTaskDTO(&t, nil))
+		// 列表也带拆解步骤：AI 拆好的步骤要能在卡片上看到、进编辑弹窗修改，
+		// 刷新页面后不能凭空消失。（任务量是本地单用户量级，逐条查询可接受。）
+		subs, serr := a.SQLite.AITasks().ListSubtasks(t.ID)
+		if serr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "list subtasks failed"})
+			return
+		}
+		out = append(out, toTaskDTO(&t, subs))
 	}
 	c.JSON(http.StatusOK, out)
 }
@@ -448,6 +452,7 @@ func toSubtaskDTO(s domain.SubtaskRow) SubtaskDTO {
 		Status:           string(s.Status),
 		EstimatedMinutes: s.EstimatedMinutes,
 		OrderIndex:       s.OrderIndex,
+		Version:          s.Version,
 	}
 }
 

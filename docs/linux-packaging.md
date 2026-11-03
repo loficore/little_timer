@@ -89,8 +89,8 @@ CI 断言两者指向同一 API 代，不一致即 fail。
 
 ## 命名与互斥
 
-- rpm：`Name: little-timer`，`Release: 1webkit40%{?dist}`，产物 `little-timer-<ver>-1webkit40.el9.x86_64.rpm`。将来 Fedora 变体是同 `Name`、不同 dist tag（`.fc44` + `1webkit41`），由 `dnf` 按版本替换而非并存；再加 `Provides: little-timer(webkit40)` 供脚本筛选。
-- deb：包名 `little-timer`，`Version: <ver>-1webkit41`，产物 `little-timer_<ver>-1webkit41_amd64.deb`，`Provides: little-timer-webkit41`。
+- rpm：`Name: little-timer`，`Release: webkit40%{?dist}`，产物 `little-timer-<ver>-webkit40.el9.x86_64.rpm`。将来 Fedora 变体是同 `Name`、不同 dist tag（`.fc44` + `webkit41`），由 `dnf` 按版本替换而非并存；再加 `Provides: little-timer(webkit40)` 供脚本筛选。
+- deb：包名 `little-timer`，`Version: <ver>-webkit41`，产物 `little-timer-<ver>-webkit41-x86_64.deb`，`Provides: little-timer-webkit41`。
 - tar.gz 通道保持现状（`-tags embed_ui`，不含 webview），作为「两个 webkit 都没有 / 只想跑 headless」时的兜底。包与 tar 包不共享安装路径，不做跨格式 `Conflicts`；但 `/usr/local/bin` 下的手工副本不受包管理器管辖，需在发布说明里提醒。
 
 ## 包内容与桌面入口

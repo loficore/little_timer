@@ -251,8 +251,8 @@ package version="" embed_ui="true":
         cp bin/little-timer "$stage/"
         sanitized="$(echo "$ver" | sed -E 's/[^A-Za-z0-9._-]/_/g')"
         mkdir -p {{ROOT}}/dist
-        tar -czf {{ROOT}}/dist/little_timer-${sanitized}-linux-x64.tar.gz -C "$stage" .
-        echo "✅ {{ROOT}}/dist/little_timer-${sanitized}-linux-x64.tar.gz"
+        tar -czf {{ROOT}}/dist/little-timer-${sanitized}-linux-x86_64.tar.gz -C "$stage" .
+        echo "✅ {{ROOT}}/dist/little-timer-${sanitized}-linux-x86_64.tar.gz"
 
 # 本地 rpm / deb 打包。依赖检查与构建细节见 docs/linux-packaging.md。
 package-rpm version="":

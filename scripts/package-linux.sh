@@ -45,8 +45,8 @@ fi
 
 WORK="$ROOT/dist/package"
 BIN="$WORK/little-timer"
-RELEASE_RPM="1webkit40"
-RELEASE_DEB="1webkit41"
+RELEASE_RPM="webkit40"
+RELEASE_DEB="webkit41"
 
 die() {
     echo "error: $*" >&2
@@ -198,7 +198,7 @@ Description: Countdown, stopwatch and habit timer
  available as a separate desktop action.
 EOF
 
-    local out="$ROOT/dist/little-timer_${VER}-${RELEASE_DEB}_amd64.deb"
+    local out="$ROOT/dist/little-timer-${VER}-${RELEASE_DEB}-x86_64.deb"
     dpkg-deb --build --root-owner-group "$debroot" "$out" >/dev/null
     echo "✅ $out"
 }

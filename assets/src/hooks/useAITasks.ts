@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { getAPIClient } from "../utils/apiClientSingleton";
+import type { SubtaskDTO } from "../types/aigtd";
 import { VersionConflictError } from "../utils/apiClient";
 import { logError } from "../utils/logger";
 import type { TaskDTO } from "../types/aigtd";
@@ -102,40 +103,34 @@ export function useAITasks(opts: UseAITasksOptions = {}) {
   const toggleSubtask = useCallback(
     async (taskId: number, subId: number, done: boolean) => {
       const target = tasksRef.current.find((t) => t.id === taskId);
-      if (!target || typeof target.version !== "number") {
-        throw new Error(`toggleSubtask: task ${taskId} missing or has no version`);
+      // 子任务是独立的 tasks 行，乐观锁用的是它自己的 version —— 传父任务的
+      // version 会稳定 409（历史 bug：勾选框点了没反应）。
+      const sub = target?.subtasks?.find((s) => s.id === subId);
+      if (!target || !sub || typeof sub.version !== "number") {
+        throw new Error(`toggleSubtask: subtask ${subId} missing or has no version`);
       }
-      setTasks((cur) =>
-        cur.map((t) =>
-          t.id !== taskId
-            ? t
-            : {
-                ...t,
-                subtasks: (t.subtasks ?? []).map((s) =>
-                  s.id === subId ? { ...s, status: done ? "done" : "active" } : s,
-                ),
-              },
-        ),
-      );
-      try {
-        await getAPIClient().toggleSubtask(taskId, subId, done ? "done" : "active", target.version);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
-        logError("useAITasks.toggleSubtask failed", new Error(msg));
-        // 回滚
+      const patchSub = (fn: (s: SubtaskDTO) => SubtaskDTO) =>
         setTasks((cur) =>
           cur.map((t) =>
             t.id !== taskId
               ? t
-              : {
-                  ...t,
-                  subtasks: (t.subtasks ?? []).map((s) =>
-                    s.id === subId ? { ...s, status: done ? "active" : "done" } : s,
-                  ),
-                },
+              : { ...t, subtasks: (t.subtasks ?? []).map((s) => (s.id === subId ? fn(s) : s)) },
           ),
         );
+
+      patchSub((s) => ({ ...s, status: done ? "done" : "active", version: s.version + 1 }));
+      try {
+        await getAPIClient().toggleSubtask(taskId, subId, done ? "done" : "active", sub.version);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        logError("useAITasks.toggleSubtask failed", new Error(msg));
+        // 回滚状态与本地 version
+        patchSub((s) => ({
+          ...s,
+          status: done ? "active" : "done",
+          version: Math.max(0, s.version - 1),
+        }));
       }
     },
     [],

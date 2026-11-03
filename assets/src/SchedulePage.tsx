@@ -16,6 +16,8 @@
 import { useMemo, useState } from "preact/hooks";
 import { Timeline } from "./components/Schedule/Timeline";
 import type { TimelineTask } from "./components/Schedule/types";
+import { tasksScheduledOnDate } from "./components/Schedule/fromTasks";
+import { ScheduleBlockModal } from "./components/Schedule/ScheduleBlockModal";
 import { ScoreEditPanel } from "./components/settings/ScoreEditPanel";
 import { ChevronLeftIconComponent, ChevronRightIconComponent } from "./utils/icons";
 import { useScheduler } from "./hooks/useScheduler";
@@ -43,13 +45,26 @@ function shiftDate(iso: string, days: number): string {
 }
 
 export function SchedulePage() {
-  const { plan, tasks, loading, error, conflictMessage, runPreview, apply, refresh: refreshTasks } =
-    useScheduler();
+  const {
+    plan,
+    tasks,
+    loading,
+    error,
+    conflictMessage,
+    runPreview,
+    apply,
+    refresh: refreshTasks,
+    setPlacement,
+    clearPlacement,
+  } = useScheduler();
   const [date, setDate] = useState<string>(todayIso());
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingBlock, setEditingBlock] = useState<TimelineTask | null>(null);
 
   const timelineTasks: TimelineTask[] = useMemo(() => {
-    if (!plan) return [];
+    // 有 AI 草稿时看草稿；否则回退到「当天已落库的排程」，
+    // 刷新页面后仍然能看到并编辑已应用的时间块。
+    if (!plan) return tasksScheduledOnDate(tasks, date);
     const byId = new Map(tasks.map((t) => [t.id, t]));
     return plan.Placements.map((p) => {
       const task = byId.get(p.TaskID);
@@ -62,7 +77,7 @@ export function SchedulePage() {
         context_tag: task?.context_tag,
       };
     });
-  }, [plan, tasks]);
+  }, [plan, tasks, date]);
 
   const placementCount = plan?.Placements.length ?? 0;
   const unscheduledCount = plan?.Unscheduled.length ?? 0;
@@ -146,7 +161,7 @@ export function SchedulePage() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-        <Timeline tasks={timelineTasks} />
+        <Timeline tasks={timelineTasks} onSelectTask={setEditingBlock} />
 
         <section
           className="rounded-lg border border-base-300 bg-base-100 p-3"
@@ -204,6 +219,16 @@ export function SchedulePage() {
           </ul>
         </section>
       </div>
+
+      {editingBlock && (
+        <ScheduleBlockModal
+          task={editingBlock}
+          date={date}
+          onSave={(start, end) => setPlacement(editingBlock.id, start, end)}
+          onRemove={() => clearPlacement(editingBlock.id)}
+          onClose={() => setEditingBlock(null)}
+        />
+      )}
     </div>
   );
 }

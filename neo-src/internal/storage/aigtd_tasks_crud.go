@@ -870,7 +870,7 @@ const taskCols = `id, parent_id, raw_text, title, notes, status, due_date,
 	urgency_score, energy_required, context_tag, blocked_by, created_at,
 	updated_at, parsed_at`
 
-const subtaskCols = `id, parent_id, title, estimated_minutes, order_index, status, created_at`
+const subtaskCols = `id, parent_id, title, estimated_minutes, order_index, status, version, created_at`
 
 const aiJobCols = `id, task_id, provider, model, status, request_payload,
 	response_payload, error_message, input_tokens, output_tokens, attempts,
@@ -952,7 +952,7 @@ func scanSubtaskRow(rows rowScanner) (domain.SubtaskRow, error) {
 	var status string
 	if err := rows.Scan(
 		&s.ID, &parent, &s.Title, &s.EstimatedMinutes, &s.OrderIndex,
-		&status, &s.CreatedAt,
+		&status, &s.Version, &s.CreatedAt,
 	); err != nil {
 		return s, fmt.Errorf("%w: %v", ErrAITaskQueryFailed, err)
 	}

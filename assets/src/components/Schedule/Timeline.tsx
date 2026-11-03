@@ -22,6 +22,8 @@ export interface TimelineProps {
   tasks: TimelineTask[];
   dayStartHour?: number; // 默认 6
   dayEndHour?: number; // 默认 23
+  /** 传入时任务块可点击（交给上层打开编辑弹窗）。 */
+  onSelectTask?: (task: TimelineTask) => void;
 }
 
 function buildHourTicks(startHour: number, endHour: number): number[] {
@@ -50,7 +52,7 @@ function pctOfWindow(min: number, startMin: number, endMin: number): number {
   return ((min - startMin) / span) * 100;
 }
 
-export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23 }: TimelineProps) {
+export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23, onSelectTask }: TimelineProps) {
   const windowStartMin = dayStartHour * 60;
   const windowEndMin = dayEndHour * 60;
 
@@ -110,6 +112,7 @@ export function Timeline({ tasks, dayStartHour = 6, dayEndHour = 23 }: TimelineP
             task={task}
             windowStartMin={windowStartMin}
             windowEndMin={windowEndMin}
+            onSelect={onSelectTask}
           />
         ))}
         {tasks.length === 0 && (

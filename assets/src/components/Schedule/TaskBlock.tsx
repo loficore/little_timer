@@ -12,6 +12,7 @@
  */
 
 import type { TimelineTask } from "./types";
+import { t } from "../../utils/i18n";
 
 interface TaskBlockProps {
   task: TimelineTask;
@@ -19,6 +20,8 @@ interface TaskBlockProps {
   windowStartMin: number;
   /** Timeline 的窗口结束分钟(相对当天 00:00,local)。 */
   windowEndMin: number;
+  /** 传入时时间块可点击（打开编辑）；不传则只读。 */
+  onSelect?: (task: TimelineTask) => void;
 }
 
 const PRIORITY_STYLE: Record<number, string> = {
@@ -94,7 +97,7 @@ function positionStyle(
   };
 }
 
-export function TaskBlock({ task, windowStartMin, windowEndMin }: TaskBlockProps) {
+export function TaskBlock({ task, windowStartMin, windowEndMin, onSelect }: TaskBlockProps) {
   const priority = clampPriority(task.priority_score);
   const priorityClasses = PRIORITY_STYLE[priority] ?? PRIORITY_STYLE[3];
   const tint = CONTEXT_TINT[task.context_tag ?? ""] ?? "context-default";
@@ -106,13 +109,31 @@ export function TaskBlock({ task, windowStartMin, windowEndMin }: TaskBlockProps
     windowEndMin,
   );
 
+  const interactive = typeof onSelect === "function";
+
   return (
     <div
-      className={`timeline-task-block priority-${priority} ${tint} ${priorityClasses} absolute top-1 bottom-1 rounded-lg px-2 py-1 border text-xs overflow-hidden flex items-center gap-1`}
+      className={`timeline-task-block priority-${priority} ${tint} ${priorityClasses} absolute top-1 bottom-1 rounded-lg px-2 py-1 border text-xs overflow-hidden flex items-center gap-1${
+        interactive ? " cursor-pointer hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-color)]" : ""
+      }`}
       data-task-id={task.id}
       data-testid={`task-block-${task.id}`}
       data-context={task.context_tag ?? ""}
       style={{ left: pos.left, width: pos.width }}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label={interactive ? t("schedule.edit_block", { title: task.title }) : undefined}
+      onClick={interactive ? () => onSelect(task) : undefined}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(task);
+              }
+            }
+          : undefined
+      }
     >
       <span className="truncate font-medium">{task.title}</span>
       <span

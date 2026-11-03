@@ -84,7 +84,10 @@ type SubtaskRow struct {
 	Status           SubtaskStatus `json:"status"`
 	EstimatedMinutes int64         `json:"estimated_minutes"`
 	OrderIndex       int64         `json:"order_index"`
-	CreatedAt        time.Time     `json:"created_at"`
+	// Version 是子任务行自己的乐观锁版本（子任务是 parent_id 非空的 tasks 行）。
+	// 前端 PATCH/DELETE 必须带它，不能用父任务的 version。
+	Version   int64     `json:"version"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // AIJobStatus 是 ai_jobs 的状态机。

@@ -39,6 +39,10 @@ export interface UseScheduler {
   apply: (placements: SchedulerPlacement[]) => Promise<void>;
   /** 重新拉取任务列表。 */
   refresh: () => Promise<void>;
+  /** 手动改某个块的起止时间（落库 + 同步草稿 plan）。 */
+  setPlacement: (taskId: number, startSec: number, endSec: number) => Promise<void>;
+  /** 把某个块从当天排程里移除（清空 scheduled_start/end）。 */
+  clearPlacement: (taskId: number) => Promise<void>;
 }
 
 export function useScheduler(): UseScheduler {
@@ -115,6 +119,9 @@ export function useScheduler(): UseScheduler {
     try {
       await getAPIClient().applySchedulePlacements(payload);
       setConflictMessage(null);
+      // apply 会 bump 每条任务的 version；不刷新的话后续手动调整时间块会拿
+      // 旧 version 去 PATCH，稳定 409。
+      await refresh();
     } catch (err) {
       if (err instanceof VersionConflictError) {
         // 409:事务已整体回滚,本地数据 stale → 刷新任务 + 重跑 preview。
@@ -141,6 +148,58 @@ export function useScheduler(): UseScheduler {
     }
   }, [refresh]);
 
+  const requireVersion = (taskId: number): number => {
+    const task = tasksRef.current.find((t) => t.id === taskId);
+    if (!task || typeof task.version !== "number") {
+      throw new Error(t("schedule.no_version", { id: taskId }));
+    }
+    return task.version;
+  };
+
+  const setPlacement = useCallback(async (taskId: number, startSec: number, endSec: number) => {
+    const version = requireVersion(taskId);
+    await getAPIClient().updateTask(taskId, {
+      version,
+      scheduled_start: startSec,
+      scheduled_end: endSec,
+    });
+    // 草稿 plan 同步改掉，避免时间轴显示的仍是 AI 原方案。
+    setPlan((prev) =>
+      prev
+        ? {
+            ...prev,
+            Placements: prev.Placements.map((p) =>
+              p.TaskID === taskId
+                ? { ...p, ScheduledStart: startSec, ScheduledEnd: endSec }
+                : p,
+            ),
+          }
+        : prev,
+    );
+    await refresh();
+  }, [refresh]);
+
+  const clearPlacement = useCallback(async (taskId: number) => {
+    const version = requireVersion(taskId);
+    await getAPIClient().updateTask(taskId, {
+      version,
+      scheduled_start: null,
+      scheduled_end: null,
+    });
+    setPlan((prev) =>
+      prev
+        ? {
+            ...prev,
+            Placements: prev.Placements.filter((p) => p.TaskID !== taskId),
+            Unscheduled: prev.Unscheduled.includes(taskId)
+              ? prev.Unscheduled
+              : [...prev.Unscheduled, taskId],
+          }
+        : prev,
+    );
+    await refresh();
+  }, [refresh]);
+
   return {
     plan,
     tasks,
@@ -150,5 +209,7 @@ export function useScheduler(): UseScheduler {
     runPreview,
     apply,
     refresh,
+    setPlacement,
+    clearPlacement,
   };
 }

@@ -122,7 +122,7 @@ describe("useAITasks", () => {
         context_tag: "general",
         created_at: "2026-10-04T00:00:00Z",
         updated_at: "2026-10-04T00:00:00Z",
-        subtasks: [{ id: 1, task_id: 7, title: "a", status: "active", estimated_minutes: 20, order_index: 0 }],
+        subtasks: [{ id: 1, task_id: 7, title: "a", status: "active", estimated_minutes: 20, order_index: 0, version: 0 }],
       },
     ]);
     const { result } = renderHook(() => useAITasks({ pollIntervalMs: 60000 }));
@@ -190,5 +190,45 @@ describe("useAITasks", () => {
       // 有界:仅重试 1 次,绝不无限循环
       expect(patchTaskScores).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+describe("useAITasks 子任务乐观锁", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listTasks.mockResolvedValue([]);
+    toggleSubtask.mockResolvedValue(undefined);
+  });
+
+  it("toggleSubtask 用子任务自己的 version，而不是父任务的", async () => {
+    const task = makeTask({
+      id: 7,
+      version: 5,
+      subtasks: [
+        {
+          id: 11,
+          task_id: 7,
+          title: "列大纲",
+          status: "active",
+          estimated_minutes: 10,
+          order_index: 0,
+          version: 2,
+        },
+      ],
+    });
+    listTasks.mockResolvedValue([task]);
+
+    const { result } = renderHook(() => useAITasks({ pollIntervalMs: 60000 }));
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.toggleSubtask(7, 11, true);
+    });
+
+    expect(toggleSubtask).toHaveBeenCalledWith(7, 11, "done", 2);
+    const sub = result.current.tasks[0].subtasks?.[0];
+    expect(sub?.status).toBe("done");
+    // 成功后本地 version 自增，避免连续勾选第二次又撞 409
+    expect(sub?.version).toBe(3);
   });
 });

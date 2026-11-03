@@ -25,6 +25,7 @@ import type {
 } from "../types/api";
 import type {
     TaskDTO,
+    SubtaskDTO,
     LLMSettingsDTO,
     SchedulerPlan,
     ScheduleApplyPlacement,
@@ -683,7 +684,8 @@ export class APIClient {
      *  使用 version 做业务校验,但中间件强制 0/缺版本 400。
      */
     async deleteTask(id: number, version: number): Promise<void> {
-        await this.fetchJson<void>(`${this.baseUrl}/api/tasks/${id}`, {
+        // 后端成功返回 204(无 body)，必须走 request 而不是 fetchJson。
+        await this.request(`${this.baseUrl}/api/tasks/${id}`, {
             method: "DELETE",
             headers: { "If-Match": `"${version}"` },
         });
@@ -691,8 +693,8 @@ export class APIClient {
 
     /** 切换子任务完成状态。
      *
-     *  v11:ConflictGuard 要求 mutation 带 version;handler SubtaskUpdate 当前
-     *  未使用 version 做业务校验,统一带上以满足中间件。
+     *  v11:子任务行有自己的 version —— 必须传子任务的 version，传父任务的
+     *  version 会稳定 409（历史 bug）。
      */
     async toggleSubtask(
         taskId: number,
@@ -700,13 +702,48 @@ export class APIClient {
         status: "active" | "done",
         version: number,
     ): Promise<void> {
-        await this.fetchJson<void>(`${this.baseUrl}/api/tasks/${taskId}/subtasks/${subId}`, {
+        await this.updateSubtask(taskId, subId, { status }, version);
+    }
+
+    /** 更新子任务（标题 / 分钟数 / 状态）。version = 子任务自己的 version。 */
+    async updateSubtask(
+        taskId: number,
+        subId: number,
+        patch: { title?: string; estimated_minutes?: number; status?: "active" | "done" | "archived" },
+        version: number,
+    ): Promise<void> {
+        // 204 No Content → 用 request（空 body 不能走 fetchJson）。
+        await this.request(`${this.baseUrl}/api/tasks/${taskId}/subtasks/${subId}`, {
             method: "PATCH",
             headers: {
                 "Content-Type": "application/json",
                 "If-Match": `"${version}"`,
             },
-            body: JSON.stringify({ version, status }),
+            body: JSON.stringify({ version, ...patch }),
+        });
+    }
+
+    /** 新增子任务。返回带 id / version 的子任务，便于继续编辑。 */
+    async createSubtask(
+        taskId: number,
+        body: { title: string; estimated_minutes: number; order_index: number },
+        version: number,
+    ): Promise<SubtaskDTO> {
+        return this.fetchJson<SubtaskDTO>(`${this.baseUrl}/api/tasks/${taskId}/subtasks`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "If-Match": `"${version}"`,
+            },
+            body: JSON.stringify({ version, ...body }),
+        });
+    }
+
+    /** 删除子任务。version 用于通过 ConflictGuard（DELETE 语义上不看具体值）。 */
+    async deleteSubtask(taskId: number, subId: number, version: number): Promise<void> {
+        await this.request(`${this.baseUrl}/api/tasks/${taskId}/subtasks/${subId}`, {
+            method: "DELETE",
+            headers: { "If-Match": `"${version}"` },
         });
     }
 
@@ -816,7 +853,7 @@ export class APIClient {
 
     /** 拒绝一条提议:POST /api/daily-sweep/reject → 204。 */
     async rejectDailySweep(body: { change_id: string }): Promise<void> {
-        return this.fetchJson<void>(`${this.baseUrl}/api/daily-sweep/reject`, {
+        return this.request(`${this.baseUrl}/api/daily-sweep/reject`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),

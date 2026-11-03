@@ -318,6 +318,15 @@ field_title = "标题"
 field_notes = "备注"
 field_due_date = "截止日期"
 
+section_subtasks = "拆解步骤"
+subtask_add = "添加步骤"
+subtask_delete = "删除步骤"
+subtask_title = "步骤"
+subtask_minutes = "分钟"
+subtasks_empty = "暂无步骤，可手动添加"
+field_estimated_minutes = "预计时长（分钟）"
+subtask_invalid = "步骤标题不能为空"
+
 [llm_settings]
 title = "AI"
 provider = "提供商"
@@ -366,6 +375,12 @@ tasks = "任务评分"
 prev_day = "前一天"
 next_day = "后一天"
 summary = "已排 {placed} · 待排 {unscheduled}"
+
+edit_block = "调整时间块"
+block_start = "开始时间"
+block_end = "结束时间"
+block_invalid = "结束时间必须晚于开始时间"
+block_remove = "移除排程"
 
 [dailySweep]
 start = "立即扫一遍"

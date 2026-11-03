@@ -14,6 +14,10 @@
 just apk
 ```
 
+`just apk` 产出的 `bin/LittleTimer.apk` 是本地调试件。Release 页上挂的是
+`little-timer-<版本>-android-universal-debug.apk`（同一 debug 签名的产物，
+文件名带版本与平台；由 `release.yml` 的 `android-apk` job 重命名后上传）。
+
 如果构建中途卡在 Go 模块下载（`proxy.golang.org` 在某些网络环境下会超时），加 `GOPROXY=direct`：
 
 ```bash

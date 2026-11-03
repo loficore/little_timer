@@ -19,7 +19,7 @@
 ## 必需检查
 - 合并到 `main` 前必须通过：`frontend`、`backend`、`e2e`。
 - `vrt`（视觉回归）目前为 advisory（`continue-on-error`），不阻断合并。
-- 平台构建（`build` matrix）只在 release / 手动触发时运行，不阻断 PR。
+- 平台构建并入 `release.yml` 的三个构建 job，只在 release / 手动触发时运行，不阻断 PR。
 
 ## VRT 基线重生成
 - 基线必须在与 CI runner 等价的字体环境生成：本机 CJK 回退字形/行高与
@@ -35,7 +35,23 @@
   --project=vrt-mobile-412 --project=vrt-desktop-1280 --workers=1`。
 
 ## 发布
-- 在 `main` 上打 tag 并发 GitHub Release；`release.yml` 随即打包产物（tar.gz + rpm + deb）。rpm/deb 由 `just package-linux` 在容器内构建，见 `docs/linux-packaging.md`。
+- 在 `main` 上打 tag 并发 GitHub Release；`release.yml` 随即跑四个 job：
+  - `linux-packages`（ubuntu-latest）：`just package` 出 tar.gz，`just package-linux` 出 rpm/deb（容器内构建，见 `docs/linux-packaging.md`）。
+  - `windows-installer`（windows-latest）：`scripts/package-windows.sh` 出 NSIS 安装器（按用户安装，缺失 WebView2 运行时会被静默补装）与便携 zip；job 内再用 `scripts/smoke-windows-installer.sh` 跑「静默安装 → `LittleTimer.exe version` → 静默卸载 → 安装目录消失、`%AppData%\LittleTimer` 仍在」的冒烟断言。
+  - `android-apk`（ubuntu-latest）：`scripts/build-android.sh` 出 debug 签名 APK。
+  - `publish`（`needs` 上面三个）：git-cliff 生成 release notes，`ncipollo/release-action` 把六个产物挂上 Release。它是 Release 页产物的**唯一 writer**（`ci.yml` 不再构建任何平台产物）。
+- 六个产物名（`scripts/check-artifact-names.sh` 在每个构建 job 打包后强制校验，不合规即 job 失败）：
+
+  ```
+  little-timer-<版本>-webkit40.el9.x86_64.rpm
+  little-timer-<版本>-webkit41-x86_64.deb
+  little-timer-<版本>-linux-x86_64.tar.gz
+  little-timer-<版本>-windows-x86_64-setup.exe
+  little-timer-<版本>-windows-x86_64-portable.zip
+  little-timer-<版本>-android-universal-debug.apk
+  ```
+
+  形态固定为 `<项目名>-<版本>-<平台/引擎>-<架构>[-<种类>].<ext>`：平台/引擎槽只有 `webkit40` / `webkit41` / `linux` / `windows` / `android`，架构槽只有 `x86_64` / `universal`。
 - 不再需要「同步 develop 到 main」的步骤。
 
 ### 版本号（唯一事实来源）

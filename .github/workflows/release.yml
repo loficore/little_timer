@@ -150,12 +150,17 @@ jobs:
           echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\x86_64-w64-mingw32\bin" >> $GITHUB_PATH
           # choco 的 nsis 包**不生成 makensis 的 shim**，安装目录不在 PATH 上 ——
           # 必须显式加进去，否则下一步会报 "makensis: command not found"。
-          nsis_dir="$(ls -d "/c/Program Files (x86)/NSIS" "/c/Program Files/NSIS" 2>/dev/null | head -n1)"
+          # 用 test 而不是 ls：ls 对缺失路径返回 2，在 -e -o pipefail 下会直接中止本步。
+          nsis_dir=""
+          for d in "/c/Program Files (x86)/NSIS" "/c/Program Files/NSIS"; do
+            if [ -f "$d/makensis.exe" ]; then nsis_dir="$d"; break; fi
+          done
           if [ -z "$nsis_dir" ]; then
-            echo "cannot locate the NSIS installation directory" >&2
+            echo "cannot locate makensis.exe under the NSIS install dir" >&2
             exit 1
           fi
           cygpath -w "$nsis_dir" >> "$GITHUB_PATH"
+          "$nsis_dir/makensis.exe" -VERSION
 
       - name: Verify toolchain
         run: |

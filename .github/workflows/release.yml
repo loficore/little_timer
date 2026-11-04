@@ -26,11 +26,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - name: Setup pnpm
+        # 必须在 setup-node 之前：setup-node 的 cache=pnpm 会去找 pnpm 可执行文件
+        uses: pnpm/action-setup@v4
         with:
-          go-version: "1.25.0"
-          cache-dependency-path: neo-src/go.sum
+          version: latest
 
       - name: Setup Node.js (frontend build)
         uses: actions/setup-node@v4
@@ -39,10 +39,11 @@ jobs:
           cache: "pnpm"
           cache-dependency-path: assets/pnpm-lock.yaml
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          version: latest
+          go-version: "1.25.0"
+          cache-dependency-path: neo-src/go.sum
 
       - name: Install just
         uses: taiki-e/install-action@just
@@ -114,11 +115,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - name: Setup pnpm
+        # 必须在 setup-node 之前：setup-node 的 cache=pnpm 会去找 pnpm 可执行文件
+        uses: pnpm/action-setup@v4
         with:
-          go-version: "1.25.0"
-          cache-dependency-path: neo-src/go.sum
+          version: latest
 
       - name: Setup Node.js (frontend build)
         uses: actions/setup-node@v4
@@ -127,10 +128,11 @@ jobs:
           cache: "pnpm"
           cache-dependency-path: assets/pnpm-lock.yaml
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          version: latest
+          go-version: "1.25.0"
+          cache-dependency-path: neo-src/go.sum
 
       - name: Install mingw (CGO toolchain) and NSIS
         # webview_go 的 cgo flags 是 gcc 风格，MSVC 不可用。
@@ -193,11 +195,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - name: Setup pnpm
+        # 必须在 setup-node 之前：setup-node 的 cache=pnpm 会去找 pnpm 可执行文件
+        uses: pnpm/action-setup@v4
         with:
-          go-version: "1.25.0"
-          cache-dependency-path: neo-src/go.sum
+          version: latest
 
       - name: Setup Node.js (frontend build)
         uses: actions/setup-node@v4
@@ -206,10 +208,11 @@ jobs:
           cache: "pnpm"
           cache-dependency-path: assets/pnpm-lock.yaml
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          version: latest
+          go-version: "1.25.0"
+          cache-dependency-path: neo-src/go.sum
 
       - name: Install system dependencies
         run: |

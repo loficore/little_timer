@@ -52,8 +52,8 @@
 
 `just package-linux [version]` 一次产出 rpm 与 deb；版本缺省取最近 git tag（去掉 `v`），无 tag 时用当天日期。也可分开跑 `just package-rpm` / `just package-deb`。
 
-- rpm：AlmaLinux 9 容器构建，`-tags "webview,embed_ui"`（默认 webkit2gtk-4.0），链 `libwebkit2gtk-4.0.so.37`，产物 `dist/little-timer-<ver>-1webkit40.el9.x86_64.rpm`。
-- deb：Ubuntu 22.04 容器构建（glibc 2.35，覆盖 jammy/noble），`-tags "webview,embed_ui,webkit41"`，链 `libwebkit2gtk-4.1.so.0`，产物 `dist/little-timer_<ver>-1webkit41_amd64.deb`。
+- rpm：AlmaLinux 9 容器构建，`-tags "webview,embed_ui"`（默认 webkit2gtk-4.0），链 `libwebkit2gtk-4.0.so.37`，产物 `dist/little-timer-<ver>-webkit40.el9.x86_64.rpm`（包内 `Release: webkit40%{?dist}`，不再是 `1webkit40`）。
+- deb：Ubuntu 22.04 容器构建（glibc 2.35，覆盖 jammy/noble），`-tags "webview,embed_ui,webkit41"`，链 `libwebkit2gtk-4.1.so.0`，产物 `dist/little-timer-<ver>-webkit41-x86_64.deb`（包内 `Version: <ver>-webkit41`）。
 
 宿主机已有 gtk3/webkit 开发包时脚本直接本机构建，否则自动进容器（依赖 `docker`，并挂载宿主机 `GOROOT`/`GOMODCACHE`）。两个包链接不同 WebKit SONAME，不能互换；包内容、依赖门禁与验收口径见 `docs/linux-packaging.md`。`just package` 的 tar.gz 仍走 `embed_ui`（无 webview 依赖），自带前端。
 

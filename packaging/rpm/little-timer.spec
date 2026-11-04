@@ -2,7 +2,7 @@
 
 Name:           little-timer
 Version:        %{?lt_version}%{!?lt_version:2.0.0}
-Release:        1webkit40%{?dist}
+Release:        webkit40%{?dist}
 Summary:        Countdown, stopwatch and habit timer
 License:        Apache-2.0
 URL:            https://github.com/daedalusys/little_timer

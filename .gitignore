@@ -68,6 +68,7 @@ lerna-debug.log*
 !/scripts/collect-webkit-perf.sh
 !/scripts/package-linux.sh
 !/scripts/stage-embedded-ui.sh
+!/scripts/check-artifact-names.sh
 
 # === CI/CD ===
 /.github/*

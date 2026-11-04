@@ -77,19 +77,11 @@ jobs:
         run: bash scripts/generate-bindings.sh
 
       - name: Compute version
-        run: |
-          set -eux
-          RELEASE_TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
-          VERSION="${RELEASE_TAG#v}"
-          if [ -z "$VERSION" ]; then
-            VERSION="$(git describe --tags --exact-match 2>/dev/null || true)"
-          fi
-          if [ -z "$VERSION" ]; then
-            VERSION="$(git rev-parse --short HEAD)"
-          fi
-          VERSION="${VERSION#v}"
-          echo "Using VERSION=$VERSION"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        # 四个 job 共用 scripts/ci-version.sh：版本算错一处，Release 页上
+        # 就会出现一半带 tag 版本、一半带 commit hash 的产物。
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: bash scripts/ci-version.sh
 
       - name: Package Linux artifacts
         run: |
@@ -173,19 +165,11 @@ jobs:
         run: bash scripts/generate-bindings.sh
 
       - name: Compute version
-        run: |
-          set -eux
-          RELEASE_TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
-          VERSION="${RELEASE_TAG#v}"
-          if [ -z "$VERSION" ]; then
-            VERSION="$(git describe --tags --exact-match 2>/dev/null || true)"
-          fi
-          if [ -z "$VERSION" ]; then
-            VERSION="$(git rev-parse --short HEAD)"
-          fi
-          VERSION="${VERSION#v}"
-          echo "Using VERSION=$VERSION"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        # 四个 job 共用 scripts/ci-version.sh：版本算错一处，Release 页上
+        # 就会出现一半带 tag 版本、一半带 commit hash 的产物。
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: bash scripts/ci-version.sh
 
       - name: Package Windows artifacts
         # scripts/package-windows.sh 自足：前端 build、Go build、makensis、zip 全在里面
@@ -264,19 +248,11 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> $GITHUB_ENV
 
       - name: Compute version
-        run: |
-          set -eux
-          RELEASE_TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
-          VERSION="${RELEASE_TAG#v}"
-          if [ -z "$VERSION" ]; then
-            VERSION="$(git describe --tags --exact-match 2>/dev/null || true)"
-          fi
-          if [ -z "$VERSION" ]; then
-            VERSION="$(git rev-parse --short HEAD)"
-          fi
-          VERSION="${VERSION#v}"
-          echo "Using VERSION=$VERSION"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        # 四个 job 共用 scripts/ci-version.sh：版本算错一处，Release 页上
+        # 就会出现一半带 tag 版本、一半带 commit hash 的产物。
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: bash scripts/ci-version.sh
 
       - name: Build APK
         # scripts/build-android.sh 内部自己跑 android bindings + NDK + Gradle
@@ -313,19 +289,11 @@ jobs:
           fetch-depth: 0
 
       - name: Compute version
-        run: |
-          set -eux
-          RELEASE_TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
-          VERSION="${RELEASE_TAG#v}"
-          if [ -z "$VERSION" ]; then
-            VERSION="$(git describe --tags --exact-match 2>/dev/null || true)"
-          fi
-          if [ -z "$VERSION" ]; then
-            VERSION="$(git rev-parse --short HEAD)"
-          fi
-          VERSION="${VERSION#v}"
-          echo "Using VERSION=$VERSION"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        # 四个 job 共用 scripts/ci-version.sh：版本算错一处，Release 页上
+        # 就会出现一半带 tag 版本、一半带 commit hash 的产物。
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: bash scripts/ci-version.sh
 
       - name: Install git-cliff
         env:

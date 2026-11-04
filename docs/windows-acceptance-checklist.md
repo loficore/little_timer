@@ -61,3 +61,21 @@ DPAPI blob 绑定当前 Windows 账户，跨账户/跨机不可解——这是�
 - [ ] 本期范围：**Windows 为新增支持**；macOS 暂不在发布目标内
       （Keychain 后端另开 issue，见后续计划）；Linux / Android 行为不变
       （Secret Service / Android Keystore 各自路径无任何改动）。
+
+## 7. 安装器 / WebView2 运行时（变更后必验）
+
+安装器**按用户安装、免 UAC**，缺失 WebView2 运行时会静默补装。这一节覆盖
+CI 覆盖不到的分支（CI runner 自带 WebView2，且不会真的验证「已装 runtime 不重装」）。
+
+- [ ] **无 WebView2 的机器**（Win10 精简版 / 未装 Edge / 已卸载 WebView2 运行时）：
+      静默或交互安装都能跑完，安装日志里出现「未检测到 WebView2 运行时，正在静默安装...」，
+      装完 `LittleTimer.exe` 能起窗（不需要手动补运行时）。
+- [ ] **已装 WebView2 的机器**（主流 Win10/11，或先装一次上一个用例的产物）：
+      再装一次，安装日志里**不应**出现上面那行；若出现，说明运行时探测漏了
+      `HKCU`（每用户）位置 —— 未提权的 bootstrapper 装的是每用户运行时。
+- [ ] 卸载：开始菜单「Little Timer」项消失、桌面快捷方式消失（若曾勾选）、
+      「应用和功能」里的条目消失，**且 `%AppData%\LittleTimer` 仍在**
+      （主库与 `secret.db` 属于用户数据，卸载不得删）。
+- [ ] 首次双击未签名的 `little-timer-<版本>-windows-x86_64-setup.exe` 会触发
+      SmartScreen 警告，这是预期（本期不签名，见 spec §6）；「更多信息 → 仍要运行」
+      后应能正常安装。

@@ -6,17 +6,49 @@
 #   scripts/smoke-windows-installer.sh <setup.exe> <version>
 #
 # 只能在 Windows（Git Bash）上跑。
+
+# Git Bash(MSYS2) 默认会把以 / 开头的参数当成 POSIX 路径改写：
+#   /S → C:\Program Files\Git\S
+# 安装器收不到静默开关就会弹 GUI 等输入 —— CI 上没有窗口，
+# 表现为整个 job 挂到 timeout 才被取消（实测挂满 34 分钟）。
+# 关掉参数路径改写，/S 才能原样送到安装器。
+export MSYS2_ARG_CONV_EXCL='*'
+
 set -euo pipefail
 
 SETUP="${1:?usage: smoke-windows-installer.sh <setup.exe> <version>}"
 VERSION="${2:?usage: smoke-windows-installer.sh <setup.exe> <version>}"
 
+command -v cygpath >/dev/null 2>&1 || {
+    echo "error: cygpath not found — this script only runs in Git Bash on Windows" >&2
+    exit 1
+}
+
 # Git Bash 里 $LOCALAPPDATA / $APPDATA 是带反斜杠的 Windows 路径，先转 POSIX
 inst="$(cygpath -u "$LOCALAPPDATA")/Programs/LittleTimer"
 appdata="$(cygpath -u "$APPDATA")/LittleTimer"
 
+# 装/卸都可能因为等待输入或补装运行时而无限期挂着 —— 加超时兜底，
+# 失败要能立刻报出来，而不是把整个 job 的时间预算耗光。
+run_bounded() {
+    local secs="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
+echo "install dir : $inst"
+echo "appdata dir : $appdata"
+
 echo "=== smoke: install ($SETUP) ==="
-"$SETUP" /S
+rc=0
+run_bounded 600 "$SETUP" /S || rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "error: silent install failed or timed out (exit $rc)" >&2
+    exit 1
+fi
 
 for _ in $(seq 1 60); do
     if [ -f "$inst/LittleTimer.exe" ]; then break; fi
@@ -28,7 +60,7 @@ if [ ! -f "$inst/LittleTimer.exe" ]; then
 fi
 
 echo "=== smoke: version ==="
-out="$("$inst/LittleTimer.exe" version)"
+out="$(run_bounded 60 "$inst/LittleTimer.exe" version)"
 echo "$out"
 if ! printf '%s\n' "$out" | grep -q -- "$VERSION"; then
     echo "error: version output does not contain '$VERSION'" >&2
@@ -36,7 +68,12 @@ if ! printf '%s\n' "$out" | grep -q -- "$VERSION"; then
 fi
 
 echo "=== smoke: uninstall ==="
-"$inst/Uninstall.exe" /S
+rc=0
+run_bounded 600 "$inst/Uninstall.exe" /S || rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "error: silent uninstall failed or timed out (exit $rc)" >&2
+    exit 1
+fi
 
 for _ in $(seq 1 60); do
     if [ ! -f "$inst/LittleTimer.exe" ]; then break; fi

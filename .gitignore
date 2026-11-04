@@ -69,6 +69,9 @@ lerna-debug.log*
 !/scripts/package-linux.sh
 !/scripts/stage-embedded-ui.sh
 !/scripts/check-artifact-names.sh
+!/scripts/check-windows-installer.sh
+!/scripts/package-windows.sh
+!/scripts/smoke-windows-installer.sh
 
 # === CI/CD ===
 /.github/*
@@ -77,6 +80,10 @@ lerna-debug.log*
 # === Project Specific ===
 AGENTS.md
 cliff.toml
+
+# Windows 打包暂存目录与许可证副本（构建期生成）
+packaging/windows/build/
+packaging/windows/LICENSE.txt
 
 # Wails generated bindings
 assets/bindings/

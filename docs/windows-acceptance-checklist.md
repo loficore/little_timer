@@ -2,7 +2,11 @@
 
 面向用户的 Windows 实机验收。逐项勾选；任何一项不符即为验收失败，附现象回报。
 
-前置：Windows 10/11 桌面版，本地标准账户登录，使用发布构建的 `server.exe`
+发布构建的可执行文件名是 `LittleTimer.exe`（不再是 `server.exe`），由
+`little-timer-<版本>-windows-x86_64-setup.exe` 安装到
+`%LOCALAPPDATA%\Programs\LittleTimer\`。
+
+前置：Windows 10/11 桌面版，本地标准账户登录，使用上述安装器装好的 `LittleTimer.exe`
 （或 `go build` 产物）。凭据文件为**主数据库同目录**下的 `secret.db`。
 
 ## 1. 登录即用（UX 红线）
@@ -10,7 +14,7 @@
 - [ ] 首启 → 设置 → AI / LLM 填写 API Key → 保存成功。
 - [ ] **重启整个机器** → 解锁登录 → 直接启动应用并进入 AI GTD / 备份页，
       **无需任何口令、授权或弹窗**即可使用。
-- [ ] 运行中强杀 `server.exe` 进程 → worker 重启后取 LLM key 成功
+- [ ] 运行中强杀 `LittleTimer.exe` 进程 → worker 重启后取 LLM key 成功
       （随手记任务照常拆解），全程零输入。
 
 ## 2. 凭据后端展示

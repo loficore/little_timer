@@ -74,7 +74,7 @@ Section "核心组件" SecCore
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Little Timer" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTKEY}" "DisplayName" "${APPNAME}"
-  WriteRegStr HKCU "${UNINSTKEY}" "DisplayVersion" "${VERSION}.0"
+  WriteRegStr HKCU "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINSTKEY}" "Publisher" "${PUBLISHER}"
   WriteRegStr HKCU "${UNINSTKEY}" "UninstallString" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "${UNINSTKEY}" "NoModify" "1"
@@ -97,6 +97,8 @@ Section "核心组件" SecCore
     ${EndIf}
   ${EndIf}
   SetRegView 32
+  ; 恢复默认（32 位）视图：上面的 HKCU 写入、InstallDirRegKey 的读、卸载器的
+  ; DeleteRegKey 必须落在同一个视图，否则「应用和功能」里的卸载项删不掉。
   ${If} $0 == ""
     ${If} $1 == ""
       DetailPrint "未检测到 WebView2 运行时，正在静默安装..."

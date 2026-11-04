@@ -62,8 +62,10 @@ fi
 echo "=== smoke: version ==="
 out="$(run_bounded 60 "$inst/LittleTimer.exe" version)"
 echo "$out"
-if ! printf '%s\n' "$out" | grep -q -- "$VERSION"; then
-    echo "error: version output does not contain '$VERSION'" >&2
+# `version` 的第一行固定是 "little-timer <ver>"。整行精确匹配 —— 子串匹配的话
+# "2.1.1" 会被 "12.1.1" 误判为通过。
+if ! printf '%s\n' "$out" | grep -Fxq -- "little-timer $VERSION"; then
+    echo "error: version output does not contain 'little-timer $VERSION'" >&2
     exit 1
 fi
 

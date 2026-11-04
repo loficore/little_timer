@@ -52,6 +52,7 @@
   ```
 
   形态固定为 `<项目名>-<版本>-<平台/引擎>-<架构>[-<种类>].<ext>`：平台/引擎槽只有 `webkit40` / `webkit41` / `linux` / `windows` / `android`，架构槽只有 `x86_64` / `universal`。
+- 安装器与便携包的分工：`windows-x86_64-setup.exe` 会装 WebView2 运行时（机器上没有时静默补装）、建开始菜单与卸载项；`windows-x86_64-portable.zip` 只有一个 `LittleTimer.exe`，**不含运行时也不含安装步骤** —— 目标机器没有 WebView2 时解压即用是打不开的，这类机器请用安装器。两者都没有代码签名，首次运行会触发 SmartScreen 警告（见 spec §6）。
 - 不再需要「同步 develop 到 main」的步骤。
 
 ### 版本号（唯一事实来源）

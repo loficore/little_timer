@@ -64,6 +64,16 @@ cp "$ROOT/LICENSE" "$ROOT/packaging/windows/LICENSE.txt"
 # 5) WebView2 evergreen bootstrapper（运行时缺失时由安装器静默补装）
 curl -fsSL "https://go.microsoft.com/fwlink/p/?LinkId=2124703" \
     -o "$ROOT/packaging/windows/build/MicrosoftEdgeWebview2Setup.exe"
+# curl 只看 HTTP 状态码：captive portal / 代理返回的 HTML 会被 200 正常存下来，
+# 然后当作 exe 嵌进安装器 —— 到目标机器上才失败。验一下 PE 头（MZ）与最小体积。
+bootstrapper="$ROOT/packaging/windows/build/MicrosoftEdgeWebview2Setup.exe"
+if [ "$(head -c 2 "$bootstrapper")" != "MZ" ]; then
+    die "downloaded bootstrapper is not a PE executable (got: $(head -c 16 "$bootstrapper" | tr -d '\0'))"
+fi
+size="$(wc -c < "$bootstrapper")"
+if [ "$size" -lt 100000 ]; then
+    die "downloaded bootstrapper is suspiciously small ($size bytes) — likely an error page"
+fi
 
 # 6) NSIS 打包 —— 必须在 packaging/windows/ 内执行，
 #    否则 File "build\..." 与 !define MUI_ICON 的相对路径解析不到

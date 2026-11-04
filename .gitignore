@@ -70,6 +70,7 @@ lerna-debug.log*
 !/scripts/stage-embedded-ui.sh
 !/scripts/check-artifact-names.sh
 !/scripts/check-windows-installer.sh
+!/scripts/ci-version.sh
 !/scripts/package-windows.sh
 !/scripts/smoke-windows-installer.sh
 

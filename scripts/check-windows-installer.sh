@@ -42,9 +42,21 @@ require 'LittleTimer.exe'
 
 # --- 禁止项 ---
 forbid 'RequestExecutionLevel admin'
-forbid 'RMDir /r "$APPDATA'
-forbid 'RMDir /r "$PROFILE'
-forbid 'Delete "$APPDATA'
+# 下面这条是「卸载不删用户数据」红线的唯一守卫，所以不能只匹配字面前缀：
+# `RMDir "$APPDATA…`（无 /r）、未加引号等变体都要覆盖。
+# 判据：非注释行里同时出现「破坏性操作」与「用户数据位置变量」。
+# 用户数据（主库与 secret.db）在 `%AppData%\LittleTimer` 的**文件系统**里，
+# 不在注册表 —— 所以 `DeleteRegKey HKCU "Software\Little Timer"`（安装目录记录）
+# 与 `DeleteRegKey HKCU "${UNINSTKEY}"`（卸载项）都是正当删除，不在此列。
+# `$INSTDIR`（= $LOCALAPPDATA\Programs\LittleTimer）与 `$DESKTOP`/`$SMPROGRAMS`
+# 的删除同样正当：它们的字面文本不含这些变量名，不会误报。
+USERDATA_RE='\$(APPDATA|PROFILE|LOCALAPPDATA|USERPROFILE)'
+DESTRUCTIVE_RE='RMDir|RmDir|Delete|DeleteRegKey|RemoveDirectory'
+if hits="$(grep -vE '^[[:space:]]*;' "$NSI" | grep -E -- "$DESTRUCTIVE_RE" | grep -E -- "$USERDATA_RE")" && [ -n "$hits" ]; then
+    echo "FAIL: .nsi 里有针对用户数据位置的破坏性操作:"
+    printf '%s\n' "$hits" | sed 's/^/  /'
+    fail=1
+fi
 
 # --- 结构项：WebView2 运行时探测必须 64/32 两个注册表视图各查一次 ---
 if [ "$(grep -Fc -- 'SetRegView 32' "$NSI" || true)" -lt 1 ]; then

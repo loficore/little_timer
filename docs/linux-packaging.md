@@ -155,7 +155,7 @@ Linux 凭据后端走 Secret Service（D-Bus），且**启动时检测不到密�
 
 ## 验收清单（发版前）
 
-本地验证（2026-10-31，产物 `little-timer-2.0.0-1webkit40.el9.x86_64.rpm` / `little-timer_2.0.0-1webkit41_amd64.deb`）：
+本地验证（2026-10-31，产物 `little-timer-2.0.0-1webkit40.el9.x86_64.rpm` / `little-timer_2.0.0-1webkit41_amd64.deb`——**这是旧命名，2026-11-04 起已改名**，见上节「命名与互斥」）：
 
 1. [x] EL9 干净容器内 `rpm -ivh` 成功，`rpm -qp --requires` 含 `libwebkit2gtk-4.0.so.37`，`little-timer serve --webview` 能起窗（Xvfb 下验证窗口创建）。
 2. [x] jammy 与 noble 干净容器内 `dpkg -i` 成功，`Depends` 含 `libwebkit2gtk-4.1-0`，起窗正常。

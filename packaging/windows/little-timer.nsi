@@ -80,19 +80,31 @@ Section "核心组件" SecCore
   WriteRegStr HKCU "${UNINSTKEY}" "NoModify" "1"
   WriteRegStr HKCU "${UNINSTKEY}" "NoRepair" "1"
 
-  ; WebView2 运行时：64 位与 32 位视图各查一次，两处都为空才补装。
+  ; WebView2 运行时探测：HKLM / HKCU × 64 位 / 32 位视图共四个位置，
+  ; 任意一个有 pv 即视为已安装。
+  ; 未提权的 bootstrapper 装的是**每用户**运行时（注册在 HKCU），
+  ; 只看 HKLM 会让已装 runtime 的机器每次安装都白跑一次 bootstrapper。
   ; SetRegView 只能写在 Section/Function 里（顶层是编译错误），且只在这一段切换：
   ; 上面那些 HKCU 写入留在默认视图，与 InstallDirRegKey / 卸载器的删除同视图。
   SetRegView 64
   ReadRegStr $0 HKLM "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+  ReadRegStr $1 HKCU "Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
   ${If} $0 == ""
-    SetRegView 32
-    ReadRegStr $0 HKLM "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+    ${If} $1 == ""
+      SetRegView 32
+      ReadRegStr $0 HKLM "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+      ReadRegStr $1 HKCU "Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+    ${EndIf}
   ${EndIf}
   SetRegView 32
   ${If} $0 == ""
-    DetailPrint "未检测到 WebView2 运行时，正在静默安装..."
-    ExecWait '"$INSTDIR\MicrosoftEdgeWebview2Setup.exe" /silent /install'
+    ${If} $1 == ""
+      DetailPrint "未检测到 WebView2 运行时，正在静默安装..."
+      ExecWait '"$INSTDIR\MicrosoftEdgeWebview2Setup.exe" /silent /install' $2
+      ${If} $2 != 0
+        DetailPrint "WebView2 运行时安装失败（退出码 $2），应用可能无法启动；请手动安装 WebView2 运行时后重试。"
+      ${EndIf}
+    ${EndIf}
   ${EndIf}
 SectionEnd
 

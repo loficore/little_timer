@@ -52,6 +52,14 @@ if [ "$(grep -Fc -- 'SetRegView 32' "$NSI" || true)" -lt 1 ]; then
     fail=1
 fi
 
+# --- 结构项：也必须查每用户（HKCU）位置 ---
+# 未提权的 bootstrapper 装的是每用户运行时，只看 HKLM 会让已装 runtime 的
+# 机器每次安装都白跑一次 bootstrapper。
+if ! grep -Eq 'ReadRegStr \$[0-9]+ HKCU "Software\\Microsoft\\EdgeUpdate\\Clients' "$NSI"; then
+    echo "FAIL: .nsi 未探测 HKCU（每用户）下的 WebView2 注册位置"
+    fail=1
+fi
+
 # --- 结构项：按用户安装要求 .onInit 与 un.onInit 各设一次 SetShellVarContext ---
 n_ctx="$(grep -Fc -- 'SetShellVarContext current' "$NSI" || true)"
 if [ "$n_ctx" -lt 2 ]; then

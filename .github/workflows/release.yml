@@ -10,12 +10,17 @@ on:
         required: false
         default: 'v2.0.0'
 
+# 三个构建 job 只需要读仓库；只有 publish 要写 Release（见该 job 的 permissions）。
 permissions:
-  contents: write
+  contents: read
 
-# 四个 job：三个平台各自打包，publish 是 Release 页产物的唯一 writer
-# （ncipollo/release-action 的 replacesArtifacts=true 会先清空该 tag 上的产物，
-#  双 writer 必然互相清空 —— 所以只有一个 job 碰 Release）。
+# 四个 job：三个平台各自打包，publish 是 Release 页产物的唯一 writer。
+# 单一 writer 的理由是幂等：publish 会先清掉该 tag 上的旧产物再上传，
+# 这样「改名后新旧两套文件名同时挂在 Release 页上」不会发生。
+# 注意两个 action 输入的分工：
+#   - removeArtifacts: true  → 删掉该 release 上的**全部**旧产物（含旧命名的那些）
+#   - replacesArtifacts: true → 只删与本次上传**同名**的产物（重跑时覆盖同名文件）
+# 两个都开：前者保证产物集合干净，后者保证同名文件不重复。
 jobs:
   linux-packages:
     runs-on: ubuntu-latest
@@ -114,6 +119,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # 版本号回退里用到 git describe --tags，浅克隆里永远失败
+          fetch-depth: 0
 
       - name: Setup pnpm
         # 必须在 setup-node 之前：setup-node 的 cache=pnpm 会去找 pnpm 可执行文件
@@ -140,10 +148,18 @@ jobs:
           choco install mingw nsis -y
           echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" >> $GITHUB_PATH
           echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\x86_64-w64-mingw32\bin" >> $GITHUB_PATH
+          # choco 的 nsis 包**不生成 makensis 的 shim**，安装目录不在 PATH 上 ——
+          # 必须显式加进去，否则下一步会报 "makensis: command not found"。
+          nsis_dir="$(ls -d "/c/Program Files (x86)/NSIS" "/c/Program Files/NSIS" 2>/dev/null | head -n1)"
+          if [ -z "$nsis_dir" ]; then
+            echo "cannot locate the NSIS installation directory" >&2
+            exit 1
+          fi
+          cygpath -w "$nsis_dir" >> "$GITHUB_PATH"
 
       - name: Verify toolchain
         run: |
-          makensis /VERSION
+          makensis -VERSION
           gcc --version
           g++ --version
 
@@ -194,6 +210,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # 版本号回退里用到 git describe --tags，浅克隆里永远失败
+          fetch-depth: 0
 
       - name: Setup pnpm
         # 必须在 setup-node 之前：setup-node 的 cache=pnpm 会去找 pnpm 可执行文件
@@ -279,11 +298,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [linux-packages, windows-installer, android-apk]
+    # 只有这个 job 需要写 Release；其余 job 只需要读（见文件顶部 permissions）
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Compute version
+        run: |
+          set -eux
+          RELEASE_TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          VERSION="${RELEASE_TAG#v}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(git describe --tags --exact-match 2>/dev/null || true)"
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION="$(git rev-parse --short HEAD)"
+          fi
+          VERSION="${VERSION#v}"
+          echo "Using VERSION=$VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Install git-cliff
         env:
@@ -317,6 +354,11 @@ jobs:
           merge-multiple: true
           path: dist
 
+      - name: Check artifact names
+        # 发布前的最后一道门禁：三个构建 job 各自验过自己的产物，
+        # 但汇到一起的 dist/ 没人验过 —— 版本不一致、多余文件都在这里被拦下。
+        run: bash scripts/check-artifact-names.sh "$VERSION"
+
       - name: Create GitHub Release and attach artifacts
         uses: ncipollo/release-action@v1
         with:
@@ -331,5 +373,10 @@ jobs:
             dist/*.zip
             dist/*.apk
           token: ${{ secrets.GITHUB_TOKEN }}
+          # 两个输入的分工：
+          #   removeArtifacts   删掉该 release 上**全部**旧产物（含改名前的旧文件名）
+          #   replacesArtifacts 只删与本次上传同名的产物（重跑时覆盖同名文件）
+          # 只开后者会让旧命名的产物留在页面上 —— 改名后的 release 会同时挂新旧两套。
+          removeArtifacts: true
           replacesArtifacts: true
           allowUpdates: true

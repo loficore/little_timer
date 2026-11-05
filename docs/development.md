@@ -17,7 +17,11 @@
 - 平台能力差异用能力探测隐藏入口,不展示「暂不可用」类提示页。
 
 ## 必需检查
-- 合并到 `main` 前必须通过：`frontend`、`backend`、`e2e`。
+- 合并到 `main` 前必须通过：`frontend`、`backend`、`e2e`、`windows-msys2`。
+- `windows-msys2` 在真实 msys2 + mingw-w64 里编译 HTTP-only 与 WebView 两个目标，
+  且**不依赖 Windows SDK** —— 它是「Windows 上能否从源码构建」这件事唯一的自动化
+  证据（`backend` 的 Windows 交叉门禁不开 cgo、也不带 `webview` tag，碰不到
+  `WebView2.h`）。见 [docs/windows-msys2-dev.md](windows-msys2-dev.md)。
 - `vrt`（视觉回归）目前为 advisory（`continue-on-error`），不阻断合并。
 - 平台构建并入 `release.yml` 的三个构建 job，只在 release / 手动触发时运行，不阻断 PR。
 

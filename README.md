@@ -122,25 +122,22 @@ pnpm run lint
 
 ## 脚本构建与打包
 
-Linux / macOS Go 构建：
+Go 构建（go-sqlite3 是 cgo-only，需要 C 编译器；`justfile` 会自动探测 gcc / clang / `zig cc`）：
 
 ```bash
-./scripts/build.sh --go --release
-./scripts/build.sh --go --debug
+just go-build        # → neo-src/bin/server
+just go-dev          # 前端 dev server + Go 后端，一起起
 ```
 
-Windows 构建脚本仍可用，但当前 PowerShell 脚本仍面向旧的桌面构建流程；Go 后端可直接在 `neo-src` 中构建：
-
-```powershell
-cd neo-src
-go build -o bin/server ./cmd/server/
-```
+**在 Windows 上开发**：见 [docs/windows-msys2-dev.md](docs/windows-msys2-dev.md) ——
+msys2 下的工具链、cgo 环境变量、HTTP-only 与原生 WebView 两种形态的跑法。
 
 打包脚本：
 
 ```bash
 just package 1.0.0        # tar.gz（embed_ui，无 webview 依赖）
 just package-linux 1.0.0  # rpm + deb；也可分开跑 package-rpm / package-deb
+bash scripts/package-windows.sh 1.0.0   # Windows：NSIS 安装器 + 便携 zip（需 NSIS）
 ```
 
 Linux 安装包按系统 WebKit 分两个变体，不能互换：rpm 链 `webkit2gtk-4.0`（EL8/EL9），deb 链 `webkit2gtk-4.1`（Ubuntu 22.04+ / Debian 12+）。宿主机没有对应开发包时脚本自动进容器构建（需要 docker）。包依赖里带 `gnome-keyring` 推荐项，没有 Secret Service 的机器首启会按 `README` 的凭据口径报错退出。

@@ -65,9 +65,20 @@ go-dev host="":
         set -e
         trap 'kill $VITE_PID $GO_PID 2>/dev/null; exit 0' INT TERM
 
+        # 端口占用探测：Linux 用 ss；msys2 没有 iproute2（无 ss），退回 bash
+        # 内建的 /dev/tcp。两条路径都不需要额外工具，Windows 与 Linux 同形。
+        port_in_use() {
+            local port=$1
+            if command -v ss >/dev/null 2>&1; then
+                ss -tlnp 2>/dev/null | grep -q ":${port} "
+            else
+                (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null
+            fi
+        }
+
         find_available_port() {
             local port=$1
-            while ss -tlnp | grep -q ":${port} "; do
+            while port_in_use "$port"; do
                 port=$((port + 1))
             done
             echo "$port"
@@ -110,9 +121,20 @@ go-dev-webview:
         set -e
         trap 'kill $VITE_PID $GO_PID 2>/dev/null; exit 0' INT TERM
 
+        # 端口占用探测：Linux 用 ss；msys2 没有 iproute2（无 ss），退回 bash
+        # 内建的 /dev/tcp。两条路径都不需要额外工具，Windows 与 Linux 同形。
+        port_in_use() {
+            local port=$1
+            if command -v ss >/dev/null 2>&1; then
+                ss -tlnp 2>/dev/null | grep -q ":${port} "
+            else
+                (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null
+            fi
+        }
+
         find_available_port() {
             local port=$1
-            while ss -tlnp | grep -q ":${port} "; do
+            while port_in_use "$port"; do
                 port=$((port + 1))
             done
             echo "$port"

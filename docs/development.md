@@ -80,6 +80,9 @@
 
 ## Windows 开发机运行指引
 
+- **在 Windows 上从源码开发**：见 [docs/windows-msys2-dev.md](windows-msys2-dev.md) ——
+  msys2 下的工具链、cgo 环境变量、HTTP-only 与原生 WebView 两种形态的跑法，以及
+  webview 窗口「只在交互式桌面会话可见」这条硬限制。
 - Windows 凭据后端为 DPAPI（`CryptProtectData`）：**无需任何额外服务或守护进程，登录即用**；
   主密钥由操作系统随用户档案托管，凭据 blob 绑定当前登录账户（跨账户/跨机不可解，属特性）。
 - Windows 侧测试由 CI 的 `test-windows` job 执行（`go test -tags windows ./internal/keystore/`
@@ -90,6 +93,12 @@
 cd neo-src
 CGO_ENABLED=0 GOOS=windows go build ./... && CGO_ENABLED=0 GOOS=windows go vet ./...
 ```
+
+- 上面那道交叉门禁**不开 cgo、也不带 `webview` tag**，所以它证明不了「Windows 上能否
+  从源码构建出带窗口的二进制」。那件事由 CI 的 `windows-msys2` job 负责：它在真实的
+  msys2 + mingw-w64 环境里编译 HTTP-only 与 WebView 两个目标，且**不依赖 Windows SDK**
+  （`EventToken.h` 兼容头由 `neo-src/third_party/webview_go/libs/mswebview2/include/`
+  提供）。没有那个 job，「Windows 能不能开发」在 CI 里就永远是空白。
 
 ## Keystore 集成测试（Linux）
 

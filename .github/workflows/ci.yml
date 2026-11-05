@@ -226,6 +226,43 @@ jobs:
         working-directory: neo-src
         run: go test -v -tags "windows integration_dpapi" ./internal/keystore/
 
+  # Windows/msys2 源码构建门禁：在真实的 msys2 + mingw-w64 环境里编译 webview
+  # 目标。缺了它，「Windows 上能否从源码构建」在 CI 里永远是空白：
+  #   - backend job 的 Windows 交叉门禁是 CGO_ENABLED=0（不开 cgo、也不带
+  #     webview tag），连 WebView2.h 都不会被读到；
+  #   - release 的 windows-installer job 能编过，是因为 GitHub runner 上预装了
+  #     Windows SDK（MSVC 的 INCLUDE 恰好暴露了 EventToken.h）—— 普通开发机，
+  #     尤其 msys2 / zig 环境，并没有那个头。
+  # 本 job 只用 msys2 自带的 mingw-w64，不依赖任何 Windows SDK，因此能守住
+  # third_party 里 vendor 的 EventToken.h 兼容头不被误删。
+  windows-msys2:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults: { run: { shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          # inherit：msys2 shell 继承 Windows PATH，setup-go 装的 go 才可见
+          path-type: inherit
+          install: mingw-w64-ucrt-x86_64-gcc
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+          cache-dependency-path: neo-src/go.sum
+      - name: Build both server targets in msys2 (cgo + mingw-w64)
+        shell: msys2 {0}
+        run: |
+          set -eux
+          gcc --version
+          cd "$GITHUB_WORKSPACE/neo-src"
+          # HTTP-only 形态（go-sqlite3 也要 cgo）
+          CGO_ENABLED=1 go build -o bin/server.exe ./cmd/server
+          # WebView 形态（读 WebView2.h —— 需要 vendor 的 EventToken.h）
+          CGO_ENABLED=1 go build -tags webview -o bin/server-webview.exe ./cmd/server
+          ./bin/server-webview.exe version
+
   vrt:
     runs-on: ubuntu-latest
     timeout-minutes: 30

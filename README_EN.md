@@ -93,24 +93,24 @@ pnpm run lint
 
 ## Scripted Build & Packaging
 
-Build the Go backend on Linux / macOS:
+Build the Go backend (go-sqlite3 is cgo-only and needs a C compiler; the `justfile`
+auto-detects gcc / clang / `zig cc`):
 
 ```bash
-./scripts/build.sh --go --release
-./scripts/build.sh --go --debug
+just go-build        # → neo-src/bin/server
+just go-dev          # frontend dev server + Go backend, together
 ```
 
-The Windows PowerShell script still targets the older desktop build flow. Build the Go backend directly instead:
+**Developing on Windows**: see [docs/windows-msys2-dev.md](docs/windows-msys2-dev.md) —
+toolchain, cgo environment variables, and both run modes (HTTP-only and native WebView)
+under msys2.
 
-```powershell
-cd neo-src
-go build -o bin/server ./cmd/server/
-```
-
-Package the Go backend on Linux:
+Packaging:
 
 ```bash
-just package 1.0.0
+just package 1.0.0        # tar.gz (embed_ui, no webview dependency)
+just package-linux 1.0.0  # rpm + deb
+bash scripts/package-windows.sh 1.0.0   # Windows: NSIS installer + portable zip (needs NSIS)
 ```
 
 ## Configuration

@@ -133,7 +133,7 @@ export class UnsupportedOnPlatformError extends Error {
    * @param feature 用户可读的功能名，例如 "AIGTD"。
    */
   constructor(feature: string) {
-    super(`${feature} 在当前平台不可用`);
+    super(`${feature}在当前平台不可用`);
     this.name = "UnsupportedOnPlatformError";
   }
 }

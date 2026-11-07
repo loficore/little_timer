@@ -12,9 +12,22 @@ import { getFrontendLogLevel, isPerfDebugEnabled, isWebViewRuntime, logError, lo
 import { useAppSettings, logWallpaperDebug } from "./hooks/useAppSettings";
 import { resolveWallpaperUrl, WALLPAPER_FALLBACK_GRADIENT } from "./utils/constants";
 import { t } from "./utils/i18n";
+import { capabilities, type PlatformCapabilities } from "./utils/platformApi";
 import { TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, SparklesIconComponent, CalendarIcon } from "./utils/icons";
 
 type Page = "timer" | "habits" | "aigtd" | "plan" | "stats" | "settings";
+
+/**
+ * 页面 → 能力字段。当前页能力被收回时回退 timer，避免渲染不可用的页面。
+ */
+const PAGE_CAPABILITY: Record<Page, keyof PlatformCapabilities> = {
+  timer: "timer",
+  habits: "habits",
+  aigtd: "tasks",
+  plan: "schedule",
+  stats: "habits",
+  settings: "settings",
+};
 
 const formatUnknownError = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -37,7 +50,9 @@ const formatUnknownError = (value: unknown): string => {
 const probeCache = new Map<string, boolean>();
 
 export const App = () => {
-  const [page, setPage] = useState<Page>("timer");
+  const [rawPage, setPage] = useState<Page>("timer");
+  // 当前页能力被收回时回退到计时页：不在受限平台上渲染不可用的页面。
+  const page: Page = capabilities[PAGE_CAPABILITY[rawPage]] ? rawPage : "timer";
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { settings, normalizeWallpaper, updateSettings } = useAppSettings();
   const previousErrorToastRef = useRef<string | null>(null);
@@ -288,26 +303,30 @@ export const App = () => {
           <HabitsIconComponent className="h-5 w-5" />
           <span className="btm-nav-label">{t("nav.habits")}</span>
         </button>
-        <button
-          type="button"
-          data-testid="nav-aigtd"
-          aria-current={page === "aigtd" ? "page" : undefined}
-          className={`my-bottom-nav-item ${page === "aigtd" ? "active" : ""}`}
-          onClick={() => navigateTo("aigtd")}
-        >
-          <SparklesIconComponent className="h-5 w-5" />
-          <span className="btm-nav-label">{t("aigtd.nav_label_short")}</span>
-        </button>
-        <button
-          type="button"
-          data-testid="nav-plan"
-          aria-current={page === "plan" ? "page" : undefined}
-          className={`my-bottom-nav-item ${page === "plan" ? "active" : ""}`}
-          onClick={() => navigateTo("plan")}
-        >
-          <CalendarIcon className="h-5 w-5" />
-          <span className="btm-nav-label">{t("plan.nav_label_short")}</span>
-        </button>
+        {capabilities.tasks && (
+          <button
+            type="button"
+            data-testid="nav-aigtd"
+            aria-current={page === "aigtd" ? "page" : undefined}
+            className={`my-bottom-nav-item ${page === "aigtd" ? "active" : ""}`}
+            onClick={() => navigateTo("aigtd")}
+          >
+            <SparklesIconComponent className="h-5 w-5" />
+            <span className="btm-nav-label">{t("aigtd.nav_label_short")}</span>
+          </button>
+        )}
+        {capabilities.schedule && (
+          <button
+            type="button"
+            data-testid="nav-plan"
+            aria-current={page === "plan" ? "page" : undefined}
+            className={`my-bottom-nav-item ${page === "plan" ? "active" : ""}`}
+            onClick={() => navigateTo("plan")}
+          >
+            <CalendarIcon className="h-5 w-5" />
+            <span className="btm-nav-label">{t("plan.nav_label_short")}</span>
+          </button>
+        )}
       </nav>
     </>
   );

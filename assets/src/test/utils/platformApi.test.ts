@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { capabilities, UnsupportedOnPlatformError } from "../../utils/platformApi";
+import { APIClient } from "../../utils/apiClient";
+import type { PlatformApi } from "../../utils/platformApi";
 
 describe("platformApi", () => {
   it("桌面环境启用全部能力", () => {
@@ -13,5 +15,10 @@ describe("platformApi", () => {
     const err = new UnsupportedOnPlatformError("AIGTD");
     expect(err.name).toBe("UnsupportedOnPlatformError");
     expect(err.message).toContain("AIGTD");
+  });
+
+  it("APIClient 满足 PlatformApi", () => {
+    const client: PlatformApi = new APIClient("http://localhost");
+    expect(client).toBeInstanceOf(APIClient);
   });
 });

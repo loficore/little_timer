@@ -34,6 +34,7 @@ import type {
     ReviewProposal,
     TestConnectionResult,
 } from "../types/aigtd";
+import type { PlatformApi, TaskScoresPatch } from "./platformApi";
 
 /**
  * API 客户端，用于与后端 API 进行交互
@@ -57,20 +58,12 @@ export class VersionConflictError extends Error {
 }
 
 /**
- * TaskScoresPatch —— PATCH /api/tasks/:id/scores 的请求体形状。
- *
- * 指针语义:除 version 外所有字段可选;后端 omitempty,缺 = "不动"。
- * version 必须带,后端 ConflictGuard 缺则 400。
+ * TaskScoresPatch —— PATCH /api/tasks/:id/scores 的请求体形状（见
+ * `platformApi.ts`，与 transport 契约同源，此处仅转出以保持既有导入路径）。
  */
-export interface TaskScoresPatch {
-    version: number;
-    priority_score?: number;
-    urgency_score?: number;
-    energy_required?: number;
-    context_tag?: string;
-}
+export type { TaskScoresPatch };
 
-export class APIClient {
+export class APIClient implements PlatformApi {
     public baseUrl: string;
     private authToken: string | null = null;
 

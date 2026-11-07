@@ -24,6 +24,7 @@ import (
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
 	"little-timer/internal/storage/backup"
+	"little-timer/internal/timer"
 	"little-timer/internal/vault"
 )
 
@@ -72,6 +73,10 @@ type App struct {
 	// 可以省略它。每个 App 持有自己的 Once：新建 App 会重新解析 keystore。
 	secretsOnce sync.Once
 	secrets     *crypto.SecretStorage
+
+	// Timer 持有计时用例规则；App 只提供 Runtime（时钟、存储、时区与
+	// session/habit 指针），不再承载计时分支。
+	Timer *timer.Operations
 }
 
 // NewApp 使用给定的依赖与默认内存状态构造一个 App。
@@ -100,6 +105,7 @@ func NewApp(
 	if sm != nil {
 		a.Vault = vault.New(sm, a)
 	}
+	a.Timer = timer.New(a)
 	return a
 }
 
@@ -117,6 +123,30 @@ func (a *App) RLock() { a.mu.RLock() }
 
 // RUnlock 释放 App 的读锁。
 func (a *App) RUnlock() { a.mu.RUnlock() }
+
+// 计时运行时访问器——满足 timer.Runtime。这些方法只读写内存字段/现有
+// 依赖，不加锁；timer.Operations 的调用方已经持有 App 锁。
+
+// ClockManager 返回时钟管理器。
+func (a *App) ClockManager() *domain.ClockManager { return a.Clock }
+
+// TimerStore 返回 timer_sessions / sessions 的存储实现。
+func (a *App) TimerStore() timer.Store { return a.SQLite.Timers() }
+
+// TimezoneOffset 返回用户相对 UTC 的时区偏移（小时）。
+func (a *App) TimezoneOffset() int8 { return a.Settings.Config().Basic.Timezone }
+
+// SessionID 返回当前计时 session 指针（可能为 nil）。
+func (a *App) SessionID() *int64 { return a.CurrentTimerSessionID }
+
+// SetSessionID 替换当前计时 session 指针。
+func (a *App) SetSessionID(id *int64) { a.CurrentTimerSessionID = id }
+
+// HabitID 返回当前计时关联的 habit 指针（可能为 nil）。
+func (a *App) HabitID() *int64 { return a.CurrentHabitID }
+
+// SetHabitID 替换当前计时关联的 habit 指针。
+func (a *App) SetHabitID(id *int64) { a.CurrentHabitID = id }
 
 // Backup 管理器访问器。持久化的 BackupConfig 一变（切换 target、轮换
 // 凭据）就重建管理器——BackupManager 上没有 SetTarget 可变方法。

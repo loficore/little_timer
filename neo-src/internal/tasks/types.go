@@ -103,3 +103,28 @@ type TaskWithSubtasks struct {
 	Task     domain.TaskRow
 	Subtasks []domain.SubtaskRow
 }
+
+// ScoresPatch 是 PATCH /api/tasks/:id/scores 的用例级入参。
+//
+// 全部 *T,nil 表示"不动"。context_tag 非枚举值由 operation 兜底为
+// general 并返回 warning,由 adapter 转成 X-LLM-Warning 响应头。
+type ScoresPatch struct {
+	PriorityScore  *int
+	UrgencyScore   *int
+	EnergyRequired *int
+	ContextTag     *string
+}
+
+// ScoreRangeError 表示某个评分字段越界。adapter 据此返回 400,并把
+// Field / Value / Min / Max 原样回给客户端(前端可依赖的稳定 payload)。
+type ScoreRangeError struct {
+	Field string
+	Value int
+	Min   int
+	Max   int
+}
+
+func (e *ScoreRangeError) Error() string { return "score out of range" }
+
+// Code 返回稳定的错误码,与历史 HTTP 契约一致。
+func (e *ScoreRangeError) Code() string { return "scores_out_of_range" }

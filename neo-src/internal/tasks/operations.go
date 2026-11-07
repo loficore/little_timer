@@ -198,3 +198,83 @@ func mapStoreError(err error) error {
 	}
 	return err
 }
+
+// 评分字段的合法闭区间,与 tasks 表 CHECK 约束(migration v11)保持一致:
+// operation 先校验,避免越界值触发 SQLite constraint → 500。
+var (
+	priorityScoreRange  = scoreRange{"priority_score", 1, 5}
+	urgencyScoreRange   = scoreRange{"urgency_score", 1, 10}
+	energyRequiredRange = scoreRange{"energy_required", 1, 3}
+)
+
+// scoreRange 描述一个整数评分的合法闭区间 [min,max]。
+type scoreRange struct {
+	field string
+	min   int
+	max   int
+}
+
+// validContextTags 是 5 维调度评分 context_tag 的白名单;其他值视为
+// LLM 自由发挥的字符串,落到 general 以保证后续规则引擎判定可预测。
+var validContextTags = map[string]bool{
+	"写作": true, "编码": true, "沟通": true, "学习": true, "杂事": true, "general": true,
+}
+
+// checkScoreRange 校验非 nil 的指针值是否落在 [min,max]。
+func checkScoreRange(r scoreRange, v *int) error {
+	if v == nil {
+		return nil
+	}
+	if *v < r.min || *v > r.max {
+		return &ScoreRangeError{Field: r.field, Value: *v, Min: r.min, Max: r.max}
+	}
+	return nil
+}
+
+// PatchScores 部分更新 5 维评分,带乐观锁。
+//
+// 返回值:更新后的 task 行、X-LLM-Warning 用的 warning 文本(空表示无)。
+// 越界 → *ScoreRangeError;版本不符 → ErrVersionConflict。
+func (o *Operations) PatchScores(id int64, patch ScoresPatch, version int64) (domain.TaskRow, string, error) {
+	for _, r := range []scoreRange{priorityScoreRange, urgencyScoreRange, energyRequiredRange} {
+		var v *int
+		switch r.field {
+		case "priority_score":
+			v = patch.PriorityScore
+		case "urgency_score":
+			v = patch.UrgencyScore
+		case "energy_required":
+			v = patch.EnergyRequired
+		}
+		if err := checkScoreRange(r, v); err != nil {
+			return domain.TaskRow{}, "", err
+		}
+	}
+	fields := storage.TaskUpdateFields{
+		PriorityScore:  patch.PriorityScore,
+		UrgencyScore:   patch.UrgencyScore,
+		EnergyRequired: patch.EnergyRequired,
+	}
+	warning := ""
+	if patch.ContextTag != nil {
+		if !validContextTags[*patch.ContextTag] {
+			// LLM 输出非枚举值 → 兜底 general,同时通过响应头提示。
+			general := "general"
+			fields.ContextTag = &general
+			warning = "context_tag fallback to general"
+		} else {
+			fields.ContextTag = patch.ContextTag
+		}
+	}
+	if err := o.store.UpdateTask(id, fields, version); err != nil {
+		return domain.TaskRow{}, "", mapStoreError(err)
+	}
+	task, _, err := o.store.GetTask(id)
+	if err != nil {
+		return domain.TaskRow{}, "", err
+	}
+	if task == nil {
+		return domain.TaskRow{}, "", ErrNotFound
+	}
+	return *task, warning, nil
+}

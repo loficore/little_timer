@@ -1,6 +1,8 @@
 // Package handlers —— /api/tasks/* 与 /api/tasks/:id/subtasks/* 端点。
 //
-// DTO 转换与领域类型分离;handler 只关心指针语义的更新与 status 流转。
+// 本文件只做 transport 绑定:JSON 三态探测、URL 参数解析、tasks.Error →
+// HTTP 状态码映射。乐观锁、user_edited_title 规则、字段语义全在
+// internal/tasks(issue #66)。
 package handlers
 
 import (
@@ -13,8 +15,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"little-timer/internal/domain"
+	"little-timer/internal/http/app"
 	"little-timer/internal/http/middleware"
-	"little-timer/internal/storage"
+	"little-timer/internal/tasks"
 )
 
 // TaskDTO 是出参形状,与前端 bindings 对齐。
@@ -106,6 +109,35 @@ func taskDTOFromRow(t *domain.TaskRow) TaskDTO {
 	return toTaskDTO(t, nil)
 }
 
+// taskOps 返回任务用例层。Store 由 storage.AITasksCrud 直接满足,构造
+// 成本只有一个 struct,无需在 App 上缓存(也不让 handler import storage)。
+func taskOps(a *app.App) *tasks.Operations {
+	return tasks.New(a.SQLite.AITasks())
+}
+
+// respondTaskError 是 tasks.Error → HTTP 状态码的唯一映射点
+// (issue #66:「409 只在一处映射」)。
+func respondTaskError(c *gin.Context, err error) {
+	var de *tasks.Error
+	if errors.As(err, &de) {
+		switch de.Code {
+		case tasks.ErrVersionConflict.Code:
+			c.JSON(http.StatusConflict, gin.H{"error": "version conflict", "code": "version_conflict"})
+			return
+		case tasks.ErrNotFound.Code:
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "task not found"})
+			return
+		case tasks.ErrInvalidSubtaskStatus.Code:
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": de.Message})
+			return
+		case tasks.ErrTitleRequired.Code:
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": de.Message})
+			return
+		}
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "internal error"})
+}
+
 // TaskList GET /api/tasks?status=&parent_id=
 func TaskList(c *gin.Context) {
 	a := appFromCtx(c)
@@ -124,22 +156,15 @@ func TaskList(c *gin.Context) {
 		}
 		parentID = &pid
 	}
-	rows, err := a.SQLite.AITasks().ListTasks(status, parentID, limit, offset)
+	rows, err := taskOps(a).List(status, parentID, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "list failed"})
 		return
 	}
 	out := make([]TaskDTO, 0, len(rows))
 	for i := range rows {
-		t := rows[i]
-		// 列表也带拆解步骤：AI 拆好的步骤要能在卡片上看到、进编辑弹窗修改，
-		// 刷新页面后不能凭空消失。（任务量是本地单用户量级，逐条查询可接受。）
-		subs, serr := a.SQLite.AITasks().ListSubtasks(t.ID)
-		if serr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "list subtasks failed"})
-			return
-		}
-		out = append(out, toTaskDTO(&t, subs))
+		row := rows[i].Task
+		out = append(out, toTaskDTO(&row, rows[i].Subtasks))
 	}
 	c.JSON(http.StatusOK, out)
 }
@@ -152,9 +177,9 @@ func TaskGet(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid id"})
 		return
 	}
-	task, subs, err := a.SQLite.AITasks().GetTask(id)
-	if err != nil || task == nil {
-		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "task not found"})
+	task, subs, err := taskOps(a).Get(id)
+	if err != nil {
+		respondTaskError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, toTaskDTO(task, subs))
@@ -175,38 +200,20 @@ func TaskCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "title required"})
 		return
 	}
-	taskID, err := a.SQLite.AITasks().CreateTask(req.Title, "manual")
+	taskID, err := taskOps(a).Create(tasks.CreateInput{
+		Title:  req.Title,
+		Notes:  req.Notes,
+		Source: "manual",
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "create failed"})
 		return
 	}
-	// I7 fix:创建是刚 CreateTask 的 version=0 行,title / notes / status
-	// 在**单次** UpdateTask 里一并写入,替代原先的
-	// title→(可选)notes→SetTaskStatus 三次顺序写(其中 notes 写还吞了错误)。
-	// notes 为空时写空串(列 DEFAULT '' 语义等价);status 直接置 active
-	// (手动创建无需 AI 处理)。所有错误都不再吞,失败即 500。
-	title := req.Title
-	notes := req.Notes
-	active := domain.TaskStatusActive
-	// issue #10:手动创建时用户自带 title,视为"用户编辑过" → 翻
-	// user_edited_title=true,后续 append reparse 不覆盖用户起的标题
-	// (与 PATCH title 路径 spec §3.5 的保护语义一致)。
-	userEdited := true
-	if err := a.SQLite.AITasks().UpdateTask(taskID, storage.TaskUpdateFields{
-		Title:           &title,
-		Notes:           &notes,
-		Status:          &active,
-		UserEditedTitle: &userEdited,
-	}, 0); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "initialize task failed"})
+	task, subs, err := taskOps(a).Get(taskID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "create failed"})
 		return
 	}
-	// ai_status 不在 TaskUpdateFields 里,单独写(错误同样不吞)。
-	if err := a.SQLite.AITasks().SetAIStatus(taskID, domain.AIStatusDone, ""); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "set ai_status failed"})
-		return
-	}
-	task, subs, _ := a.SQLite.AITasks().GetTask(taskID)
 	c.JSON(http.StatusOK, toTaskDTO(task, subs))
 }
 
@@ -234,87 +241,72 @@ func TaskUpdate(c *gin.Context) {
 	var body map[string]any
 	_ = json.Unmarshal(rawBody, &body)
 
-	fields := storage.TaskUpdateFields{}
+	var patch tasks.UpdatePatch
 	if v, ok := body["title"].(string); ok {
-		if strings.TrimSpace(v) != "" {
-			fields.Title = &v
-			// 仅当新值与旧值不同时才标记 user_edited_title(避免客户端
-			// round-trip / autosave 同值 PATCH 粘死 flag)。读旧值失败时保守
-			// 不翻(下次真正改名的 PATCH 仍会翻)。
-			if cur, _, gerr := a.SQLite.AITasks().GetTask(id); gerr == nil && cur != nil {
-				if strings.TrimSpace(v) != strings.TrimSpace(cur.Title) {
-					edited := true
-					fields.UserEditedTitle = &edited
-				}
-			}
-		}
+		patch.Title = &v
 	}
 	if v, ok := body["notes"].(string); ok {
-		fields.Notes = &v
+		patch.Notes = &v
 	}
 	// due_date: 三态(缺/显式 null/值)
 	if rm, ok := probe["due_date"]; ok {
 		if isJSONNull(rm) {
-			fields.ClearDueDate = true
+			patch.ClearDueDate = true
 		} else if v, ok := body["due_date"].(string); ok {
-			fields.DueDate = &v
+			patch.DueDate = &v
 		}
 	}
 	if v, ok := body["status"].(string); ok && domain.IsValidTaskStatus(v) {
 		s := domain.TaskStatus(v)
-		fields.Status = &s
+		patch.Status = &s
 	}
 	if rm, ok := probe["parent_id"]; ok {
 		if isJSONNull(rm) {
-			fields.ClearParentID = true
+			patch.ClearParentID = true
 		} else if v, ok := body["parent_id"].(float64); ok {
 			pid := int64(v)
-			fields.ParentID = &pid
+			patch.ParentID = &pid
 		}
 	}
 	if rm, ok := probe["scheduled_start"]; ok {
 		if isJSONNull(rm) {
-			fields.ClearScheduledStart = true
+			patch.ClearScheduledStart = true
 		} else if v, ok := body["scheduled_start"].(float64); ok {
 			s := int64(v)
-			fields.ScheduledStart = &s
+			patch.ScheduledStart = &s
 		}
 	}
 	if rm, ok := probe["scheduled_end"]; ok {
 		if isJSONNull(rm) {
-			fields.ClearScheduledEnd = true
+			patch.ClearScheduledEnd = true
 		} else if v, ok := body["scheduled_end"].(float64); ok {
 			s := int64(v)
-			fields.ScheduledEnd = &s
+			patch.ScheduledEnd = &s
 		}
 	}
 	if v, ok := body["pinned"].(bool); ok {
-		fields.Pinned = &v
+		patch.Pinned = &v
 	}
 	if v, ok := body["order_index"].(float64); ok {
 		o := int64(v)
-		fields.OrderIndex = &o
+		patch.OrderIndex = &o
 	}
 	if v, ok := body["estimated_minutes"].(float64); ok {
 		e := int64(v)
-		fields.EstimatedMinutes = &e
+		patch.EstimatedMinutes = &e
 	}
 
-	if err := a.SQLite.AITasks().UpdateTask(id, fields, middleware.GetVersion(c)); err != nil {
-		// C3 fix:乐观锁冲突 → 409(与 TaskScoresUpdate / ScheduleApply 一致),
-		// 其它错误才是 500。
-		if errors.Is(err, storage.ErrVersionConflict) {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "version conflict",
-				"code":  "version_conflict",
-			})
-			return
-		}
+	task, err := taskOps(a).Update(id, patch, middleware.GetVersion(c))
+	if err != nil {
+		respondTaskError(c, err)
+		return
+	}
+	_, subs, err := taskOps(a).Get(id)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
 		return
 	}
-	task, subs, _ := a.SQLite.AITasks().GetTask(id)
-	c.JSON(http.StatusOK, toTaskDTO(task, subs))
+	c.JSON(http.StatusOK, toTaskDTO(&task, subs))
 }
 
 // TaskDelete DELETE /api/tasks/:id
@@ -327,15 +319,8 @@ func TaskDelete(c *gin.Context) {
 	}
 	// C1 fix:删除也走乐观锁 —— 用 ConflictGuard 解析出的期望版本,
 	// 0 行受影响(版本不符/task 不存在)→ 409。
-	if err := a.SQLite.AITasks().DeleteTask(id, middleware.GetVersion(c)); err != nil {
-		if errors.Is(err, storage.ErrVersionConflict) {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "version conflict",
-				"code":  "version_conflict",
-			})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "delete failed"})
+	if err := taskOps(a).Delete(id, middleware.GetVersion(c)); err != nil {
+		respondTaskError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -363,19 +348,17 @@ func SubtaskCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "title required"})
 		return
 	}
-	subID, err := a.SQLite.AITasks().CreateSubtask(id, body.Title, body.EstimatedMinutes, body.DueDate, body.OrderIndex)
+	sub, err := taskOps(a).CreateSubtask(id, tasks.SubtaskInput{
+		Title:            body.Title,
+		EstimatedMinutes: body.EstimatedMinutes,
+		DueDate:          body.DueDate,
+		OrderIndex:       body.OrderIndex,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "create failed"})
 		return
 	}
-	_, subs, _ := a.SQLite.AITasks().GetTask(id)
-	for _, s := range subs {
-		if s.ID == subID {
-			c.JSON(http.StatusOK, toSubtaskDTO(s))
-			return
-		}
-	}
-	c.JSON(http.StatusOK, gin.H{"id": subID})
+	c.JSON(http.StatusOK, toSubtaskDTO(sub))
 }
 
 // SubtaskUpdate PATCH /api/tasks/:id/subtasks/:sub_id
@@ -391,39 +374,26 @@ func SubtaskUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid json"})
 		return
 	}
-	fields := storage.SubtaskUpdateFields{}
+	var patch tasks.SubtaskPatch
 	if v, ok := body["title"].(string); ok {
-		fields.Title = &v
+		patch.Title = &v
 	}
 	if v, ok := body["status"].(string); ok {
 		s := domain.SubtaskStatus(v)
-		if !domain.IsValidSubtaskStatus(s) {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false, "error": "invalid status (allowed: active|done|archived)",
-			})
-			return
-		}
-		fields.Status = &s
+		patch.Status = &s
 	}
 	if v, ok := body["estimated_minutes"].(float64); ok {
 		e := int64(v)
-		fields.EstimatedMinutes = &e
+		patch.EstimatedMinutes = &e
 	}
 	if v, ok := body["order_index"].(float64); ok {
 		o := int64(v)
-		fields.OrderIndex = &o
+		patch.OrderIndex = &o
 	}
 	// C2 fix:子任务也走乐观锁。子任务本身是 tasks 行(带 parent_id 与
 	// version),与 UpdateTask 同源同语义。
-	if err := a.SQLite.AITasks().UpdateSubtask(subID, fields, middleware.GetVersion(c)); err != nil {
-		if errors.Is(err, storage.ErrVersionConflict) {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "version conflict",
-				"code":  "version_conflict",
-			})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "update failed"})
+	if err := taskOps(a).UpdateSubtask(subID, patch, middleware.GetVersion(c)); err != nil {
+		respondTaskError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -437,7 +407,7 @@ func SubtaskDelete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid sub_id"})
 		return
 	}
-	if err := a.SQLite.AITasks().DeleteSubtask(subID); err != nil {
+	if err := taskOps(a).DeleteSubtask(subID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "delete failed"})
 		return
 	}

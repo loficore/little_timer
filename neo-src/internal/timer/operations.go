@@ -232,6 +232,49 @@ func (o *Operations) writeDailySession(habitID *int64, elapsed int64) {
 	}
 }
 
+// Progress 返回实时进度；内存中没有 session 指针时先惰性读取持久化的
+// 活动 session。调用方必须持有 App 锁（写锁或读锁）。
+func (o *Operations) Progress() ProgressResult {
+	if o.rt.SessionID() == nil {
+		o.LoadProgress()
+	}
+	state := o.rt.ClockManager().Update()
+	return ProgressResult{
+		SessionID:        o.rt.SessionID(),
+		HabitID:          o.rt.HabitID(),
+		Mode:             state.GetMode(),
+		IsRunning:        !state.IsPaused(),
+		IsPaused:         state.IsPaused(),
+		IsFinished:       state.IsFinished(),
+		InRest:           state.InRest(),
+		ElapsedSeconds:   state.GetElapsedSeconds(),
+		RemainingSeconds: state.GetRemainingSeconds(),
+	}
+}
+
+// LoadProgress 重新读取最近未结束的 timer_session 到内存指针。
+// 调用方必须持有 App 写锁。
+func (o *Operations) LoadProgress() {
+	row, err := o.rt.TimerStore().GetActiveTimerSession()
+	if err != nil {
+		log.Error("timer.session.load_progress failed", "error", err.Error())
+		return
+	}
+	id := row.ID
+	o.rt.SetSessionID(&id)
+	if row.HabitID != nil {
+		hid := *row.HabitID
+		o.rt.SetHabitID(&hid)
+	}
+	log.Info("timer.session.load_progress", "session_id", row.ID, "habit_id", row.HabitID, "elapsed", row.ElapsedSeconds)
+}
+
+// SaveProgress 把当前时钟状态持久化到活动的 timer_session 行。
+// 调用方必须持有 App 写锁。
+func (o *Operations) SaveProgress() {
+	o.saveProgress()
+}
+
 // convergeStale 收敛内存中残留的 timer_session（spec §6 H1 跨项目泄漏）。//
 //   - 无残留指针时只清 habit 指针。
 //   - 行取不到（可能已被删除）时只清指针，不做 DB 操作。

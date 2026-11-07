@@ -123,8 +123,70 @@ func (o *Operations) Start(in StartInput) (StartResult, error) {
 	return StartResult{Status: "started", HabitID: in.HabitID, SessionID: id}, nil
 }
 
-// convergeStale 收敛内存中残留的 timer_session（spec §6 H1 跨项目泄漏）。
-//
+// Pause 暂停时钟并把当前进度持久化到活动的 timer_session。调用方必须
+// 持有 App 写锁。
+func (o *Operations) Pause() {
+	o.rt.ClockManager().HandleEvent(domain.UserPauseTimerEvent{})
+	o.saveProgress()
+}
+
+// Reset 清除当前 session/habit 指针、删除 timer_session 行，并把时钟复位。
+// 调用方必须持有 App 写锁。
+func (o *Operations) Reset() {
+	o.resetSession()
+	o.rt.ClockManager().HandleEvent(domain.UserResetTimerEvent{})
+}
+
+// resetSession 清指针并删除当前 timer_session 行。调用方必须持有 App 写锁。
+func (o *Operations) resetSession() {
+	sessionID := o.rt.SessionID()
+	o.rt.SetSessionID(nil)
+	habitID := o.rt.HabitID()
+	o.rt.SetHabitID(nil)
+	if sessionID != nil {
+		_ = o.rt.TimerStore().DeleteTimerSession(*sessionID)
+	}
+	log.Info("timer.session.reset", "session_id", sessionID, "habit_id", habitID)
+}
+
+// saveProgress 把当前时钟状态写回活动的 timer_session 行。调用方必须持有
+// App 写锁。
+func (o *Operations) saveProgress() {
+	sessionID := o.rt.SessionID()
+	if sessionID == nil {
+		return
+	}
+	store := o.rt.TimerStore()
+	state := o.rt.ClockManager().Update()
+	now := time.Now().Unix()
+	row, err := store.GetTimerSessionByID(*sessionID)
+	if err != nil {
+		log.Error("timer.session.save_progress failed", "session_id", *sessionID, "error", err.Error())
+		return
+	}
+	pausedTotal := row.PausedTotalSeconds
+	pauseStarted := row.PauseStartedAt
+	isPaused := state.IsPaused()
+	isRunning := !isPaused
+	if isPaused && pauseStarted == nil {
+		pauseStarted = &now
+	} else if !isPaused && pauseStarted != nil {
+		if now > *pauseStarted {
+			pausedTotal += now - *pauseStarted
+		}
+		pauseStarted = nil
+	}
+	remaining := state.GetRemainingSeconds()
+	_ = store.UpdateTimerSession(
+		row.ID, state.GetElapsedSeconds(), &remaining,
+		pausedTotal, pauseStarted, &now,
+		isRunning, isPaused, state.IsFinished(),
+		row.CurrentRound, state.InRest(),
+	)
+	log.Info("timer.session.save_progress", "session_id", row.ID, "elapsed", state.GetElapsedSeconds())
+}
+
+// convergeStale 收敛内存中残留的 timer_session（spec §6 H1 跨项目泄漏）。//
 //   - 无残留指针时只清 habit 指针。
 //   - 行取不到（可能已被删除）时只清指针，不做 DB 操作。
 //   - 能读到行则标记为已结束；elapsed == 0（从未真正使用）时直接删除，避免

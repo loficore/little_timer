@@ -112,6 +112,9 @@ func NewLocalAdapter(path string) *LocalAdapter {
 
 func (l *LocalAdapter) Target() BackupTarget { return TargetLocal }
 
+// Dir 返回本地备份目录（由调用方保证已归一化为绝对路径）。
+func (l *LocalAdapter) Dir() string { return l.path }
+
 func (l *LocalAdapter) TestConnection() error {
 	if err := os.MkdirAll(l.path, 0o700); err != nil {
 		return fmt.Errorf("%w: mkdir %s: %v", ErrConnectionFailed, l.path, err)

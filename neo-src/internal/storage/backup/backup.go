@@ -44,6 +44,12 @@ func NewLocal(sqliteMgr *storage.SqliteManager, dbPath, backupDir string) (*Back
 	if backupDir == "" {
 		return nil, errors.New("backup: backupDir is required for local target")
 	}
+	// 内部默认目录也归一化成绝对路径：Location() 要能如实告诉用户写到哪了。
+	abs, err := filepath.Abs(backupDir)
+	if err != nil {
+		return nil, fmt.Errorf("backup: resolve %s: %w", backupDir, err)
+	}
+	backupDir = abs
 	if err := os.MkdirAll(backupDir, 0o700); err != nil {
 		return nil, fmt.Errorf("backup: mkdir %s: %w", backupDir, err)
 	}
@@ -92,12 +98,26 @@ func buildAdapter(ctx context.Context, cfg domain.BackupConfig, backupDir string
 			PathPrefix: cfg.S3PathPrefix,
 		})
 	default:
-		path := cfg.LocalPath
-		if path == "" {
-			path = backupDir
+		if cfg.LocalPath == "" {
+			return NewLocalAdapter(backupDir), nil
 		}
-		return NewLocalAdapter(path), nil
+		// 用户填的目录先校验/归一化：相对路径与 Windows 上的 "/d/x" 都会被
+		// 系统按"当前盘"解释，落点不可预测（见 ResolveLocalDir）。
+		dir, err := ResolveLocalDir(cfg.LocalPath)
+		if err != nil {
+			return nil, err
+		}
+		return NewLocalAdapter(dir), nil
 	}
+}
+
+// Location 返回当前备份目标的实际位置。本地 target 是解析后的绝对目录；
+// 云端 target 返回 target 名字（真实位置由 URL / prefix 描述）。
+func (m *BackupManager) Location() string {
+	if l, ok := m.adapter.(*LocalAdapter); ok {
+		return l.Dir()
+	}
+	return string(m.adapter.Target())
 }
 
 // Adapter 返回底层 adapter（对测试方便）。

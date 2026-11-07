@@ -15,6 +15,7 @@ package app
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"time"
 
 	"little-timer/internal/domain"
@@ -591,7 +592,13 @@ func (s *BackupService) CreateBackup() (any, error) {
 		return nil, err
 	}
 	log.Info("backup.create ok", "method", "BackupService.CreateBackup", "backup_name", name)
-	return map[string]any{"success": true, "backup_path": name}, nil
+	resp := map[string]any{"success": true, "backup_path": name}
+	if a.Vault.GetBackupConfig().TargetType == domain.BackupTargetLocal {
+		dir := a.Vault.BackupLocation()
+		resp["backup_dir"] = dir
+		resp["backup_location"] = filepath.Join(dir, name)
+	}
+	return resp, nil
 }
 
 func (s *BackupService) RestoreBackup(name string) (any, error) {

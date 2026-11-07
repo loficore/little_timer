@@ -1,31 +1,47 @@
 // Package handlers —— /api/aigtd/* 端点:捕获、重新解析、job 状态查询。
 //
-// 捕获是异步的:handler 只负责建 task + 入队 ai_jobs,worker(在 cmd/server
-// 启动)负责实际调用 LLM。
+// 本文件只做 transport 绑定与 aigtd.Error → HTTP 状态码映射;原文校验、
+// 入队、失败回滚、processing 前置检查全在 internal/aigtd(issue #66)。
+//
+// 捕获是异步的:operation 只负责建 task + 入队 ai_jobs,worker(在
+// cmd/server 启动)负责实际调用 LLM。
 package handlers
 
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"little-timer/internal/aigtd"
 	"little-timer/internal/domain"
+	"little-timer/internal/http/app"
 	"little-timer/internal/http/middleware"
-	"little-timer/internal/storage"
 )
-
-const maxRawTextLen = 2000
 
 // hasInFlightJobFn / taskIsProcessingFn 是 reparse precheck 的可注入点。
 // 生产默认实现直连 storage;测试替换后可绕过 precheck,确定性触达 DB 层
 // 部分 UNIQUE 索引的 ErrJobInFlight→409 分支(reviewer M4)。
 var (
-	hasInFlightJobFn   = func(c *storage.AITasksCrud, taskID int64) (bool, error) { return c.HasInFlightJob(taskID) }
+	hasInFlightJobFn   = func(s aigtd.TaskStore, taskID int64) (bool, error) { return s.HasInFlightJob(taskID) }
 	taskIsProcessingFn = func(t *domain.TaskRow) bool { return t.AIStatus == domain.AIStatusProcessing }
 )
+
+// aigtdOpsFor 构造 capture / reparse 的用例层。
+//
+// precheck 的两个可注入点保留在包级(测试替换后这条路径必须生效,见
+// TestAIGtdReparse_DBUniqueFallback409):每次构造时把当前值焊进
+// aigtd.InFlightProbe / ProcessingProbe,NewOperations 再快照一次。
+func aigtdOpsFor(a *app.App) *aigtd.Operations {
+	aigtd.InFlightProbe = func(s aigtd.TaskStore, taskID int64) (bool, error) {
+		return hasInFlightJobFn(s, taskID)
+	}
+	aigtd.ProcessingProbe = func(t *domain.TaskRow) bool {
+		return taskIsProcessingFn(t)
+	}
+	cfg := aiConfigFromApp(a)
+	return aigtd.NewOperations(a.SQLite.AITasks(), func() aigtd.LLMConfig { return cfg })
+}
 
 // AIGtdCapture POST /api/aigtd/capture
 //
@@ -40,43 +56,17 @@ func AIGtdCapture(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "code": "aigtd.bad_request", "error": "invalid json"})
 		return
 	}
-	raw := strings.TrimSpace(req.RawText)
-	if raw == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "code": "aigtd.empty", "error": "raw_text is empty"})
-		return
-	}
-	if len([]rune(raw)) > maxRawTextLen {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "code": "aigtd.too_long", "error": "raw_text too long"})
-		return
-	}
-	source := req.Source
-	if source == "" {
-		source = "manual"
-	}
-
-	taskID, err := a.SQLite.AITasks().CreateTask(raw, source)
+	taskID, err := aigtdOpsFor(a).Capture(req.RawText, req.Source)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": "aigtd.create_failed", "error": "create failed"})
+		respondAIGtdError(c, err, "aigtd.create_failed")
 		return
 	}
-
-	// 立即入队(worker 在后台处理)。失败时回滚 CreateTask,避免出现
-	// "卡片永远停在 Parsing 状态"的孤儿记录。
-	cfg := aiConfigFromApp(a)
-	if _, err := a.SQLite.AITasks().EnqueueJob(taskID, cfg.Provider, cfg.Model, raw, domain.AIJobModeAppend); err != nil {
-		// 刚 CreateTask 的行 version=0,rollback 时显式带 0(内部调用不走
-		// ConflictGuard 的 context,这里必须自带版本)。
-		_ = a.SQLite.AITasks().DeleteTask(taskID, 0)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": "aigtd.enqueue_failed", "error": "enqueue failed"})
-		return
-	}
-
 	c.JSON(http.StatusAccepted, gin.H{"task_id": taskID})
 }
 
 // AIGtdReparse POST /api/aigtd/reparse/:task_id
 //
-// body { raw_text? } → 202 { job_id }
+// body { raw_text?, mode? } → 202 { job_id }
 // 若任务正在 processing → 409。
 func AIGtdReparse(c *gin.Context) {
 	a := appFromCtx(c)
@@ -85,64 +75,44 @@ func AIGtdReparse(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid task_id"})
 		return
 	}
-	task, _, err := a.SQLite.AITasks().GetTask(taskID)
-	if err != nil || task == nil {
-		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "task not found"})
-		return
-	}
-	// 已有 queued/running job 时拒绝重复入队(可能来自快速双击或重试风暴)。
-	// 走可注入的 precheckFn:生产等价于直接调 storage;测试可绕过以确定性地
-	// 触达 DB 层 idx_ai_jobs_in_flight 的 ErrJobInFlight→409 分支(reviewer M4)。
-	inFlight, err := hasInFlightJobFn(a.SQLite.AITasks(), taskID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "job lookup failed"})
-		return
-	}
-	if inFlight || taskIsProcessingFn(task) {
-		c.JSON(http.StatusConflict, gin.H{"success": false, "code": "aigtd.processing", "error": "task is being processed"})
-		return
-	}
-
-	// 可选改写原文 + 处理 mode。
 	var req struct {
 		RawText *string `json:"raw_text"`
 		Mode    string  `json:"mode"`
 	}
 	_ = c.ShouldBindJSON(&req)
-	mode := domain.AIJobMode(req.Mode)
-	if req.Mode == "" {
-		mode = domain.AIJobModeAppend
-	}
-	switch mode {
-	case domain.AIJobModeAppend, domain.AIJobModeReplace:
-		// ok
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid mode (allowed: append|replace)"})
-		return
-	}
-	var rawUpdate *storage.TaskUpdateFields
-	if req.RawText != nil {
-		raw := strings.TrimSpace(*req.RawText)
-		if raw == "" || len([]rune(raw)) > maxRawTextLen {
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid raw_text"})
-			return
-		}
-		fields := taskRawUpdate(raw)
-		rawUpdate = &fields
-	}
-	cfg := aiConfigFromApp(a)
-	jobID, err := a.SQLite.AITasks().EnqueueReparse(
-		taskID, rawUpdate, middleware.GetVersion(c), cfg.Provider, cfg.Model, mode,
-	)
+
+	jobID, err := aigtdOpsFor(a).Reparse(taskID, req.RawText, req.Mode, middleware.GetVersion(c))
 	if err != nil {
-		if errors.Is(err, storage.ErrJobInFlight) || errors.Is(err, storage.ErrVersionConflict) {
-			c.JSON(http.StatusConflict, gin.H{"success": false, "code": "aigtd.processing", "error": "task is being processed"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "reparse failed"})
+		respondAIGtdError(c, err, "aigtd.reparse_failed")
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
+}
+
+// respondAIGtdError 是 aigtd.Error → HTTP 状态码的唯一映射点(issue #66)。
+// fallbackCode 用于非类型化错误(500)。
+func respondAIGtdError(c *gin.Context, err error, fallbackCode string) {
+	var de *aigtd.Error
+	if errors.As(err, &de) {
+		switch {
+		case errors.Is(err, aigtd.ErrProcessing):
+			c.JSON(http.StatusConflict, gin.H{"success": false, "code": "aigtd.processing", "error": "task is being processed"})
+			return
+		case errors.Is(err, aigtd.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "task not found"})
+			return
+		case errors.Is(err, aigtd.ErrEmpty):
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "code": "aigtd.empty", "error": "raw_text is empty"})
+			return
+		case errors.Is(err, aigtd.ErrTooLong):
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "code": "aigtd.too_long", "error": "raw_text too long"})
+			return
+		case errors.Is(err, aigtd.ErrBadRequest):
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid raw_text"})
+			return
+		}
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": fallbackCode, "error": "request failed"})
 }
 
 // AIGtdJobs GET /api/aigtd/jobs?task_id=X

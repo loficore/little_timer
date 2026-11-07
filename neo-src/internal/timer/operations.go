@@ -186,6 +186,52 @@ func (o *Operations) saveProgress() {
 	log.Info("timer.session.save_progress", "session_id", row.ID, "elapsed", state.GetElapsedSeconds())
 }
 
+// Finish 结束当前计时并为关联 habit 写一条每日 session。调用方必须持有
+// App 写锁。
+//
+// store 标记失败时走兜底路径：发 user_finish_timer，用时钟的 elapsed 计算
+// 时长，仍写每日 session（存在 habit 且 elapsed > 0 时），然后复位。
+func (o *Operations) Finish() (FinishResult, error) {
+	habitID := o.rt.HabitID()
+	sessionID := o.rt.SessionID()
+	store := o.rt.TimerStore()
+	clock := o.rt.ClockManager()
+
+	if sessionID != nil {
+		if err := store.FinishTimerSession(*sessionID); err != nil {
+			log.Error("timer.session.finish failed", "session_id", *sessionID, "error", err.Error())
+			clock.HandleEvent(domain.UserFinishTimerEvent{})
+			elapsed := clock.Update().GetElapsedSeconds()
+			o.writeDailySession(habitID, elapsed)
+			o.resetSession()
+			return FinishResult{Status: "finished", ElapsedSeconds: elapsed}, nil
+		}
+		elapsed := clock.Update().GetElapsedSeconds()
+		log.Info("timer.session.finish", "session_id", *sessionID, "elapsed", elapsed)
+		o.writeDailySession(habitID, elapsed)
+		o.resetSession()
+		return FinishResult{Status: "finished", ElapsedSeconds: elapsed, SessionID: sessionID}, nil
+	}
+
+	// 无活动 session：旧实现视作成功（elapsed 0），仍复位时钟相关状态。
+	o.writeDailySession(habitID, 0)
+	o.resetSession()
+	return FinishResult{Status: "finished"}, nil
+}
+
+// writeDailySession 在存在 habit 且 elapsed > 0 时写入一条今日 session。
+// 写入失败只记日志——结束操作本身仍成功。
+func (o *Operations) writeDailySession(habitID *int64, elapsed int64) {
+	if habitID == nil || elapsed <= 0 {
+		return
+	}
+	if _, err := o.rt.TimerStore().CreateSession(
+		*habitID, elapsed, 1, domain.TodayString(o.rt.TimezoneOffset()),
+	); err != nil {
+		log.Error("timer.session.daily_create failed", "habit_id", *habitID, "error", err.Error())
+	}
+}
+
 // convergeStale 收敛内存中残留的 timer_session（spec §6 H1 跨项目泄漏）。//
 //   - 无残留指针时只清 habit 指针。
 //   - 行取不到（可能已被删除）时只清指针，不做 DB 操作。

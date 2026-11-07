@@ -22,7 +22,9 @@
   且**不依赖 Windows SDK** —— 它是「Windows 上能否从源码构建」这件事唯一的自动化
   证据（`backend` 的 Windows 交叉门禁不开 cgo、也不带 `webview` tag，碰不到
   `WebView2.h`）。见 [docs/windows-msys2-dev.md](windows-msys2-dev.md)。
-- `vrt`（视觉回归）目前为 advisory（`continue-on-error`），不阻断合并。
+- `vrt`（视觉回归）由 `.github/workflows/vrt.yml` 独立运行，目前为 advisory
+  （`continue-on-error`），不阻断合并。改到 `assets/src/**`、`assets/playwright.config.ts`、
+  `assets/package.json` 或该 workflow 才会触发，同一 PR 只跑一次 —— `ci.yml` 不再重复该 job。
 - 平台构建并入 `release.yml` 的三个构建 job，只在 release / 手动触发时运行，不阻断 PR。
 
 ## VRT 基线重生成

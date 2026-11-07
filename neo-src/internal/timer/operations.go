@@ -233,7 +233,7 @@ func (o *Operations) writeDailySession(habitID *int64, elapsed int64) {
 }
 
 // Progress 返回实时进度；内存中没有 session 指针时先惰性读取持久化的
-// 活动 session。调用方必须持有 App 锁（写锁或读锁）。
+// 活动 session（会写指针，因此调用方必须持有 App 写锁）。
 func (o *Operations) Progress() ProgressResult {
 	if o.rt.SessionID() == nil {
 		o.LoadProgress()
@@ -275,7 +275,7 @@ func (o *Operations) SaveProgress() {
 	o.saveProgress()
 }
 
-// convergeStale 收敛内存中残留的 timer_session（spec §6 H1 跨项目泄漏）。//
+// convergeStale 收敛内存中残留的 timer_session（spec §6 H1 跨项目泄漏）。
 //   - 无残留指针时只清 habit 指针。
 //   - 行取不到（可能已被删除）时只清指针，不做 DB 操作。
 //   - 能读到行则标记为已结束；elapsed == 0（从未真正使用）时直接删除，避免

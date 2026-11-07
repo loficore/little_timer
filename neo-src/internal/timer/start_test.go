@@ -162,6 +162,57 @@ func TestStart_CountdownMode(t *testing.T) {
 	}
 }
 
+func TestStart_ConvergesMissingRow(t *testing.T) {
+	rt := newFakeRuntime(domain.StopwatchMode)
+	danglingID := int64(99) // 指针指向一行已不存在的 session
+	habitID := int64(5)
+	rt.SetSessionID(&danglingID)
+	rt.SetHabitID(&habitID)
+	rt.clock.HandleEvent(domain.UserStartTimerEvent{})
+	o := New(rt)
+
+	res, err := o.Start(StartInput{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if len(rt.store.created) != 1 {
+		t.Fatalf("created = %d, want 1", len(rt.store.created))
+	}
+	if res.SessionID == danglingID {
+		t.Errorf("session id = %d, want a new session", res.SessionID)
+	}
+	if rt.HabitID() != nil {
+		t.Errorf("habit id = %v, want nil for fresh start without habit", rt.HabitID())
+	}
+}
+
+func TestStart_ConvergesFinishedNotReset(t *testing.T) {
+	rt := newFakeRuntime(domain.StopwatchMode)
+	oldID := rt.store.seed(storage.TimerSessionRow{
+		Mode:           "stopwatch",
+		IsFinished:     true,
+		ElapsedSeconds: 30,
+		WorkDuration:   1500,
+	})
+	rt.SetSessionID(&oldID)
+	rt.clock.HandleEvent(domain.UserStartTimerEvent{})
+	rt.clock.HandleEvent(domain.UserFinishTimerEvent{})
+	o := New(rt)
+
+	res, err := o.Start(StartInput{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if len(rt.store.finished) != 1 || rt.store.finished[0] != oldID {
+		t.Errorf("finished = %v, want [%d]", rt.store.finished, oldID)
+	}
+	if len(rt.store.created) != 1 || res.SessionID == oldID {
+		t.Errorf("created = %d, session id = %d, want a new session", len(rt.store.created), res.SessionID)
+	}
+}
+
 // withHabit 返回带 habit 指针的副本。
 func withHabit(row storage.TimerSessionRow, habitID *int64) storage.TimerSessionRow {
 	row.HabitID = habitID

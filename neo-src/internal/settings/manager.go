@@ -33,6 +33,7 @@ import (
 	"little-timer/internal/domain"
 	"little-timer/internal/log"
 	"little-timer/internal/storage"
+	"little-timer/internal/storage/backup"
 )
 
 // SecretStorage 中三个凭据字段的 key 名 —— spec §6 约定,settings 与
@@ -296,6 +297,17 @@ func (sm *SettingsManager) UpdateBackupConfigFromJSON(jsonStr string) error {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
 		return fmt.Errorf("settings: parse backup json: %w", err)
+	}
+
+	// 先把用户填的本地目录校验掉，任何一项非法都不改动内存状态。
+	// 空串保持原语义（回退到默认备份目录），非空则必须是绝对路径 ——
+	// 相对路径的落点取决于进程 cwd；Windows 上 "/d/backup_test" 这种
+	// msys2 风格写法会被解析成「当前盘:\d\backup_test」，备份看似成功，
+	// 文件却不在用户以为的地方。见 backup.ResolveLocalDir。
+	if v, ok := raw["local_path"].(string); ok && strings.TrimSpace(v) != "" {
+		if _, err := backup.ResolveLocalDir(v); err != nil {
+			return err
+		}
 	}
 
 	if v, ok := raw["enabled"].(bool); ok {

@@ -254,6 +254,63 @@ func TestHandleBackupCreate(t *testing.T) {
 	}
 }
 
+// 回归：备份成功时只回一个文件名，用户无从知道写到了哪个目录 ——
+// Windows 上 "/d/backup_test" 被解析成「当前盘:\d\backup_test」时，
+// 界面上只能看到"成功"，文件却不在他以为的地方。
+func TestHandleBackupCreate_ReportsResolvedLocation(t *testing.T) {
+	a, backupDir := newBackupTestApp(t)
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/create", nil)
+	c.Set("app", a)
+
+	BackupCreate(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	name, _ := got["backup_path"].(string)
+	if name == "" {
+		t.Fatalf("backup_path missing: %v", got)
+	}
+	if dir, _ := got["backup_dir"].(string); dir != backupDir {
+		t.Errorf("backup_dir = %q, want %q", dir, backupDir)
+	}
+	wantLocation := filepath.Join(backupDir, name)
+	if loc, _ := got["backup_location"].(string); loc != wantLocation {
+		t.Errorf("backup_location = %q, want %q", loc, wantLocation)
+	}
+}
+
+// 回归：相对路径的落点取决于进程 cwd，用户无法预测；必须在保存配置时就拒绝，
+// 而不是等备份"成功"之后让人去猜。
+func TestHandleBackupConfigUpdate_RejectsRelativeLocalPath(t *testing.T) {
+	a, _ := newBackupTestApp(t)
+	before := a.Vault.GetBackupConfig().LocalPath
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := strings.NewReader(`{"enabled":true,"target_type":"local","local_path":"backup_test"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/backup/config", body)
+	c.Set("app", a)
+
+	BackupConfigUpdate(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("code = %d, want 400; body = %s", w.Code, w.Body.String())
+	}
+	if got := a.Vault.GetBackupConfig().LocalPath; got != before {
+		t.Errorf("LocalPath 被改成 %q，拒绝时不应落库（原值 %q）", got, before)
+	}
+}
+
 func TestHandleBackupCreate_NoBackupManager(t *testing.T) {
 	a, _ := newBackupTestApp(t)
 	a.Backup = nil

@@ -7,6 +7,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -73,7 +74,16 @@ func BackupCreate(c *gin.Context) {
 		respondBackupError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "backup_path": name})
+	resp := gin.H{"success": true, "backup_path": name}
+	// 把实际写入位置一并回给前端。local target 只有它有意义：用户在
+	// Windows 上填 "/d/backup_test" 这类路径时，光看文件名根本发现不了
+	// 文件落到了「当前盘:\d\backup_test」。
+	if a.Vault.GetBackupConfig().TargetType == domain.BackupTargetLocal {
+		dir := a.Vault.BackupLocation()
+		resp["backup_dir"] = dir
+		resp["backup_location"] = filepath.Join(dir, name)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // /api/backup/restore

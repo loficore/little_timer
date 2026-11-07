@@ -168,6 +168,33 @@ describe("BackupTab", () => {
     });
   });
 
+  // 回归：后端只回文件名时，用户看不出备份写到了哪个目录 —— Windows 上
+  // "/d/backup_test" 被解析成「当前盘:\d\backup_test」时完全无从发现。
+  it("shows the resolved location when the backend reports one", async () => {
+    mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
+    mockApiClient.createBackup.mockResolvedValue({
+      success: true,
+      backup_path: "presets_backup_1.db",
+      backup_dir: "/tmp/backups",
+      backup_location: "/tmp/backups/presets_backup_1.db",
+    });
+
+    render(<BackupTab config={{}} onChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("备份")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText(t("backup.create_now")));
+
+    await waitFor(() => {
+      expect(mocks.showToastMock).toHaveBeenCalledWith(
+        t("backup.created_at", { path: "/tmp/backups/presets_backup_1.db" }),
+        'success',
+      );
+    });
+  });
+
   it("shows error message when createBackup fails", async () => {
     mockApiClient.listBackups.mockResolvedValue({ success: true, backups: [] });
     mockApiClient.createBackup.mockResolvedValue({ success: false, error: "Failed to create backup" });

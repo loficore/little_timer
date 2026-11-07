@@ -303,6 +303,10 @@ export interface BackupCreateResult {
   success: boolean;
   /** 备份文件路径 */
   backup_path?: string;
+  /** 备份写入目录（local target 的解析后绝对路径） */
+  backup_dir?: string;
+  /** 备份文件的完整路径（local target） */
+  backup_location?: string;
   /** 错误信息 */
   error?: string;
 }

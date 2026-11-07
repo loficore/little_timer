@@ -106,6 +106,16 @@ func (o *Operations) CreateBackup() (string, error) {
 	return mgr.CreateBackup()
 }
 
+// BackupLocation 返回当前备份写入位置（本地 target 为解析后的绝对目录，
+// 云端 target 为 target 名字）。未配置备份时返回空串。
+func (o *Operations) BackupLocation() string {
+	mgr := o.runtime.Manager()
+	if mgr == nil {
+		return ""
+	}
+	return mgr.Location()
+}
+
 // RestoreBackup 从指定名字的备份恢复。
 func (o *Operations) RestoreBackup(name string) error {
 	mgr := o.runtime.Manager()

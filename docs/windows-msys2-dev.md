@@ -223,6 +223,49 @@ pause
 用 `.cmd` 而不是 SSH，是因为会话限制（见上）。`pause` 让窗口不立刻消失，
 方便看日志；也可以删掉。
 
+## 通过 SSH 启动服务：别用 `nohup ... &`
+
+Windows 的 sshd **会等整棵子进程树退出**才关闭连接。所以
+
+```sh
+nohup ./run-http.sh > http.log 2>&1 &
+```
+
+这种「挂后台后立刻返回」的写法在 Windows 上不成立：SSH 命令会一直挂着，
+直到你手动打断或超时。**服务其实已经起来了** —— 现象是命令「卡住」，不是失败，
+别因此重复启动。
+
+两种可用的做法：
+
+**一次性验证：起 → 检查 → 杀，放在同一条命令里**
+
+```sh
+./bin/server.exe serve --http-only --port 8013 > /d/dev/tmp/smoke.log 2>&1 &
+PID=$!
+sleep 5
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8013/api/version
+kill $PID          # 不 kill 的话，这条 SSH 命令就不会返回
+```
+
+**常驻服务：用计划任务起** —— 进程不挂在 sshd 的进程树下，SSH 立即返回
+
+```bat
+REM run-http.cmd（和 run-webview.cmd 同样的包法，但去掉 pause）
+@echo off
+"D:\msys64\usr\bin\bash.exe" -l -c "exec /d/dev/little-timer-win/run-http.sh" > D:\dev\little-timer-win\http.log 2>&1
+```
+
+```powershell
+schtasks /Create /TN "LTDev" /TR "D:\dev\little-timer-win\run-http.cmd" /SC ONCE /ST 23:59 /IT /F
+schtasks /Run /TN "LTDev"
+```
+
+- `/IT` 让任务跑在**交互式桌面会话**里 —— 起 WebView 窗口时这条是**必须**的
+  （见上面的会话限制），HTTP-only 用它也无害。
+- 计划任务的 stdout 不会回到 SSH，**务必在 `.cmd` 里重定向到文件**，
+  否则窗口起不来时你什么线索都没有。
+- 用完删掉：`schtasks /Delete /TN "LTDev" /F`。删任务不会杀掉已启动的进程。
+
 ## just 配方在 msys2 上也能用
 
 `just go-dev` / `just go-dev-webview` 的端口探测已改成不依赖 `ss`

@@ -143,7 +143,9 @@ export const BackupTab: FunctionalComponent<BackupTabProps> = ({ config, onChang
       if (result.success) {
         // 优先展示完整路径（backup_location）：后端只回文件名时，用户看不出
         // 备份写到了哪个目录（Windows 上路径被按"当前盘"解释时尤其致命）。
-        showToast(t("backup.created_at", { path: result.backup_location ?? result.backup_path }), 'success');
+        // 两者都缺时传空串，避免 toast 里出现 "undefined"。
+        const backupPath = result.backup_location ?? result.backup_path ?? "";
+        showToast(t("backup.created_at", { path: backupPath }), 'success');
         await loadBackups();
       } else {
         showMessage('error', result.error || t("backup.create_failed"));

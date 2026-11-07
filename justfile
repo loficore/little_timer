@@ -31,10 +31,10 @@ frontend-build:
 
 go_src := justfile_directory() / "neo-src"
 
-# 用户可见版本号：优先最近 tag（去掉 v 前缀），无 tag 用短 commit，
-# 工作区有改动时带 -dirty。通过 ldflags 注入 app.Version，UI 的
-# /api/version 直接读它 —— 不在源码里写死版本。
-app_version := `(git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo dev) | sed 's/^v//'`
+# 用户可见版本号只由 scripts/ci-version.sh 计算（RELEASE_TAG → 当前 tag →
+# 短 commit），与 release 流水线是同一份规则。通过 ldflags 注入 app.Version，
+# UI 的 /api/version 直接读它 —— 不在源码里写死版本。
+app_version := `bash scripts/ci-version.sh --print`
 
 # go-sqlite3 是 cgo-only，构建需要 CGO_ENABLED=1 + 一个 C 编译器。
 # 优先 zig cc（自带 libc，CI 无 gcc 时兜底），其次 gcc / clang / cc。
@@ -245,18 +245,14 @@ webview-build:
 
 # 打包发布产物：前端 build + go build (embed_ui) + tar.gz 到 dist/
 # 用法: just package [version] [embed_ui]
-#   version   默认值 = 今天日期 (YYYYMMDD)
+#   version   默认由 scripts/ci-version.sh 计算（tag 或短 commit）
 #   embed_ui  默认值 = true；传 false 关闭（产物无界面）
 package version="" embed_ui="true":
         #!/usr/bin/env bash
         set -euo pipefail
         ver="{{version}}"
         if [ -z "$ver" ]; then
-            if tag="$(git -C {{ROOT}} describe --tags --abbrev=0 2>/dev/null)"; then
-                ver="${tag#v}"
-            else
-                ver="$(date +%Y%m%d)"
-            fi
+            ver="$(bash {{ROOT}}/scripts/ci-version.sh --print)"
         fi
         if [ "{{embed_ui}}" = "true" ]; then tag="embed_ui"; else tag=""; fi
         if [ "{{embed_ui}}" = "true" ]; then

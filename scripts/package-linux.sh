@@ -7,8 +7,8 @@
 #
 # WebKit 版本由 build tag 决定：rpm 用默认（webkit2gtk-4.0），deb 加
 # `webkit41`（webkit2gtk-4.1），不再复制 .pc 文件。
-# deb 在非 Debian/Ubuntu 主机上会自动进入 ubuntu:22.04 容器构建；版本默认取
-# 最近一个 git tag（去掉 v 前缀），没有 tag 时用当天日期。
+# deb 在非 Debian/Ubuntu 主机上会自动进入 ubuntu:22.04 容器构建；版本默认由
+# `scripts/ci-version.sh --print` 计算（tag 或短 commit），与 just / release 一致。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,11 +32,7 @@ else
 fi
 
 if [ -z "${VER:-}" ]; then
-    if tag="$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null)"; then
-        VER="${tag#v}"
-    else
-        VER="$(date +%Y%m%d)"
-    fi
+    VER="$(bash "$ROOT/scripts/ci-version.sh" --print)"
 fi
 if ! [[ "$VER" =~ ^[A-Za-z0-9._+]+$ ]]; then
     echo "invalid version '$VER': use letters, digits, dot, underscore or plus" >&2

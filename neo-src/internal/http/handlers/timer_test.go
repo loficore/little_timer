@@ -18,6 +18,7 @@ import (
 	"little-timer/internal/keystore/keystoretest"
 	"little-timer/internal/settings"
 	"little-timer/internal/storage"
+	"little-timer/internal/timer"
 )
 
 // newTestApp 为集成式 handler 测试构建带真实 SQLite + SettingsManager 的
@@ -170,11 +171,8 @@ func TestTimer_GetProgress_WithActiveSession(t *testing.T) {
 	r := setupTestRouter(t, a)
 
 	a.Lock()
-	sessionID, err := a.CreateTimerSession(nil, "stopwatch", 25*60, 0, 0)
+	sessionID := startTimerSessionLocked(t, a, nil, 25*60)
 	a.Unlock()
-	if err != nil {
-		t.Fatalf("CreateTimerSession: %v", err)
-	}
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/timer/progress", nil)
@@ -229,9 +227,8 @@ func TestTimer_Start_AlreadyRunning_Paused(t *testing.T) {
 	r := setupTestRouter(t, a)
 
 	a.Lock()
-	sessionID, _ := a.CreateTimerSession(nil, "stopwatch", 25*60, 0, 0)
-	a.Clock.HandleEvent(domain.UserPauseTimerEvent{})
-	a.SaveProgressLocked()
+	sessionID := startTimerSessionLocked(t, a, nil, 25*60)
+	a.Timer.Pause()
 	a.Unlock()
 
 	body := bytes.NewBufferString(`{"habit_id": 456}`)
@@ -263,9 +260,9 @@ func TestTimer_Start_AlreadyRunning_Finished(t *testing.T) {
 	r := setupTestRouter(t, a)
 
 	a.Lock()
-	a.CreateTimerSession(nil, "stopwatch", 25*60, 0, 0)
+	startTimerSessionLocked(t, a, nil, 25*60)
 	a.Clock.HandleEvent(domain.UserFinishTimerEvent{})
-	a.SaveProgressLocked()
+	a.Timer.SaveProgress()
 	a.Unlock()
 
 	body := bytes.NewBufferString(`{}`)
@@ -354,8 +351,7 @@ func TestTimer_Pause_Normal(t *testing.T) {
 	r := setupTestRouter(t, a)
 
 	a.Lock()
-	a.CreateTimerSession(nil, "stopwatch", 25*60, 0, 0)
-	a.Clock.HandleEvent(domain.UserStartTimerEvent{})
+	startTimerSessionLocked(t, a, nil, 25*60)
 	a.Unlock()
 
 	w := httptest.NewRecorder()
@@ -386,8 +382,7 @@ func TestTimer_Reset_Normal(t *testing.T) {
 	r := setupTestRouter(t, a)
 
 	a.Lock()
-	a.CreateTimerSession(nil, "stopwatch", 25*60, 0, 0)
-	a.Clock.HandleEvent(domain.UserStartTimerEvent{})
+	startTimerSessionLocked(t, a, nil, 25*60)
 	a.Unlock()
 
 	w := httptest.NewRecorder()
@@ -424,9 +419,9 @@ func TestTimer_Finish_Success(t *testing.T) {
 	a := newTestApp(t)
 	r := setupTestRouter(t, a)
 
+	habitID := createTestHabit(t, a)
 	a.Lock()
-	a.CreateTimerSession(int64Ptr(123), "stopwatch", 25*60, 0, 0)
-	a.Clock.HandleEvent(domain.UserStartTimerEvent{})
+	startTimerSessionLocked(t, a, &habitID, 25*60)
 	a.Unlock()
 
 	w := httptest.NewRecorder()
@@ -454,9 +449,9 @@ func TestTimer_Finish_FallbackPath(t *testing.T) {
 	a := newTestApp(t)
 	r := setupTestRouter(t, a)
 
+	habitID := createTestHabit(t, a)
 	a.Lock()
-	a.CreateTimerSession(int64Ptr(456), "stopwatch", 25*60, 0, 0)
-	a.Clock.HandleEvent(domain.UserStartTimerEvent{})
+	startTimerSessionLocked(t, a, &habitID, 25*60)
 	a.Unlock()
 
 	// 模拟时间流逝
@@ -736,6 +731,31 @@ func TestTimer_UpdateConfig_InvalidJSON(t *testing.T) {
 	}
 }
 
-func int64Ptr(i int64) *int64 {
-	return &i
+// startTimerSessionLocked 经 timer.Operations 建立活动 session 并启动时钟。
+// 调用方必须已经持有 App 写锁。
+func startTimerSessionLocked(t *testing.T, a *app.App, habitID *int64, workDuration int64) int64 {
+	t.Helper()
+	res, err := a.Timer.Start(timer.StartInput{
+		HabitID:      habitID,
+		Mode:         "stopwatch",
+		WorkDuration: workDuration,
+	})
+	if err != nil {
+		t.Fatalf("timer.Start: %v", err)
+	}
+	return res.SessionID
+}
+
+// createTestHabit 建一个真实 habit（timer_sessions.habit_id 有外键约束）。
+func createTestHabit(t *testing.T, a *app.App) int64 {
+	t.Helper()
+	setID, err := a.SQLite.HabitSets().Create("Test", "", "#000000")
+	if err != nil {
+		t.Fatalf("create habit set: %v", err)
+	}
+	habitID, err := a.SQLite.Habits().Create(setID, "Focus", 60, "#000000")
+	if err != nil {
+		t.Fatalf("create habit: %v", err)
+	}
+	return habitID
 }

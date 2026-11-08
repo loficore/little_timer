@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"little-timer/internal/aigtd"
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
 	"little-timer/internal/http/middleware"
@@ -216,7 +217,7 @@ func TestAIGtdReparse_DBUniqueFallback409(t *testing.T) {
 
 	// 注入:跳过 precheck,让 handler 走到 EnqueueJob
 	origInFlight, origProcessing := hasInFlightJobFn, taskIsProcessingFn
-	hasInFlightJobFn = func(c *storage.AITasksCrud, id int64) (bool, error) { return false, nil }
+	hasInFlightJobFn = func(c aigtd.TaskStore, id int64) (bool, error) { return false, nil }
 	taskIsProcessingFn = func(t *domain.TaskRow) bool { return false }
 	t.Cleanup(func() {
 		hasInFlightJobFn = origInFlight

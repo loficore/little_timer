@@ -9,7 +9,6 @@ import (
 
 	"little-timer/internal/aigtd"
 	"little-timer/internal/http/app"
-	"little-timer/internal/storage"
 )
 
 // pathID 从 Gin 路由中截取给定 prefix 之后的末尾整数 ID。
@@ -60,11 +59,6 @@ func aiConfigFromApp(a *app.App) aigtd.LLMConfig {
 		}
 	}
 	return cfg
-}
-
-// taskRawUpdate 返回把 task.raw_text 改成给定字符串的 UpdateTask 字段。
-func taskRawUpdate(raw string) storage.TaskUpdateFields {
-	return storage.TaskUpdateFields{RawText: &raw}
 }
 
 // parseInt64Query 从 query string 取整型参数。

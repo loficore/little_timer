@@ -108,11 +108,8 @@ func respondAIGtdError(c *gin.Context, err error) {
 		case errors.Is(err, aigtd.ErrTooLong):
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "code": "aigtd.too_long", "error": "raw_text too long"})
 			return
-		case errors.Is(err, aigtd.ErrInvalidMode):
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid mode (allowed: append|replace)"})
-			return
-		case errors.Is(err, aigtd.ErrInvalidRawText):
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid raw_text"})
+		case errors.Is(err, aigtd.ErrBadRequest):
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": de.Message})
 			return
 		case errors.Is(err, aigtd.ErrCreateFailed):
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": "aigtd.create_failed", "error": "create failed"})

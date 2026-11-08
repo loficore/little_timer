@@ -161,12 +161,12 @@ func TestReparse_ProcessingStatusRejected(t *testing.T) {
 	}
 }
 
-// TestReparse_InvalidMode：mode 非 append/replace → ErrInvalidMode。
+// TestReparse_InvalidMode：mode 非 append/replace → ErrBadRequest。
 func TestReparse_InvalidMode(t *testing.T) {
 	f := &fakeTaskStore{task: &domain.TaskRow{ID: 5}}
 	ops := NewOperations(f, testConfig)
 
-	if _, err := ops.Reparse(5, nil, "review", 0); !errors.Is(err, ErrInvalidMode) {
+	if _, err := ops.Reparse(5, nil, "review", 0); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("err=%v, want ErrBadRequest", err)
 	}
 }
@@ -192,13 +192,13 @@ func TestReparse_RawTextRewrite(t *testing.T) {
 	}
 }
 
-// TestReparse_EmptyRawTextRejected：显式空 raw_text → ErrInvalidRawText。
+// TestReparse_EmptyRawTextRejected：显式空 raw_text → ErrBadRequest。
 func TestReparse_EmptyRawTextRejected(t *testing.T) {
 	f := &fakeTaskStore{task: &domain.TaskRow{ID: 5}}
 	ops := NewOperations(f, testConfig)
 
 	raw := "   "
-	if _, err := ops.Reparse(5, &raw, "append", 0); !errors.Is(err, ErrInvalidRawText) {
+	if _, err := ops.Reparse(5, &raw, "append", 0); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("err=%v, want ErrBadRequest", err)
 	}
 }

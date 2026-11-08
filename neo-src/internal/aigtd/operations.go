@@ -25,6 +25,12 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
+// badRequest 构造带具体文案的入参错误。Code 与 ErrBadRequest 一致,所以
+// errors.Is(err, ErrBadRequest) 仍然成立。
+func badRequest(message string) *Error {
+	return &Error{Code: ErrBadRequest.Code, Message: message}
+}
+
 // Is 让同 Code 的错误互相匹配(带 detail 的副本仍能被 errors.Is 命中哨兵)。
 func (e *Error) Is(target error) bool {
 	t, ok := target.(*Error)
@@ -33,12 +39,9 @@ func (e *Error) Is(target error) bool {
 
 // 哨兵错误。
 var (
-	// ErrBadRequest 覆盖"请求体本身不合法"(通用兜底)。
+	// ErrBadRequest 覆盖"请求体本身不合法":非法 mode、显式给出的原文为空
+	// 或超长。具体文案由 badRequest 构造,adapter 原样回给客户端。
 	ErrBadRequest = &Error{Code: "aigtd.bad_request", Message: "invalid request"}
-	// ErrInvalidMode 是 reparse 的非法 mode。
-	ErrInvalidMode = &Error{Code: "aigtd.invalid_mode", Message: "invalid mode (allowed: append|replace)"}
-	// ErrInvalidRawText 是 reparse 显式给出的原文不合法。
-	ErrInvalidRawText = &Error{Code: "aigtd.invalid_raw_text", Message: "invalid raw_text"}
 	// ErrCreateFailed 是建 task 失败。
 	ErrCreateFailed = &Error{Code: "aigtd.create_failed", Message: "create failed"}
 	// ErrEnqueueFailed 是入队失败(已回滚刚建的 task)。
@@ -149,14 +152,14 @@ func (o *Operations) Reparse(taskID int64, rawText *string, mode string, version
 	case domain.AIJobModeAppend, domain.AIJobModeReplace:
 		// ok
 	default:
-		return 0, ErrInvalidMode
+		return 0, badRequest("invalid mode (allowed: append|replace)")
 	}
 
 	var rawUpdate *storage.TaskUpdateFields
 	if rawText != nil {
 		raw := strings.TrimSpace(*rawText)
 		if raw == "" || len([]rune(raw)) > MaxRawTextLen {
-			return 0, ErrInvalidRawText
+			return 0, badRequest("invalid raw_text")
 		}
 		rawUpdate = &storage.TaskUpdateFields{RawText: &raw}
 	}

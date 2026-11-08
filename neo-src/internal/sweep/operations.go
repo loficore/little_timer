@@ -39,7 +39,8 @@ var (
 	// ErrVersionConflict 表示版本闸门命中 0 行 → 409,提示客户端刷新。
 	ErrVersionConflict = &Error{Code: "version_conflict", Message: "version conflict"}
 	// ErrInvalidProposal 覆盖所有入参不合法:无效 action、ai_job 不存在、
-	// proposal.task_id 与 job 不符、reschedule 无时间。
+	// proposal.task_id 与 job 不符、reschedule 无时间。具体文案由
+	// invalidProposal 构造,adapter 原样回给客户端(保持历史 400 文案)。
 	ErrInvalidProposal = &Error{Code: "sweep.invalid_proposal", Message: "invalid proposal"}
 	// ErrAdoptionDuplicate 表示并发竞态下审计行已被写入;caller 按幂等处理。
 	ErrAdoptionDuplicate = &Error{Code: "sweep.adoption_duplicate", Message: "adoption already recorded"}
@@ -122,6 +123,12 @@ func DefaultConfig() (provider, model string) {
 	return "openai_compat", "deepseek-chat"
 }
 
+// invalidProposal 构造带具体文案的入参错误。Code 与 ErrInvalidProposal 一致,
+// 所以 errors.Is(err, ErrInvalidProposal) 仍然成立。
+func invalidProposal(message string) *Error {
+	return &Error{Code: ErrInvalidProposal.Code, Message: message}
+}
+
 // Adopt 采纳一条 review 提议。
 //
 // 流程:
@@ -137,18 +144,19 @@ func DefaultConfig() (provider, model string) {
 // 不双 bump:reschedule/drop 走 UpdateTaskTx 已 bump,不能再调 BumpTaskVersionTx。
 func (o *Operations) Adopt(in AdoptInput) (AdoptResult, error) {
 	if in.Proposal.TaskID == 0 || !aigtd.IsValidAction(in.Proposal.Action) {
-		return AdoptResult{}, ErrInvalidProposal
+		return AdoptResult{}, invalidProposal("invalid proposal")
 	}
 	if in.Proposal.Action == "reschedule" &&
 		in.Proposal.SuggestedStart == nil && in.Proposal.SuggestedEnd == nil {
-		return AdoptResult{}, ErrInvalidProposal
+		return AdoptResult{}, invalidProposal(
+			"reschedule requires suggested_scheduled_start or suggested_scheduled_end")
 	}
 	realTaskID, err := o.jobTaskID(in.AIJobID)
 	if err != nil {
-		return AdoptResult{}, ErrInvalidProposal
+		return AdoptResult{}, invalidProposal("unknown ai_job_id")
 	}
 	if realTaskID != in.Proposal.TaskID {
-		return AdoptResult{}, ErrInvalidProposal
+		return AdoptResult{}, invalidProposal("proposal.task_id does not match ai_job.task_id")
 	}
 
 	// 1. 幂等前置
@@ -192,7 +200,7 @@ func (o *Operations) Adopt(in AdoptInput) (AdoptResult, error) {
 			return AdoptResult{}, mapStoreError(err)
 		}
 	default:
-		return AdoptResult{}, ErrInvalidProposal
+		return AdoptResult{}, invalidProposal("invalid action")
 	}
 
 	// 3. 审计行
@@ -296,7 +304,7 @@ func (o *Operations) jobTaskID(jobID int64) (int64, error) {
 // Reject 拒绝一条提议:只校验入参,不写审计(Δ4.4 — YAGNI)。
 func (o *Operations) Reject(changeID string) error {
 	if strings.TrimSpace(changeID) == "" {
-		return ErrInvalidProposal
+		return invalidProposal("change_id required")
 	}
 	return nil
 }

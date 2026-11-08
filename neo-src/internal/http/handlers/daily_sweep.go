@@ -85,20 +85,21 @@ func respondSweepAdoptError(c *gin.Context, err error, body adoptRequest) {
 			})
 			return
 		case errors.Is(err, sweep.ErrInvalidProposal):
-			// 区分历史文案:proposal 本身不合法 vs ai_job 不存在/不匹配。
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": invalidProposalMessage(body)})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": de.Message})
 			return
 		}
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 }
 
-// invalidProposalMessage 保持既有 400 文案(handler 测试与前端都依赖它)。
-func invalidProposalMessage(body adoptRequest) string {
-	if body.Proposal.TaskID == 0 {
-		return "invalid proposal"
+// respondSweepError 把 sweep.Error 映射为 400(reject 等无 409 分支的端点)。
+func respondSweepError(c *gin.Context, err error) {
+	var de *sweep.Error
+	if errors.As(err, &de) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": de.Message})
+		return
 	}
-	return "proposal.task_id does not match ai_job.task_id"
+	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 }
 
 // DailySweepReject POST /api/daily-sweep/reject
@@ -113,7 +114,7 @@ func DailySweepReject(c *gin.Context) {
 		return
 	}
 	if err := sweepOpsFor(appFromCtx(c)).Reject(body.ChangeID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "change_id required"})
+		respondSweepError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)

@@ -58,7 +58,7 @@ func AIGtdCapture(c *gin.Context) {
 	}
 	taskID, err := aigtdOpsFor(a).Capture(req.RawText, req.Source)
 	if err != nil {
-		respondAIGtdError(c, err, "aigtd.create_failed")
+		respondAIGtdError(c, err)
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"task_id": taskID})
@@ -83,15 +83,15 @@ func AIGtdReparse(c *gin.Context) {
 
 	jobID, err := aigtdOpsFor(a).Reparse(taskID, req.RawText, req.Mode, middleware.GetVersion(c))
 	if err != nil {
-		respondAIGtdError(c, err, "aigtd.reparse_failed")
+		respondAIGtdError(c, err)
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
 }
 
 // respondAIGtdError 是 aigtd.Error → HTTP 状态码的唯一映射点(issue #66)。
-// fallbackCode 用于非类型化错误(500)。
-func respondAIGtdError(c *gin.Context, err error, fallbackCode string) {
+// 每条错误码的 HTTP 形状(状态码 + code + 文案)与重构前逐字一致。
+func respondAIGtdError(c *gin.Context, err error) {
 	var de *aigtd.Error
 	if errors.As(err, &de) {
 		switch {
@@ -107,12 +107,21 @@ func respondAIGtdError(c *gin.Context, err error, fallbackCode string) {
 		case errors.Is(err, aigtd.ErrTooLong):
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "code": "aigtd.too_long", "error": "raw_text too long"})
 			return
-		case errors.Is(err, aigtd.ErrBadRequest):
+		case errors.Is(err, aigtd.ErrInvalidMode):
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid mode (allowed: append|replace)"})
+			return
+		case errors.Is(err, aigtd.ErrInvalidRawText):
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid raw_text"})
+			return
+		case errors.Is(err, aigtd.ErrCreateFailed):
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": "aigtd.create_failed", "error": "create failed"})
+			return
+		case errors.Is(err, aigtd.ErrEnqueueFailed):
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": "aigtd.enqueue_failed", "error": "enqueue failed"})
 			return
 		}
 	}
-	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": fallbackCode, "error": "request failed"})
+	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "reparse failed"})
 }
 
 // AIGtdJobs GET /api/aigtd/jobs?task_id=X

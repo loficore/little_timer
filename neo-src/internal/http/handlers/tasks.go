@@ -116,13 +116,14 @@ func taskOps(a *app.App) *tasks.Operations {
 }
 
 // respondTaskError 是 tasks.Error → HTTP 状态码的唯一映射点
-// (issue #66:「409 只在一处映射」)。
-func respondTaskError(c *gin.Context, err error) {
+// (issue #66:「409 只在一处映射」)。fallback 用于非类型化错误(500)的
+// 文案,保持各端点的既有措辞。
+func respondTaskError(c *gin.Context, err error, fallback string) {
 	var de *tasks.Error
 	if errors.As(err, &de) {
 		switch de.Code {
 		case tasks.ErrVersionConflict.Code:
-			respondVersionConflict(c)
+			respondVersionConflict(c, "")
 			return
 		case tasks.ErrNotFound.Code:
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "task not found"})
@@ -135,7 +136,7 @@ func respondTaskError(c *gin.Context, err error) {
 			return
 		}
 	}
-	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "internal error"})
+	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": fallback})
 }
 
 // TaskList GET /api/tasks?status=&parent_id=
@@ -179,7 +180,7 @@ func TaskGet(c *gin.Context) {
 	}
 	task, subs, err := taskOps(a).Get(id)
 	if err != nil {
-		respondTaskError(c, err)
+		respondTaskError(c, err, "get failed")
 		return
 	}
 	c.JSON(http.StatusOK, toTaskDTO(task, subs))
@@ -298,7 +299,7 @@ func TaskUpdate(c *gin.Context) {
 
 	task, err := taskOps(a).Update(id, patch, middleware.GetVersion(c))
 	if err != nil {
-		respondTaskError(c, err)
+		respondTaskError(c, err, "update failed")
 		return
 	}
 	_, subs, err := taskOps(a).Get(id)
@@ -320,7 +321,7 @@ func TaskDelete(c *gin.Context) {
 	// C1 fix:删除也走乐观锁 —— 用 ConflictGuard 解析出的期望版本,
 	// 0 行受影响(版本不符/task 不存在)→ 409。
 	if err := taskOps(a).Delete(id, middleware.GetVersion(c)); err != nil {
-		respondTaskError(c, err)
+		respondTaskError(c, err, "delete failed")
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -393,7 +394,7 @@ func SubtaskUpdate(c *gin.Context) {
 	// C2 fix:子任务也走乐观锁。子任务本身是 tasks 行(带 parent_id 与
 	// version),与 UpdateTask 同源同语义。
 	if err := taskOps(a).UpdateSubtask(subID, patch, middleware.GetVersion(c)); err != nil {
-		respondTaskError(c, err)
+		respondTaskError(c, err, "update failed")
 		return
 	}
 	c.Status(http.StatusNoContent)

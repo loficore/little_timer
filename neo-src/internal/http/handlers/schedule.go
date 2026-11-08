@@ -102,7 +102,7 @@ func ScheduleApply(c *gin.Context) {
 func respondScheduleError(c *gin.Context, err error) {
 	var de *schedule.Error
 	if errors.As(err, &de) && errors.Is(err, schedule.ErrVersionConflict) {
-		respondVersionConflict(c)
+		respondVersionConflict(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

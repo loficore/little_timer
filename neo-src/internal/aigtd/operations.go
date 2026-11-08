@@ -29,8 +29,16 @@ func (e *Error) Error() string { return e.Message }
 
 // 哨兵错误。
 var (
-	// ErrBadRequest 覆盖"请求体本身不合法":空原文、非法 mode、无效 raw_text。
+	// ErrBadRequest 覆盖"请求体本身不合法"(通用兜底)。
 	ErrBadRequest = &Error{Code: "aigtd.bad_request", Message: "invalid request"}
+	// ErrInvalidMode 是 reparse 的非法 mode。
+	ErrInvalidMode = &Error{Code: "aigtd.invalid_mode", Message: "invalid mode (allowed: append|replace)"}
+	// ErrInvalidRawText 是 reparse 显式给出的原文不合法。
+	ErrInvalidRawText = &Error{Code: "aigtd.invalid_raw_text", Message: "invalid raw_text"}
+	// ErrCreateFailed 是建 task 失败。
+	ErrCreateFailed = &Error{Code: "aigtd.create_failed", Message: "create failed"}
+	// ErrEnqueueFailed 是入队失败(已回滚刚建的 task)。
+	ErrEnqueueFailed = &Error{Code: "aigtd.enqueue_failed", Message: "enqueue failed"}
 	// ErrEmpty 是空原文。
 	ErrEmpty = &Error{Code: "aigtd.empty", Message: "raw_text is empty"}
 	// ErrTooLong 是原文超长。
@@ -102,14 +110,14 @@ func (o *Operations) Capture(rawText, source string) (int64, error) {
 	}
 	taskID, err := o.store.CreateTask(raw, source)
 	if err != nil {
-		return 0, err
+		return 0, ErrCreateFailed
 	}
 	cfg := o.config()
 	if _, err := o.store.EnqueueJob(taskID, cfg.Provider, cfg.Model, raw, domain.AIJobModeAppend); err != nil {
 		// 刚 CreateTask 的行 version=0,rollback 时显式带 0(内部调用不走
 		// ConflictGuard 的 context,这里必须自带版本)。
 		_ = o.store.DeleteTask(taskID, 0)
-		return 0, err
+		return 0, ErrEnqueueFailed
 	}
 	return taskID, nil
 }
@@ -140,14 +148,14 @@ func (o *Operations) Reparse(taskID int64, rawText *string, mode string, version
 	case domain.AIJobModeAppend, domain.AIJobModeReplace:
 		// ok
 	default:
-		return 0, ErrBadRequest
+		return 0, ErrInvalidMode
 	}
 
 	var rawUpdate *storage.TaskUpdateFields
 	if rawText != nil {
 		raw := strings.TrimSpace(*rawText)
 		if raw == "" || len([]rune(raw)) > MaxRawTextLen {
-			return 0, ErrBadRequest
+			return 0, ErrInvalidRawText
 		}
 		rawUpdate = &storage.TaskUpdateFields{RawText: &raw}
 	}

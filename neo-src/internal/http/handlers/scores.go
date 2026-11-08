@@ -65,7 +65,7 @@ func TaskScoresUpdate(c *gin.Context) {
 			})
 			return
 		}
-		respondTaskError(c, err)
+		respondTaskError(c, err, err.Error())
 		return
 	}
 	if warning != "" {

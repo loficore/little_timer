@@ -122,7 +122,7 @@ func respondTaskError(c *gin.Context, err error) {
 	if errors.As(err, &de) {
 		switch de.Code {
 		case tasks.ErrVersionConflict.Code:
-			c.JSON(http.StatusConflict, gin.H{"error": "version conflict", "code": "version_conflict"})
+			respondVersionConflict(c)
 			return
 		case tasks.ErrNotFound.Code:
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "task not found"})

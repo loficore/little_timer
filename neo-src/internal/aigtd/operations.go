@@ -63,37 +63,34 @@ type TaskStore interface {
 	EnqueueReparse(taskID int64, rawUpdate *storage.TaskUpdateFields, version int64, provider, model string, mode domain.AIJobMode) (int64, error)
 }
 
-// InFlightProbe / ProcessingProbe 是 reparse precheck 的可注入点。
-//
-// 生产默认实现直连 store;测试替换后可绕过 precheck,确定性触达 DB 层
-// 部分 UNIQUE 索引的 ErrJobInFlight→409 分支(reviewer M4)。
-// NewOperations 构造时快照这两个值,所以测试替换后新建的 Operations 生效。
-var (
-	InFlightProbe = func(store TaskStore, taskID int64) (bool, error) {
-		return store.HasInFlightJob(taskID)
-	}
-	ProcessingProbe = func(task *domain.TaskRow) bool {
-		return task.AIStatus == domain.AIStatusProcessing
-	}
-)
-
 // Operations 是 capture / reparse 的用例层。
+//
+// InFlightProbe / ProcessingProbe 是 reparse precheck 的可注入点:生产默认
+// 实现直连 store;测试替换后可绕过 precheck,确定性触达 DB 层部分 UNIQUE
+// 索引的 ErrJobInFlight→409 分支(reviewer M4)。它们是**实例字段**而非包级
+// 变量,并发请求各持一份,不会互相覆盖。
 type Operations struct {
 	store  TaskStore
 	config func() LLMConfig
 
-	hasInFlightJob   func(store TaskStore, taskID int64) (bool, error)
-	taskIsProcessing func(task *domain.TaskRow) bool
+	// InFlightProbe 报告该 task 是否已有 queued/running job。
+	InFlightProbe func(store TaskStore, taskID int64) (bool, error)
+	// ProcessingProbe 报告 task 是否仍处于 processing。
+	ProcessingProbe func(task *domain.TaskRow) bool
 }
 
 // NewOperations 构造 Operations。config 在每次入队时求值,使设置页改动
 // 无需重建 Operations。
 func NewOperations(store TaskStore, config func() LLMConfig) *Operations {
 	return &Operations{
-		store:            store,
-		config:           config,
-		hasInFlightJob:   InFlightProbe,
-		taskIsProcessing: ProcessingProbe,
+		store:  store,
+		config: config,
+		InFlightProbe: func(s TaskStore, taskID int64) (bool, error) {
+			return s.HasInFlightJob(taskID)
+		},
+		ProcessingProbe: func(t *domain.TaskRow) bool {
+			return t.AIStatus == domain.AIStatusProcessing
+		},
 	}
 }
 
@@ -136,11 +133,11 @@ func (o *Operations) Reparse(taskID int64, rawText *string, mode string, version
 	if err != nil || task == nil {
 		return 0, ErrNotFound
 	}
-	inFlight, err := o.hasInFlightJob(o.store, taskID)
+	inFlight, err := o.InFlightProbe(o.store, taskID)
 	if err != nil {
 		return 0, err
 	}
-	if inFlight || o.taskIsProcessing(task) {
+	if inFlight || o.ProcessingProbe(task) {
 		return 0, ErrProcessing
 	}
 

@@ -30,17 +30,18 @@ var (
 // aigtdOpsFor 构造 capture / reparse 的用例层。
 //
 // precheck 的两个可注入点保留在包级(测试替换后这条路径必须生效,见
-// TestAIGtdReparse_DBUniqueFallback409):每次构造时把当前值焊进
-// aigtd.InFlightProbe / ProcessingProbe,NewOperations 再快照一次。
+// TestAIGtdReparse_DBUniqueFallback409);这里把当前值装进本次请求私有的
+// Operations 实例 —— 不写包级状态,避免并发请求互相覆盖。
 func aigtdOpsFor(a *app.App) *aigtd.Operations {
-	aigtd.InFlightProbe = func(s aigtd.TaskStore, taskID int64) (bool, error) {
+	cfg := aiConfigFromApp(a)
+	ops := aigtd.NewOperations(a.SQLite.AITasks(), func() aigtd.LLMConfig { return cfg })
+	ops.InFlightProbe = func(s aigtd.TaskStore, taskID int64) (bool, error) {
 		return hasInFlightJobFn(s, taskID)
 	}
-	aigtd.ProcessingProbe = func(t *domain.TaskRow) bool {
+	ops.ProcessingProbe = func(t *domain.TaskRow) bool {
 		return taskIsProcessingFn(t)
 	}
-	cfg := aiConfigFromApp(a)
-	return aigtd.NewOperations(a.SQLite.AITasks(), func() aigtd.LLMConfig { return cfg })
+	return ops
 }
 
 // AIGtdCapture POST /api/aigtd/capture

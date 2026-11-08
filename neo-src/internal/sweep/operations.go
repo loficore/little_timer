@@ -50,7 +50,6 @@ var (
 type Store interface {
 	DB() *sql.DB
 	ListTopLevel(status string, limit, offset int) ([]domain.TaskRow, error)
-	GetTask(id int64) (*domain.TaskRow, []domain.SubtaskRow, error)
 	GetTaskVersion(id int64) (int64, error)
 	UpdateTaskTx(tx *sql.Tx, id int64, fields storage.TaskUpdateFields, version int64) error
 	BumpTaskVersionTx(tx *sql.Tx, id int64, version int64) error
@@ -376,10 +375,6 @@ func (s sqliteStore) DB() *sql.DB { return s.sqlite.DB() }
 
 func (s sqliteStore) ListTopLevel(status string, limit, offset int) ([]domain.TaskRow, error) {
 	return s.sqlite.AITasks().ListTopLevel(status, limit, offset)
-}
-
-func (s sqliteStore) GetTask(id int64) (*domain.TaskRow, []domain.SubtaskRow, error) {
-	return s.sqlite.AITasks().GetTask(id)
 }
 
 func (s sqliteStore) GetTaskVersion(id int64) (int64, error) {

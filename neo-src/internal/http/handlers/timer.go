@@ -5,15 +5,14 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"little-timer/internal/domain"
 	"little-timer/internal/http/app"
+	"little-timer/internal/timer"
 )
 
 // 硬编码计时器时长的包级常量。
@@ -77,29 +76,20 @@ func TimerState(c *gin.Context) {
 func TimerProgress(c *gin.Context) {
 	a := appFromCtx(c)
 
-	a.RLock()
-	hasSession := a.CurrentTimerSessionID != nil
-	a.RUnlock()
-	if !hasSession {
-		a.LoadTimerProgress()
-	}
+	a.Lock()
+	res := a.Timer.Progress()
+	a.Unlock()
 
-	a.RLock()
-	sessionID := a.CurrentTimerSessionID
-	habitID := a.CurrentHabitID
-	a.RUnlock()
-
-	state := a.Clock.Update()
 	c.JSON(http.StatusOK, gin.H{
-		"session_id":        sessionID,
-		"habit_id":          habitID,
-		"mode":              modeKey(state.GetMode()),
-		"is_running":        !state.IsPaused(),
-		"is_paused":         state.IsPaused(),
-		"is_finished":       state.IsFinished(),
-		"elapsed_seconds":   state.GetElapsedSeconds(),
-		"remaining_seconds": state.GetRemainingSeconds(),
-		"in_rest":           state.InRest(),
+		"session_id":        res.SessionID,
+		"habit_id":          res.HabitID,
+		"mode":              modeKey(res.Mode),
+		"is_running":        res.IsRunning,
+		"is_paused":         res.IsPaused,
+		"is_finished":       res.IsFinished,
+		"elapsed_seconds":   res.ElapsedSeconds,
+		"remaining_seconds": res.RemainingSeconds,
+		"in_rest":           res.InRest,
 	})
 }
 
@@ -119,74 +109,26 @@ func TimerStart(c *gin.Context) {
 	a := appFromCtx(c)
 
 	var req startRequest
-	_ = c.ShouldBindJSON(&req) // body 可选——下方有默认值。
-
-	mode := "stopwatch"
-	if req.Mode == "countdown" {
-		mode = "countdown"
-	}
-	work := req.WorkDuration
-	if work == 0 {
-		work = DefaultWorkDuration
-	}
-	rest := req.RestDuration
-	loop := req.LoopCount
+	_ = c.ShouldBindJSON(&req) // body 可选——默认值由 timer.Operations 负责。
 
 	a.Lock()
 	defer a.Unlock()
 
-	// 已有 session 时:仅保留「用户主动暂停后恢复」的语义(spec §6 H1);
-	// 其余情况(含运行中残留、已 finished 但未 reset、行取不到等)一律收敛,
-	// 由下方 CreateTimerSession 创建全新 session,而不是复用旧 id。
-	if a.CurrentTimerSessionID != nil {
-		// 查询实时数据行。
-		row, err := a.SQLite.Timers().GetTimerSessionByID(*a.CurrentTimerSessionID)
-		if err == nil {
-			// 暂停分支——恢复。保留此分支,让「先 pause 再 start」语义不变。
-			state := a.Clock.Update()
-			if state.IsPaused() && (!state.IsFinished() || row.IsPaused) {
-				pausedTotal := row.PausedTotalSeconds
-				now := time.Now().Unix()
-				if row.PauseStartedAt != nil && now > *row.PauseStartedAt {
-					pausedTotal += now - *row.PauseStartedAt
-				}
-				a.Clock.HandleEvent(domain.UserStartTimerEvent{})
-				_ = a.SQLite.Timers().UpdateTimerSession(
-					row.ID, row.ElapsedSeconds, row.RemainingSeconds,
-					pausedTotal, nil, &now,
-					true, false, false,
-					row.CurrentRound, row.InRest,
-				)
-				a.CurrentHabitID = req.HabitID
-				if a.CurrentHabitID == nil && row.HabitID != nil {
-					h := *row.HabitID
-					a.CurrentHabitID = &h
-				}
-				c.JSON(http.StatusOK, gin.H{
-					"status":     "started",
-					"habit_id":   a.CurrentHabitID,
-					"session_id": row.ID,
-				})
-				return
-			}
-		}
-		// 运行中残留 / 过期会话 / 行取不到:收敛旧 session,落到 CreateTimerSession
-		// 创建新 session。CreateTimerSession 内部还会再调一次
-		// ConvergeStaleSessionIfAny 作防御层。
-		a.ConvergeStaleSessionIfAny()
-	}
-
-	sessionID, err := a.CreateTimerSession(req.HabitID, mode, work, rest, loop)
+	res, err := a.Timer.Start(timer.StartInput{
+		HabitID:      req.HabitID,
+		Mode:         req.Mode,
+		WorkDuration: req.WorkDuration,
+		RestDuration: req.RestDuration,
+		LoopCount:    req.LoopCount,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create timer session"})
 		return
 	}
-	a.CurrentHabitID = req.HabitID
-	a.Clock.HandleEvent(domain.UserStartTimerEvent{})
 	c.JSON(http.StatusOK, gin.H{
-		"status":     "started",
-		"habit_id":   req.HabitID,
-		"session_id": sessionID,
+		"status":     res.Status,
+		"habit_id":   res.HabitID,
+		"session_id": res.SessionID,
 	})
 }
 
@@ -196,8 +138,7 @@ func TimerPause(c *gin.Context) {
 	a := appFromCtx(c)
 	a.Lock()
 	defer a.Unlock()
-	a.Clock.HandleEvent(domain.UserPauseTimerEvent{})
-	a.SaveProgressLocked()
+	a.Timer.Pause()
 	c.JSON(http.StatusOK, gin.H{"status": "paused"})
 }
 
@@ -207,9 +148,7 @@ func TimerReset(c *gin.Context) {
 	a := appFromCtx(c)
 	a.Lock()
 	defer a.Unlock()
-	a.ResetTimerSession()
-	a.CurrentHabitID = nil
-	a.Clock.HandleEvent(domain.UserResetTimerEvent{})
+	a.Timer.Reset()
 	c.JSON(http.StatusOK, gin.H{"status": "reset"})
 }
 
@@ -222,41 +161,21 @@ func TimerFinish(c *gin.Context) {
 	a.Lock()
 	defer a.Unlock()
 
-	habitID := a.CurrentHabitID
-	sessionID := a.CurrentTimerSessionID
-
-	elapsed, err := a.FinishTimerSession()
+	res, err := a.Timer.Finish()
 	if err != nil {
-		// 兜底路径:发出 user_finish_timer，从时钟状态计算 elapsed，
-		// 并在存在活动 habit 时持久化一条每日会话记录。
-		a.Clock.HandleEvent(domain.UserFinishTimerEvent{})
-		state := a.Clock.Update()
-		elapsedSeconds := state.GetElapsedSeconds()
-		if habitID != nil && elapsedSeconds > 0 {
-			if _, err := a.SQLite.Timers().CreateSession(*habitID, elapsedSeconds, 1, domain.TodayString(a.Settings.Config().Basic.Timezone)); err != nil {
-				log.Printf("failed to create fallback session: %v", err)
-			}
-		}
-		a.ResetTimerSession()
-		c.JSON(http.StatusOK, gin.H{
-			"status":          "finished",
-			"elapsed_seconds": elapsedSeconds,
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to finish timer session"})
 		return
 	}
 
-	if habitID != nil && elapsed > 0 {
-		if _, err := a.SQLite.Timers().CreateSession(*habitID, elapsed, 1, domain.TodayString(a.Settings.Config().Basic.Timezone)); err != nil {
-			log.Printf("failed to create session at end: %v", err)
-		}
+	out := gin.H{
+		"status":          res.Status,
+		"elapsed_seconds": res.ElapsedSeconds,
 	}
-	a.ResetTimerSession()
-
-	c.JSON(http.StatusOK, gin.H{
-		"status":          "finished",
-		"elapsed_seconds": elapsed,
-		"session_id":      sessionID,
-	})
+	// 兜底路径没有可报告的 session id；旧响应在该路径也不带这个字段。
+	if res.SessionID != nil {
+		out["session_id"] = *res.SessionID
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 // POST /api/mode

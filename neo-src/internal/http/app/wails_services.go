@@ -16,11 +16,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"time"
 
 	"little-timer/internal/domain"
 	"little-timer/internal/habits"
 	"little-timer/internal/log"
+	"little-timer/internal/timer"
 	"little-timer/internal/vault"
 )
 
@@ -46,11 +46,11 @@ func NewTimerService(app *App) *TimerService { return &TimerService{app: app} }
 func (s *TimerService) GetState() (any, error) {
 	log.Debug("timer.get_state", "method", "TimerService.GetState")
 	a := s.app
-	state := a.Clock.Update()
-	tz := a.Settings.Config().Basic.Timezone
+	state := a.ClockManager().Update()
+	tz := a.TimezoneOffset()
 
 	a.RLock()
-	habitID := a.CurrentHabitID
+	habitID := a.HabitID()
 	a.RUnlock()
 
 	return map[string]any{
@@ -69,81 +69,32 @@ func (s *TimerService) GetState() (any, error) {
 }
 
 // StartTimer 的参数可选；零值回退到默认（stopwatch、25 分钟工作）。
+//
+// 与 HTTP adapter 共用同一 operation：暂停中恢复同一 session，运行中残留 /
+// 过期 session 收敛后新建。旧的 already_running 分支随统一状态机移除。
 func (s *TimerService) StartTimer(habitID *int64, mode string, workDuration int64, restDuration int64, loopCount int64) (any, error) {
 	log.Debug("timer.start", "method", "TimerService.StartTimer", "habit_id", habitID, "mode", mode)
 	a := s.app
 
-	m := "stopwatch"
-	if mode == "countdown" {
-		m = "countdown"
-	}
-	work := workDuration
-	if work == 0 {
-		work = 25 * 60
-	}
-
 	a.Lock()
 	defer a.Unlock()
 
-	// 已在运行的分支：保持同一 session，报告当前 habit id。
-	if a.CurrentTimerSessionID != nil {
-		row, err := a.SQLite.Timers().GetTimerSessionByID(*a.CurrentTimerSessionID)
-		if err == nil {
-			if row.IsRunning && !row.IsFinished && !row.IsPaused {
-				a.CurrentHabitID = habitID
-				if a.CurrentHabitID == nil && row.HabitID != nil {
-					h := *row.HabitID
-					a.CurrentHabitID = &h
-				}
-				return map[string]any{
-					"status":     "already_running",
-					"habit_id":   a.CurrentHabitID,
-					"session_id": *a.CurrentTimerSessionID,
-				}, nil
-			}
-			// 暂停分支 —— 恢复。
-			cs := a.Clock.Update()
-			if (cs.IsPaused() && !cs.IsFinished()) || row.IsPaused {
-				pausedTotal := row.PausedTotalSeconds
-				now := time.Now().Unix()
-				if row.PauseStartedAt != nil && now > *row.PauseStartedAt {
-					pausedTotal += now - *row.PauseStartedAt
-				}
-				a.Clock.HandleEvent(domain.UserStartTimerEvent{})
-				_ = a.SQLite.Timers().UpdateTimerSession(
-					row.ID, row.ElapsedSeconds, row.RemainingSeconds,
-					pausedTotal, nil, &now,
-					true, false, false,
-					row.CurrentRound, row.InRest,
-				)
-				a.CurrentHabitID = habitID
-				if a.CurrentHabitID == nil && row.HabitID != nil {
-					h := *row.HabitID
-					a.CurrentHabitID = &h
-				}
-				return map[string]any{
-					"status":     "started",
-					"habit_id":   a.CurrentHabitID,
-					"session_id": row.ID,
-				}, nil
-			}
-		}
-		// 过期 session —— 清理。
-		a.ResetTimerSession()
-	}
-
-	sessionID, err := a.CreateTimerSession(habitID, m, work, restDuration, loopCount)
+	res, err := a.Timer.Start(timer.StartInput{
+		HabitID:      habitID,
+		Mode:         mode,
+		WorkDuration: workDuration,
+		RestDuration: restDuration,
+		LoopCount:    loopCount,
+	})
 	if err != nil {
 		log.Error("timer.start failed", "method", "TimerService.StartTimer", "error", err.Error())
 		return nil, err
 	}
-	a.CurrentHabitID = habitID
-	a.Clock.HandleEvent(domain.UserStartTimerEvent{})
-	log.Info("timer.start ok", "method", "TimerService.StartTimer", "session_id", sessionID, "habit_id", habitID, "mode", m)
+	log.Info("timer.start ok", "method", "TimerService.StartTimer", "session_id", res.SessionID, "habit_id", res.HabitID)
 	return map[string]any{
-		"status":     "started",
-		"habit_id":   habitID,
-		"session_id": sessionID,
+		"status":     res.Status,
+		"habit_id":   res.HabitID,
+		"session_id": res.SessionID,
 	}, nil
 }
 
@@ -154,38 +105,22 @@ func (s *TimerService) FinishTimer() (any, error) {
 	a.Lock()
 	defer a.Unlock()
 
-	habitID := a.CurrentHabitID
-	sessionID := a.CurrentTimerSessionID
-
-	elapsed, err := a.FinishTimerSession()
+	res, err := a.Timer.Finish()
 	if err != nil {
 		log.Error("timer.finish failed", "method", "TimerService.FinishTimer", "error", err.Error())
-		// 回退路径：发 user_finish_timer，从 clock 状态算 elapsed，
-		// 若之前有 habit 则持久化一条每日 session。
-		a.Clock.HandleEvent(domain.UserFinishTimerEvent{})
-		state := a.Clock.Update()
-		elapsedSeconds := state.GetElapsedSeconds()
-		if habitID != nil && elapsedSeconds > 0 {
-			_, _ = a.SQLite.Timers().CreateSession(*habitID, elapsedSeconds, 1, domain.TodayString(a.Settings.Config().Basic.Timezone))
-		}
-		a.ResetTimerSession()
-		return map[string]any{
-			"status":          "finished",
-			"elapsed_seconds": elapsedSeconds,
-		}, nil
+		return nil, err
 	}
 
-	if habitID != nil && elapsed > 0 {
-		_, _ = a.SQLite.Timers().CreateSession(*habitID, elapsed, 1, domain.TodayString(a.Settings.Config().Basic.Timezone))
+	out := map[string]any{
+		"status":          res.Status,
+		"elapsed_seconds": res.ElapsedSeconds,
 	}
-	a.ResetTimerSession()
-
-	log.Info("timer.finish ok", "method", "TimerService.FinishTimer", "elapsed_seconds", elapsed, "session_id", sessionID)
-	return map[string]any{
-		"status":          "finished",
-		"elapsed_seconds": elapsed,
-		"session_id":      sessionID,
-	}, nil
+	// 兜底路径没有可报告的 session id；旧响应在该路径也不带这个字段。
+	if res.SessionID != nil {
+		out["session_id"] = *res.SessionID
+	}
+	log.Info("timer.finish ok", "method", "TimerService.FinishTimer", "elapsed_seconds", res.ElapsedSeconds, "session_id", res.SessionID)
+	return out, nil
 }
 
 // GetProgress 返回实时进度、模式与 paused/finished 标志；无活动 session
@@ -194,29 +129,20 @@ func (s *TimerService) GetProgress() (any, error) {
 	log.Debug("timer.get_progress", "method", "TimerService.GetProgress")
 	a := s.app
 
-	a.RLock()
-	hasSession := a.CurrentTimerSessionID != nil
-	a.RUnlock()
-	if !hasSession {
-		a.LoadTimerProgress()
-	}
+	a.Lock()
+	res := a.Timer.Progress()
+	a.Unlock()
 
-	a.RLock()
-	sessionID := a.CurrentTimerSessionID
-	habitID := a.CurrentHabitID
-	a.RUnlock()
-
-	state := a.Clock.Update()
 	return map[string]any{
-		"session_id":        sessionID,
-		"habit_id":          habitID,
-		"mode":              modeKey(state.GetMode()),
-		"is_running":        !state.IsPaused(),
-		"is_paused":         state.IsPaused(),
-		"is_finished":       state.IsFinished(),
-		"elapsed_seconds":   state.GetElapsedSeconds(),
-		"remaining_seconds": state.GetRemainingSeconds(),
-		"in_rest":           state.InRest(),
+		"session_id":        res.SessionID,
+		"habit_id":          res.HabitID,
+		"mode":              modeKey(res.Mode),
+		"is_running":        res.IsRunning,
+		"is_paused":         res.IsPaused,
+		"is_finished":       res.IsFinished,
+		"elapsed_seconds":   res.ElapsedSeconds,
+		"remaining_seconds": res.RemainingSeconds,
+		"in_rest":           res.InRest,
 	}, nil
 }
 
@@ -252,8 +178,7 @@ func (s *TimerService) PauseTimer() (any, error) {
 	a := s.app
 	a.Lock()
 	defer a.Unlock()
-	a.Clock.HandleEvent(domain.UserPauseTimerEvent{})
-	a.SaveProgressLocked()
+	a.Timer.Pause()
 	log.Info("timer.pause ok", "method", "TimerService.PauseTimer")
 	return map[string]any{"status": "paused"}, nil
 }
@@ -263,9 +188,7 @@ func (s *TimerService) ResetTimer() (any, error) {
 	a := s.app
 	a.Lock()
 	defer a.Unlock()
-	a.ResetTimerSession()
-	a.CurrentHabitID = nil
-	a.Clock.HandleEvent(domain.UserResetTimerEvent{})
+	a.Timer.Reset()
 	return map[string]any{"status": "reset"}, nil
 }
 

@@ -17,8 +17,24 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
+// Is 让同 Code 的错误互相匹配(带 detail 的副本仍能被 errors.Is 命中哨兵)。
+func (e *Error) Is(target error) bool {
+	t, ok := target.(*Error)
+	return ok && e.Code == t.Code
+}
+
 // ErrVersionConflict 表示某个 placement 的乐观锁命中 0 行;整个事务必须回滚。
 var ErrVersionConflict = &Error{Code: "version_conflict", Message: "version conflict"}
+
+// versionConflictWith 返回带上 storage 原文的版本冲突错误(含 current=N),
+// 让 adapter 能像重构前那样把 detail 回给客户端。
+func versionConflictWith(detail error) *Error {
+	msg := "version conflict"
+	if detail != nil {
+		msg = detail.Error()
+	}
+	return &Error{Code: ErrVersionConflict.Code, Message: msg}
+}
 
 // Store 是本包依赖的持久化能力集合。storage 满足它。
 type Store interface {
@@ -174,7 +190,7 @@ func (o *Operations) Apply(placements []Placement) error {
 		}
 		if err := o.store.UpdateTaskTx(tx, p.TaskID, fields, p.Version); err != nil {
 			if errors.Is(err, storage.ErrVersionConflict) {
-				return ErrVersionConflict
+				return versionConflictWith(err)
 			}
 			return err
 		}

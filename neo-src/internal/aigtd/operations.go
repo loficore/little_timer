@@ -25,6 +25,12 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
+// Is 让同 Code 的错误互相匹配(带 detail 的副本仍能被 errors.Is 命中哨兵)。
+func (e *Error) Is(target error) bool {
+	t, ok := target.(*Error)
+	return ok && e.Code == t.Code
+}
+
 // 哨兵错误。
 var (
 	// ErrBadRequest 覆盖"请求体本身不合法"(通用兜底)。

@@ -29,6 +29,12 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
+// Is 让同 Code 的错误互相匹配(带 detail 的副本仍能被 errors.Is 命中哨兵)。
+func (e *Error) Is(target error) bool {
+	t, ok := target.(*Error)
+	return ok && e.Code == t.Code
+}
+
 var (
 	// ErrVersionConflict 表示版本闸门命中 0 行 → 409,提示客户端刷新。
 	ErrVersionConflict = &Error{Code: "version_conflict", Message: "version conflict"}

@@ -101,9 +101,12 @@ func ScheduleApply(c *gin.Context) {
 // respondScheduleError 是 schedule.Error → HTTP 状态码的唯一映射点。
 func respondScheduleError(c *gin.Context, err error) {
 	var de *schedule.Error
-	if errors.As(err, &de) && errors.Is(err, schedule.ErrVersionConflict) {
-		respondVersionConflict(c, err.Error(), true, nil)
-		return
+	if errors.As(err, &de) {
+		if de.Code == schedule.ErrVersionConflict.Code {
+			respondVersionConflict(c, de.Message, true, nil)
+			return
+		}
 	}
+
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 }

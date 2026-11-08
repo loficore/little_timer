@@ -1,10 +1,8 @@
-// Package aigtd —— capture / reparse 的用例层(issue #66)。
+// capture / reparse 的用例层(issue #66)。
 //
-// HTTP handler 与(将来的)Wails service 都只做参数绑定与 aigtd.Error →
+// HTTP handler 与(将来的)Wails service 都只做参数绑定与 Error →
 // transport 状态码映射;原文校验、入队、失败回滚、processing 前置检查都
-// 集中在这里。
-//
-// LLM client / worker / parser 仍留在本包其它文件,不受影响。
+// 集中在这里。LLM client / worker / parser 仍留在本包其它文件。
 package aigtd
 
 import (

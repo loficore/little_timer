@@ -1,58 +1,10 @@
-/**
- * @description 习惯集合信息
- */
-export interface HabitSet {
-  /** 集合 ID */
-  id: number;
-  /** 集合名称 */
-  name: string;
-  /** 集合描述 */
-  description: string;
-  /** 集合颜色 */
-  color: string;
-  /** 壁纸路径或地址 */
-  wallpaper?: string;
-  /** 创建时间 */
-  created_at?: string;
-}
+import type { Habit, HabitSet, Session, HabitDetail } from "./api";
 
 /**
- * @description 习惯信息
+ * DTO 单一来源：`HabitSet` / `Habit` / `Session` / `HabitDetail` 的声明在
+ * `types/api.ts`，这里只做转发，避免两份定义各自漂移。
  */
-export interface Habit {
-  /** 习惯 ID */
-  id: number;
-  /** 所属集合 ID */
-  set_id: number;
-  /** 习惯名称 */
-  name: string;
-  /** 目标时长（秒） */
-  goal_seconds: number;
-  /** 习惯颜色 */
-  color: string;
-  /** 壁纸路径或地址 */
-  wallpaper?: string;
-  /** 创建时间 */
-  created_at?: string;
-}
-
-/**
- * @description 一次习惯计时会话
- */
-export interface Session {
-  /** 会话 ID */
-  id: number;
-  /** 关联的习惯 ID */
-  habit_id: number;
-  /** 会话持续时间（秒） */
-  duration_seconds: number;
-  /** 完成次数 */
-  count: number;
-  /** 开始时间 */
-  started_at: string;
-  /** 会话日期 */
-  date: string;
-}
+export type { Habit, HabitSet, Session, HabitDetail };
 
 /**
  * @description 包含今日进度的习惯信息
@@ -64,24 +16,6 @@ export interface HabitWithProgress extends Habit {
   today_count: number;
   /** 当前进度百分比（0-100） */
   progress: number;
-}
-
-/**
- * @description 习惯详情及进度信息
- */
-export interface HabitDetail {
-  /** 习惯 ID */
-  id: number;
-  /** 习惯名称 */
-  name: string;
-  /** 目标时长（秒） */
-  goal_seconds: number;
-  /** 习惯颜色 */
-  color: string;
-  /** 今日累计时长（秒） */
-  today_seconds: number;
-  /** 当前进度百分比 */
-  progress_percent: number;
 }
 
 /**

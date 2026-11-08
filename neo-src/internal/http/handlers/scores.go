@@ -65,7 +65,12 @@ func TaskScoresUpdate(c *gin.Context) {
 			})
 			return
 		}
-		respondTaskError(c, err, err.Error())
+		if errors.Is(err, tasks.ErrVersionConflict) {
+			respondVersionConflict(c, "", true, nil)
+			return
+		}
+		// 非类型化错误:与重构前一致,只回 {"error": ...}。
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	if warning != "" {

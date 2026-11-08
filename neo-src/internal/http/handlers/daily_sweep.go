@@ -79,8 +79,9 @@ func respondSweepAdoptError(c *gin.Context, err error, body adoptRequest) {
 	if errors.As(err, &de) {
 		switch {
 		case errors.Is(err, sweep.ErrVersionConflict):
-			c.JSON(http.StatusConflict, gin.H{
-				"success": false, "error": "version conflict", "task_id": body.Proposal.TaskID,
+			// 历史契约:adopt 的 409 不带 code,带 success / task_id。
+			respondVersionConflict(c, "", false, gin.H{
+				"success": false, "task_id": body.Proposal.TaskID,
 			})
 			return
 		case errors.Is(err, sweep.ErrInvalidProposal):

@@ -1,14 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/preact";
 import type { ComponentChildren } from "preact";
+import type { PlatformCapabilities } from "../utils/platformApi";
 import { App } from "../App";
 
 const mocks = vi.hoisted(() => ({
   showToastMock: vi.fn(),
   serverWallpaper: "",
+  capabilities: {
+    timer: true,
+    habits: true,
+    backup: true,
+    settings: true,
+    tasks: true,
+    schedule: true,
+    llmSettings: true,
+    credentials: true,
+    wallpaper: true,
+    dailySweep: true,
+  } as PlatformCapabilities,
+}));
+
+vi.mock("../utils/platformApi", () => ({
+  get capabilities() {
+    return mocks.capabilities;
+  },
 }));
 
 vi.mock("../utils/apiClientSingleton", () => ({
+  get capabilities() {
+    return mocks.capabilities;
+  },
   supportsDailySweep: true,
   getAPIClient: vi.fn(() => ({
     getSettings: vi.fn().mockImplementation(() =>
@@ -79,6 +101,14 @@ vi.mock("../Stats", () => ({
   ),
 }));
 
+vi.mock("../AIGtdPage", () => ({
+  AIGtdPage: () => <div data-testid="aigtd-page">AIGTD</div>,
+}));
+
+vi.mock("../PlanPage", () => ({
+  PlanPage: () => <div data-testid="plan-page">Plan</div>,
+}));
+
 vi.mock("../Settings", () => ({
   SettingsPage: ({ onBackClick }: { onBackClick?: () => void }) => (
     <div data-testid="settings-page">
@@ -133,6 +163,18 @@ describe("App", () => {
     localStorage.clear();
     installImageStub();
     document.documentElement.removeAttribute("style");
+    mocks.capabilities = {
+      timer: true,
+      habits: true,
+      backup: true,
+      settings: true,
+      tasks: true,
+      schedule: true,
+      llmSettings: true,
+      credentials: true,
+      wallpaper: true,
+      dailySweep: true,
+    };
   });
 
   afterEach(() => {
@@ -252,6 +294,53 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("settings-page")).toBeTruthy();
+    });
+  });
+
+  describe("平台能力", () => {
+    it("默认停在计时页，不渲染 AIGTD / Plan", () => {
+      render(<App />);
+
+      expect(screen.getByTestId("current-page").textContent).toBe("timer");
+      expect(screen.queryByTestId("aigtd-page")).toBeNull();
+      expect(screen.queryByTestId("plan-page")).toBeNull();
+    });
+
+    it("支持任务与调度时底栏保留 AIGTD / Plan 入口", () => {
+      render(<App />);
+
+      expect(screen.getByTestId("nav-aigtd")).toBeTruthy();
+      expect(screen.getByTestId("nav-plan")).toBeTruthy();
+    });
+
+    it("不支持任务与调度时底栏隐藏 AIGTD / Plan 入口", () => {
+      mocks.capabilities = { ...mocks.capabilities, tasks: false, schedule: false };
+      render(<App />);
+
+      expect(screen.queryByTestId("nav-aigtd")).toBeNull();
+      expect(screen.queryByTestId("nav-plan")).toBeNull();
+      // 其余入口照常。
+      expect(screen.getByTestId("nav-timer")).toBeTruthy();
+      expect(screen.getByTestId("nav-habits")).toBeTruthy();
+      expect(screen.getByTestId("nav-stats")).toBeTruthy();
+      expect(screen.getByTestId("nav-settings")).toBeTruthy();
+    });
+
+    it("当前页能力被收回时回退到计时页", async () => {
+      render(<App />);
+
+      fireEvent.click(screen.getByTestId("nav-aigtd"));
+      await waitFor(() => {
+        expect(screen.getByTestId("current-page").textContent).toBe("aigtd");
+      });
+
+      // 能力在会话中被收回（例如热更新到受限构建）：不应继续渲染 AIGTD。
+      mocks.capabilities = { ...mocks.capabilities, tasks: false };
+      cleanup();
+      render(<App />);
+
+      expect(screen.getByTestId("current-page").textContent).toBe("timer");
+      expect(screen.queryByTestId("aigtd-page")).toBeNull();
     });
   });
 

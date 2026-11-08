@@ -73,14 +73,28 @@ export interface StopwatchDefaults {
 }
 
 /**
+ * @description `clock_defaults` 块：倒计时 / 正计时默认值。
+ *
+ * 与后端 `domain.ClockTaskConfig` 对齐（http settings handler 原样返回）。
+ */
+export interface ClockTaskConfig {
+  /** 倒计时默认设置 */
+  countdown: CountdownDefaults;
+  /** 正计时默认设置 */
+  stopwatch: StopwatchDefaults;
+}
+
+/**
  * @description 应用完整设置
  */
 export interface Settings {
   /** 基础设置 */
   basic: BasicSettings;
-  /** 倒计时设置 */
+  /** 时钟默认值（倒计时 / 正计时），GET /api/settings 必定返回 */
+  clock_defaults?: ClockTaskConfig;
+  /** 倒计时设置（历史平铺写法，保留兼容） */
   countdown?: CountdownDefaults;
-  /** 正计时设置 */
+  /** 正计时设置（历史平铺写法，保留兼容） */
   stopwatch?: StopwatchDefaults;
 }
 

@@ -33,7 +33,20 @@ import type {
   WallpaperDeleteResult,
   CredentialStatus,
   AppVersionInfo,
+  Settings,
 } from "../types/api";
+import type {
+  DailySweepSettings,
+  DailySweepToday,
+  LLMSettingsDTO,
+  ReviewProposal,
+  ScheduleApplyPlacement,
+  SchedulerPlan,
+  SubtaskDTO,
+  TaskDTO,
+  TestConnectionResult,
+} from "../types/aigtd";
+import { UnsupportedOnPlatformError, type PlatformApi, type TaskScoresPatch } from "./platformApi";
 
 /* eslint-disable @typescript-eslint/require-await */
 // 检测 Android：Wails v3 在 Android 上会设置 window.wails
@@ -67,10 +80,42 @@ async function _loadBindings() {
 }
 /**
  * Wails API 客户端 — 封装所有与后端通信的 Wails Go 绑定方法
+ *
+ * 显式 `implements PlatformApi`：Android 侧未落地的域（AIGTD / 调度 / LLM 设置 /
+ * 凭据）也必须有方法，统一抛 `UnsupportedOnPlatformError`。这些入口本就由
+ * `capabilities` 隐藏，方法存在只为让两条 transport 共享同一契约。
  */
-export class WailsAPIClient {
+export class WailsAPIClient implements PlatformApi {
   // 暴露给 useSSE（其访问 apiClient.baseUrl）—— Android 上不启用 SSE
   baseUrl = "";
+
+  private authToken: string | null = null;
+
+  /**
+   * 设置认证 Token。Android 走进程内绑定，无 HTTP header 可带；
+   * 保留与 `APIClient` 一致的读写语义，避免调用方分叉。
+   * @param token 认证 Token，设为 null 可清除
+   */
+  setAuthToken(token: string | null): void {
+    this.authToken = token;
+  }
+
+  /**
+   * @returns 当前认证 Token
+   */
+  getAuthToken(): string | null {
+    return this.authToken;
+  }
+
+  /**
+   * 当前平台未实现某能力时的统一兜底。
+   *
+   * @param feature 用户可读的功能名
+   * @throws {UnsupportedOnPlatformError} 总是抛出
+   */
+  private unsupported(feature: string): never {
+    throw new UnsupportedOnPlatformError(feature);
+  }
 
   private async _b(name: 'TimerService' | 'SettingsService' | 'HabitService' | 'BackupService') {
     const b = await _loadBindings();
@@ -168,7 +213,7 @@ export class WailsAPIClient {
   /**
    * 获取应用设置
    */
-  async getSettings(): Promise<any> {
+  async getSettings(): Promise<Settings> {
     const SS = await this._b('SettingsService');
     return SS.GetSettings();
   }
@@ -401,43 +446,286 @@ export class WailsAPIClient {
     return { filename: "" };
   }
   // ===== GTD Daily Sweep / Review (v12) =====
-  // 入口已由 supportsDailySweep 能力探测隐藏,此处的 throw 是深链兜底的内部
-  // 不变量,错误文案即用户可见口径。补齐跟踪见 GitHub issue #41。
+  // 入口已由 capabilities.dailySweep 隐藏，此处的 throw 是深链兜底的内部
+  // 不变量；错误文案即用户可见口径。绑定补齐跟踪见 GitHub issue #41。
   /**
-   *
+   * 手动触发一次 review（当前平台未实现，见 issue #41）。
    */
   async startDailySweep(): Promise<{ job_ids: number[] }> {
-    throw new Error("每日梳理在当前平台不可用");
+    return this.unsupported("每日梳理");
   }
+
   /**
-   *
+   * 拉当日 review 提议（当前平台未实现，见 issue #41）。
    */
-  async getDailySweepToday(): Promise<unknown> {
-    throw new Error("每日梳理在当前平台不可用");
+  async getDailySweepToday(): Promise<DailySweepToday> {
+    return this.unsupported("每日梳理");
   }
+
   /**
-   *
+   * 采纳一条提议（当前平台未实现，见 issue #41）。
+   * @param _body 采纳请求体
    */
-  async adoptDailySweep(_body: unknown): Promise<unknown> {
-    throw new Error("每日梳理在当前平台不可用");
+  async adoptDailySweep(_body: {
+    change_id: string;
+    ai_job_id: number;
+    version: number;
+    proposal: ReviewProposal;
+  }): Promise<{ task_id: number; version_after: number; idempotent?: boolean }> {
+    return this.unsupported("每日梳理");
   }
+
   /**
-   *
+   * 拒绝一条提议（当前平台未实现，见 issue #41）。
+   * @param _body 拒绝请求体
    */
-  async rejectDailySweep(_body: unknown): Promise<void> {
-    throw new Error("每日梳理在当前平台不可用");
+  async rejectDailySweep(_body: { change_id: string }): Promise<void> {
+    return this.unsupported("每日梳理");
   }
+
   /**
-   *
+   * 读每日梳理设置（当前平台未实现，见 issue #41）。
    */
-  async getDailySweepSettings(): Promise<unknown> {
-    throw new Error("每日梳理在当前平台不可用");
+  async getDailySweepSettings(): Promise<DailySweepSettings> {
+    return this.unsupported("每日梳理");
   }
+
   /**
-   *
+   * 写每日梳理设置（当前平台未实现，见 issue #41）。
+   * @param _patch 要更新的字段
    */
-  async updateDailySweepSettings(_patch: unknown): Promise<unknown> {
-    throw new Error("每日梳理在当前平台不可用");
+  async updateDailySweepSettings(_patch: {
+    enabled?: boolean;
+    time?: string;
+  }): Promise<DailySweepSettings> {
+    return this.unsupported("每日梳理");
+  }
+
+  // ===== Android 未实现的域（入口由 capabilities 隐藏）=====
+  // 这些方法存在只为满足 PlatformApi：桌面 / Web 走 HTTP，Android 的
+  // Wails 绑定尚未暴露对应服务。调用即抛 UnsupportedOnPlatformError。
+
+  /**
+   * 提交一条随手记 → 异步拆解（Android 未实现）。
+   * @param _rawText 原始文本
+   * @param _source 来源
+   */
+  async captureAIGtd(_rawText: string, _source?: string): Promise<{ task_id: number }> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 重新解析一个 task（Android 未实现）。
+   * @param _taskId 任务 ID
+   * @param _version 任务当前版本
+   * @param _newRawText 新原文（可选）
+   */
+  async reparseAIGtd(
+    _taskId: number,
+    _version: number,
+    _newRawText?: string,
+  ): Promise<{ job_id: number }> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 查询任务当前 AI 处理状态（Android 未实现）。
+   * @param _taskId 任务 ID
+   */
+  async getAIGtdJob(_taskId: number): Promise<{
+    task_id: number;
+    ai_status: string;
+    ai_error?: string;
+    latest_job_id?: number;
+    attempts?: number;
+  }> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 列出顶层任务（Android 未实现）。
+   * @param _status 状态过滤
+   */
+  async listTasks(_status?: string): Promise<TaskDTO[]> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 取单条任务（Android 未实现）。
+   * @param _id 任务 ID
+   */
+  async getTask(_id: number): Promise<TaskDTO> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 直接创建任务（Android 未实现）。
+   * @param _title 标题
+   * @param _notes 备注（可选）
+   */
+  async createTask(_title: string, _notes?: string): Promise<TaskDTO> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 局部更新任务（Android 未实现）。
+   * @param _id 任务 ID
+   * @param _patch 要更新的字段
+   */
+  async updateTask(_id: number, _patch: Partial<TaskDTO>): Promise<TaskDTO> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 删除任务（Android 未实现）。
+   * @param _id 任务 ID
+   * @param _version 任务当前版本
+   */
+  async deleteTask(_id: number, _version: number): Promise<void> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 切换子任务完成状态（Android 未实现）。
+   * @param _taskId 父任务 ID
+   * @param _subId 子任务 ID
+   * @param _status 目标状态
+   * @param _version 子任务自己的版本
+   */
+  async toggleSubtask(
+    _taskId: number,
+    _subId: number,
+    _status: "active" | "done",
+    _version: number,
+  ): Promise<void> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 更新子任务（Android 未实现）。
+   * @param _taskId 父任务 ID
+   * @param _subId 子任务 ID
+   * @param _patch 要更新的字段
+   * @param _version 子任务自己的版本
+   */
+  async updateSubtask(
+    _taskId: number,
+    _subId: number,
+    _patch: { title?: string; estimated_minutes?: number; status?: "active" | "done" | "archived" },
+    _version: number,
+  ): Promise<void> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 新增子任务（Android 未实现）。
+   * @param _taskId 父任务 ID
+   * @param _body 新子任务字段
+   * @param _version 父任务当前版本
+   */
+  async createSubtask(
+    _taskId: number,
+    _body: { title: string; estimated_minutes: number; order_index: number },
+    _version: number,
+  ): Promise<SubtaskDTO> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 删除子任务（Android 未实现）。
+   * @param _taskId 父任务 ID
+   * @param _subId 子任务 ID
+   * @param _version 用于通过 ConflictGuard 的版本号
+   */
+  async deleteSubtask(_taskId: number, _subId: number, _version: number): Promise<void> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 局部更新 5 维评分（Android 未实现）。
+   * @param _id 任务 ID
+   * @param _body 评分 patch
+   */
+  async patchTaskScores(_id: number, _body: TaskScoresPatch): Promise<TaskDTO> {
+    return this.unsupported("AIGTD");
+  }
+
+  /**
+   * 读 LLM 设置（Android 未实现）。
+   */
+  async getLLMSettings(): Promise<LLMSettingsDTO> {
+    return this.unsupported("大模型设置");
+  }
+
+  /**
+   * 写 LLM 设置（Android 未实现）。
+   * @param _patch 要更新的字段
+   */
+  async updateLLMSettings(_patch: {
+    provider?: "openai_compat" | "anthropic";
+    base_url?: string;
+    model?: string;
+    max_tokens?: number;
+    timeout_seconds?: number;
+    api_key?: string;
+    clear_key?: boolean;
+  }): Promise<LLMSettingsDTO> {
+    return this.unsupported("大模型设置");
+  }
+
+  /**
+   * 测试 LLM 连通性（Android 未实现）。
+   * @param _patch 当前表单值
+   */
+  async testLLMSettings(_patch: {
+    provider?: "openai_compat" | "anthropic";
+    base_url?: string;
+    model?: string;
+    max_tokens?: number;
+    timeout_seconds?: number;
+    api_key?: string;
+  }): Promise<TestConnectionResult> {
+    return this.unsupported("大模型设置");
+  }
+
+  /**
+   * 预览某天的排程（Android 未实现）。
+   * @param _date 日期（YYYY-MM-DD）
+   */
+  async runSchedulePreview(_date: string): Promise<SchedulerPlan> {
+    return this.unsupported("计划调度");
+  }
+
+  /**
+   * 落库某天的排程（Android 未实现）。
+   * @param _date 日期（YYYY-MM-DD）
+   */
+  async runScheduleApply(_date: string): Promise<SchedulerPlan> {
+    return this.unsupported("计划调度");
+  }
+
+  /**
+   * 显式提交要落库的 placements（Android 未实现）。
+   * @param _placements 带各自 version 的 placement 列表
+   */
+  async applySchedulePlacements(
+    _placements: ScheduleApplyPlacement[],
+  ): Promise<{ applied: number }> {
+    return this.unsupported("计划调度");
+  }
+
+  /**
+   * 重置凭据（Android 未实现）。
+   */
+  async resetCredentials(): Promise<void> {
+    return this.unsupported("凭据管理");
+  }
+
+  /**
+   * 锁定凭据（Android 未实现）。
+   */
+  async lockCredentials(): Promise<{ success: boolean }> {
+    return this.unsupported("凭据管理");
   }
 }
 

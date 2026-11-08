@@ -6,7 +6,7 @@
 import type { FunctionalComponent } from "preact";
 import { t } from "../utils/i18n";
 import { useAppVersion } from "../hooks/useAppVersion";
-import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, CalendarIcon, SparklesIconComponent } from "../utils/icons";
+import { capabilities, type PlatformCapabilities } from "../utils/platformApi";import { StarIconComponent, TimerIconComponent, HabitsIconComponent, ChartIcon, SettingsIcon, CalendarIcon, SparklesIconComponent } from "../utils/icons";
 
 type Page = "timer" | "habits" | "aigtd" | "plan" | "stats" | "settings";
 
@@ -17,10 +17,20 @@ interface SidebarProps {
     onNavigate: (page: Page) => void;
 }
 
-const navItems = [
+/**
+ * 导航项。`capability` 指向能力表字段：平台不支持时整条入口不渲染，
+ * 而不是先渲染再在运行期抛错。
+ */
+const navItems: {
+    id: Page;
+    labelKey: string;
+    capability: keyof PlatformCapabilities;
+    icon: preact.JSX.Element;
+}[] = [
     {
         id: "timer" as const,
         labelKey: "nav.timer",
+        capability: "timer" as const,
         icon: (
             <TimerIconComponent className="h-5 w-5" />
         ),
@@ -28,6 +38,7 @@ const navItems = [
     {
         id: "habits" as const,
         labelKey: "nav.habits",
+        capability: "habits" as const,
         icon: (
             <HabitsIconComponent className="h-5 w-5" />
         ),
@@ -35,6 +46,7 @@ const navItems = [
     {
         id: "aigtd" as const,
         labelKey: "aigtd.nav_label",
+        capability: "tasks" as const,
         icon: (
             <SparklesIconComponent className="h-5 w-5" />
         ),
@@ -42,6 +54,7 @@ const navItems = [
     {
         id: "plan" as const,
         labelKey: "plan.nav_label",
+        capability: "schedule" as const,
         icon: (
             <CalendarIcon className="h-5 w-5" />
         ),
@@ -49,6 +62,7 @@ const navItems = [
     {
         id: "stats" as const,
         labelKey: "nav.stats",
+        capability: "habits" as const,
         icon: (
             <ChartIcon className="h-5 w-5" />
         ),
@@ -56,6 +70,7 @@ const navItems = [
     {
         id: "settings" as const,
         labelKey: "nav.settings",
+        capability: "settings" as const,
         icon: (
             <SettingsIcon className="h-5 w-5" />
         ),
@@ -64,6 +79,7 @@ const navItems = [
 
 export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavigate }) => {
     const versionInfo = useAppVersion();
+    const visibleItems = navItems.filter((item) => capabilities[item.capability]);
     return (
         <aside className="my-sidebar flex flex-col w-60 h-full shrink-0">
             {/* Logo */}
@@ -76,7 +92,7 @@ export const Sidebar: FunctionalComponent<SidebarProps> = ({ currentPage, onNavi
 
             {/* 导航 */}
             <nav className="flex-1 p-2" aria-label={t("common.app_name")}>
-                {navItems.map((item) => (
+                {visibleItems.map((item) => (
                     <button
                         key={item.id}
                         data-testid={`nav-${item.id}`}

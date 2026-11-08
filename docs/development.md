@@ -22,7 +22,9 @@
   且**不依赖 Windows SDK** —— 它是「Windows 上能否从源码构建」这件事唯一的自动化
   证据（`backend` 的 Windows 交叉门禁不开 cgo、也不带 `webview` tag，碰不到
   `WebView2.h`）。见 [docs/windows-msys2-dev.md](windows-msys2-dev.md)。
-- `vrt`（视觉回归）目前为 advisory（`continue-on-error`），不阻断合并。
+- `vrt`（视觉回归）由 `.github/workflows/vrt.yml` 独立运行，目前为 advisory
+  （`continue-on-error`），不阻断合并。改到 `assets/src/**`、`assets/playwright.config.ts`、
+  `assets/package.json` 或该 workflow 才会触发，同一 PR 只跑一次 —— `ci.yml` 不再重复该 job。
 - 平台构建并入 `release.yml` 的三个构建 job，只在 release / 手动触发时运行，不阻断 PR。
 
 ## VRT 基线重生成
@@ -61,9 +63,18 @@
 
 ### 版本号（唯一事实来源）
 
+- 版本号只由 `scripts/ci-version.sh` 计算：优先 `RELEASE_TAG`（release 事件），
+  其次当前 commit 的 git tag（去掉 `v` 前缀），都没有时用短 commit。CI 里写
+  `$GITHUB_ENV` 供后续步骤使用；本地入口用 `--print` 取同一个值，不再各自
+  `git describe`。
 - 用户可见版本号 = **git tag**。构建时通过
-  `-ldflags "-X little-timer/internal/app.Version=<tag>"` 注入；`just go-build` /
-  `just go-dev` 取最近 tag（无 tag 用短 commit），release 流水线取 release tag。
+  `-ldflags "-X little-timer/internal/app.Version=<version>"` 注入；`just go-build` /
+  `just go-dev` / `just package` / `scripts/package-linux.sh` 都消费上面的结果，
+  release 流水线取 release tag。
+- `assets/package.json` 的 `version` 与 `android/app/build.gradle` 的 `versionName`
+  是构建系统元数据，仓库里的值不代表本地构建版本；只有 release 的
+  `linux-packages` / `android-apk` job 会调用 `scripts/sync-version.sh "$VERSION"`
+  在临时 checkout 里对齐 tag，不回写仓库。
 - 后端 `GET /api/version` 返回 `{version, git_commit, build_time}`；前端 Sidebar
   只从这个接口取版本（`hooks/useAppVersion.ts`）。**禁止在组件/常量里写死版本**。
 - 未注入的构建（CI、纯 `go run`）如实显示 `dev`，不再谎报某个历史版本。
@@ -71,7 +82,7 @@
 
 ### Linux 包（本地）
 
-`just package-linux [version]` 一次产出 rpm 与 deb；版本缺省取最近 git tag（去掉 `v`），无 tag 时用当天日期。也可分开跑 `just package-rpm` / `just package-deb`。
+`just package-linux [version]` 一次产出 rpm 与 deb；版本缺省调用 `scripts/ci-version.sh --print`（tag 或短 commit），与 `just package`、release 流水线一致。也可分开跑 `just package-rpm` / `just package-deb`。
 
 - rpm：AlmaLinux 9 容器构建，`-tags "webview,embed_ui"`（默认 webkit2gtk-4.0），链 `libwebkit2gtk-4.0.so.37`，产物 `dist/little-timer-<ver>-webkit40.el9.x86_64.rpm`（包内 `Release: webkit40%{?dist}`，不再是 `1webkit40`）。
 - deb：Ubuntu 22.04 容器构建（glibc 2.35，覆盖 jammy/noble），`-tags "webview,embed_ui,webkit41"`，链 `libwebkit2gtk-4.1.so.0`，产物 `dist/little-timer-<ver>-webkit41-x86_64.deb`（包内 `Version: <ver>-webkit41`）。

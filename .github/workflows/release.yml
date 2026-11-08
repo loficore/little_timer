@@ -83,6 +83,11 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
         run: bash scripts/ci-version.sh
 
+      - name: Sync version metadata
+        # 前端包版本与 Android versionName 跟随发布 tag。只改本次 CI 的临时
+        # checkout，不提交回仓库 —— 仓库里的值是开发状态，不是发布产物版本。
+        run: bash scripts/sync-version.sh "$VERSION"
+
       - name: Package Linux artifacts
         run: |
           set -eux
@@ -112,7 +117,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # 版本号回退里用到 git describe --tags，浅克隆里永远失败
+          # ci-version.sh 用 git describe 找当前 commit 的 tag，浅克隆里永远失败
           fetch-depth: 0
 
       - name: Setup pnpm
@@ -200,7 +205,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # 版本号回退里用到 git describe --tags，浅克隆里永远失败
+          # ci-version.sh 用 git describe 找当前 commit 的 tag，浅克隆里永远失败
           fetch-depth: 0
 
       - name: Setup pnpm
@@ -253,6 +258,11 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
         run: bash scripts/ci-version.sh
+
+      - name: Sync version metadata
+        # APK 的 versionName 来自 android/app/build.gradle，必须与 tag 对齐，
+        # 否则从安装包反推不到源码版本。只写本次 CI 的临时 checkout。
+        run: bash scripts/sync-version.sh "$VERSION"
 
       - name: Build APK
         # scripts/build-android.sh 内部自己跑 android bindings + NDK + Gradle
